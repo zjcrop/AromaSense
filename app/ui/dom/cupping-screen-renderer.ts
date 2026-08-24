@@ -17,6 +17,7 @@ export class CuppingScreenRenderer {
   private flavorPreferences?: FlavorGroupPreferences;
   private disposeRailDrag?: () => void;
   private disposeFlavorDrag?: () => void;
+  private disposeDescriptorDrags: (() => void)[] = [];
   private readonly railRoot = element("aside", "cupping-layout__rail");
   private readonly mainRoot = element("main", "cupping-layout__main");
   private readonly headerRoot = element("header", "cupping-main__header");
@@ -44,9 +45,15 @@ export class CuppingScreenRenderer {
   }
 
   dispose(): void {
+    this.disposeDragHandlers();
+    this.options.voicePlayer?.cancel();
+  }
+
+  private disposeDragHandlers(): void {
     this.disposeRailDrag?.();
     this.disposeFlavorDrag?.();
-    this.options.voicePlayer?.cancel();
+    for (const dispose of this.disposeDescriptorDrags) dispose();
+    this.disposeDescriptorDrags = [];
   }
 
   private async select(sampleId: string, stageId: StageId): Promise<void> {
@@ -84,8 +91,7 @@ export class CuppingScreenRenderer {
     const state = this.state;
     if (!state) return;
 
-    this.disposeRailDrag?.();
-    this.disposeFlavorDrag?.();
+    this.disposeDragHandlers();
     renderSampleRail(this.railRoot, state.rail, {
       select: (sampleId, stageId) => this.select(sampleId, stageId)
     });
@@ -158,6 +164,22 @@ export class CuppingScreenRenderer {
           });
         }
       });
+    }
+
+    for (const tags of this.editorRoot.querySelectorAll<HTMLElement>(".flavor-group__tags")) {
+      const groupId = tags.dataset.groupId;
+      if (!groupId) continue;
+      this.disposeDescriptorDrags.push(
+        attachDragReorder(tags, {
+          itemSelector: ".flavor-tag",
+          itemIdAttribute: "data-descriptor-id",
+          onReorder: async (ids) => {
+            await this.run(async () => {
+              this.flavorPreferences = await this.flavorService.reorderDescriptors(groupId, ids, this.options.now());
+            });
+          }
+        })
+      );
     }
 
     const previous = button("cupping-nav cupping-nav--previous", "上一步", () =>
