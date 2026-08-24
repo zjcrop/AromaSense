@@ -119,6 +119,11 @@ export class CuppingScreenController {
     return this.select(active.context.sampleId, stageId, now);
   }
 
+  async leaveSession(): Promise<CuppingScreenState> {
+    await this.editor.flush();
+    return this.requireState();
+  }
+
   canFinishSession(): boolean {
     const state = this.requireState();
     return state.samples.length > 0 && state.rail.every((item) =>
