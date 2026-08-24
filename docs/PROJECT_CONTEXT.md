@@ -1,0 +1,89 @@
+# AromaSense Project Context
+
+## Product identity
+
+- Chinese name: 香迹
+- English name: AromaSense
+- Positioning: digital coffee cupping and sensory evaluation system
+
+## Product objective
+
+Replace fragile paper/spreadsheet-style multi-sample cupping records with a structured, recoverable, analyzable workflow while preserving the speed and freedom required during real cupping sessions.
+
+The system is intended to improve process consistency, data integrity, recoverability, and later analysis. It must not claim to improve a cupper's intrinsic sensory acuity.
+
+## Core workflow
+
+A session may contain multiple coffee samples. Samples are imported/created, automatically numbered, and can be manually reordered. The operator works through a single reusable cupping UI while selecting the active sample from a compact sample list.
+
+Each sample progresses through structured sensory stages such as preparation/aroma and temperature-dependent tasting stages. The exact stage taxonomy remains versioned and must not be hard-coded into database table names.
+
+## Interaction principles
+
+- One reusable editing UI for all samples.
+- One active sample/stage editing context at a time.
+- Switching samples must not discard unfinished local edits.
+- Completed/recorded stages have clear visual progress states.
+- Voice prompts may signal preparation, high-temperature, mid-temperature, low-temperature, and completion stages.
+- Flavor labels can be grouped/collapsed and may support user ordering where defined by product requirements.
+
+## Persistence architecture
+
+### Local
+
+The client will use SQLite or an equivalent transactional local database.
+
+Every meaningful confirmed edit should be persisted locally in a short atomic transaction. The application should not rely on a large in-memory session object that is only persisted at the end.
+
+Logical isolation uses stable identifiers rather than dynamic physical tables:
+
+- `session_id`
+- `sample_id`
+- `stage_id`
+
+The active UI loads only the required logical slice.
+
+### Cloud
+
+Cloud synchronization occurs after local persistence. Cloudflare Workers is the initial API layer; D1 is the initial structured cloud store. R2 is reserved for future binary attachments/exports.
+
+Cloud synchronization uses revision/checkpoint semantics:
+
+1. local edits are committed;
+2. a checkpoint or completed revision is serialized deterministically;
+3. a content hash is generated;
+4. upload is attempted;
+5. the server rejects conflicting content for an existing immutable revision identity;
+6. retrying the same revision is safe and returns an ACK;
+7. failed uploads remain pending locally for retry.
+
+## Data modeling principles
+
+Do not create a separate physical database table for each bean/sample. Use normalized or intentionally denormalized shared tables with logical keys and indexes.
+
+The long-term sensory model should preserve separable layers, for example:
+
+- descriptive observations;
+- affective/quality impression;
+- extrinsic/sample metadata;
+- derived metrics.
+
+This separation is intended to keep raw sensory observations distinguishable from calculated or preference-oriented results.
+
+## Cloud provider boundary
+
+Application/domain code should call a synchronization abstraction rather than Cloudflare-specific APIs directly. A future Tencent or other provider adapter should be possible without rewriting cupping domain logic.
+
+## Initial infrastructure milestone
+
+Before implementing the full cupping UI, verify in order:
+
+1. GitHub repository write access;
+2. Worker deployment and `GET /health`;
+3. D1 creation and binding;
+4. D1 migration application;
+5. test write/read API;
+6. error behavior when DB is absent/unavailable;
+7. deployment reproducibility from repository source.
+
+Only after this baseline is stable should production synchronization endpoints and application data be introduced.
