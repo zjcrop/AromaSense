@@ -53,6 +53,36 @@
 .sample-rail.is-compact .sample-rail__progress { grid-template-columns: repeat(2, 4px); justify-content: center; gap: 2px; }
 .sample-rail.is-compact .sample-rail__progress-dot { width: 4px; height: 4px; }
 
+.cupping-main__titles { min-width: 0; }
+.cupping-main__sample-details { display: flex; flex-wrap: wrap; gap: 5px 7px; margin-top: 7px; }
+.cupping-main__sample-detail { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; max-width: min(260px, 42vw); padding: 3px 6px; border: 1px solid rgba(185,153,90,.18); border-radius: 7px; background: rgba(185,153,90,.035); }
+.cupping-main__sample-detail-label { flex: 0 0 auto; color: #8e887e; font-size: 8px; }
+.cupping-main__sample-detail-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c7c0b5; font-size: 9px; }
+
+.cupping-main__stage-strip {
+  position: sticky;
+  bottom: calc(66px + env(safe-area-inset-bottom));
+  z-index: 8;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0,1fr));
+  gap: 4px;
+  padding: 7px 9px;
+  border-top: 1px solid rgba(255,255,255,.06);
+  background: rgba(15,15,15,.94);
+  backdrop-filter: blur(9px);
+}
+.cupping-main__stage-strip[hidden] { display: none; }
+.cupping-stage-step { position: relative; min-height: 30px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: #1b1b1b; color: #858078; font-size: 9px; }
+.cupping-stage-step::before { content: ""; position: absolute; left: 7px; right: 7px; top: 4px; height: 2px; border-radius: 999px; background: currentColor; opacity: .2; }
+.cupping-stage-step--orange { color: var(--as-orange); }
+.cupping-stage-step--pink { color: var(--as-pink); }
+.cupping-stage-step--blue { color: var(--as-blue); }
+.cupping-stage-step--white { color: var(--as-white); }
+.cupping-stage-step--neutral { color: var(--as-gold); }
+.cupping-stage-step.is-not_started { opacity: .38; }
+.cupping-stage-step.is-completed { opacity: .78; }
+.cupping-stage-step.is-current { opacity: 1; border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; font-weight: 700; }
+
 .cupping-nav--exit { border-color: rgba(232,154,85,.42); color: #dca06c; background: rgba(232,154,85,.06); }
 .cupping-main__footer .cupping-nav--finish { grid-column: 1 / -1; }
 
@@ -67,4 +97,7 @@
   .sample-rail__count { display: none; }
   .sample-rail__label { grid-column: auto; font-size: 10px; }
   .sample-rail__stages { grid-template-columns: 1fr 1fr; }
+  .cupping-main__sample-detail { max-width: 100%; }
+  .cupping-main__stage-strip { gap: 2px; padding-left: 5px; padding-right: 5px; }
+  .cupping-stage-step { min-height: 28px; padding-left: 2px; padding-right: 2px; font-size: 8px; }
 }
