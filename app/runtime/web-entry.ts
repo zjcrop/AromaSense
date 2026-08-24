@@ -1,8 +1,17 @@
 import localSchema from "../storage/0001_local_schema.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
-import { LocalMigrationRunner } from "../storage/local-migration-runner";
+import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
+import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
 import { AromaSenseDomApp } from "./dom-app";
 import { PRODUCT_VERSION } from "../version";
+
+async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
+  if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
+  return BrowserSQLiteDriver.open({
+    databaseName: "aromasense-web-B0.1.a",
+    wasmUrl: "./sql-wasm.wasm"
+  });
+}
 
 async function main(): Promise<void> {
   const root = document.getElementById("app");
@@ -11,7 +20,7 @@ async function main(): Promise<void> {
   const version = document.getElementById("version");
   if (version) version.textContent = PRODUCT_VERSION;
 
-  const db = AndroidSQLiteDriver.fromWindow();
+  const db = await openRuntimeDatabase();
   await new LocalMigrationRunner(db).apply(
     [{ id: 1, name: "local_schema_v1", sql: localSchema }],
     new Date().toISOString()
