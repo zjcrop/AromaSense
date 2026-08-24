@@ -11,7 +11,8 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": ["app/**/*.ts", "shared/**/*.ts", "tests/**/*.ts"],
   "exclude": ["dist", "node_modules", "cloud"]
