@@ -5,11 +5,13 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
+    "bundle:web": "node scripts/build-web.mjs",
     "test": "npm run build && node --test dist/tests",
     "check": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "0.28.2",
     "typescript": "^5.9.0"
   }
 }
