@@ -8,11 +8,11 @@ export interface RadarAxisValue {
 }
 
 const AXES: readonly { key: string; label: string; max: number }[] = [
-  { key: "acidity_intensity", label: "酸质", max: 10 },
-  { key: "sweetness_intensity", label: "甜感", max: 10 },
-  { key: "bitterness_intensity", label: "苦味", max: 10 },
-  { key: "mouthfeel_intensity", label: "口感", max: 10 },
-  { key: "finish_intensity", label: "余韵", max: 10 }
+  { key: "acidity_intensity", label: "酸质", max: 15 },
+  { key: "sweetness_intensity", label: "甜感", max: 15 },
+  { key: "bitterness_intensity", label: "苦味", max: 15 },
+  { key: "mouthfeel_intensity", label: "口感", max: 15 },
+  { key: "finish_intensity", label: "余韵", max: 15 }
 ];
 
 function mean(values: readonly number[]): number {
