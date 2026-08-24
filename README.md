@@ -8,15 +8,17 @@ AromaSense（香迹）是一个面向咖啡杯测与感官评价场景的 Local-
 
 ## 网页测试版
 
-**网页地址：<https://zjcrop.github.io/AromaSense/>**
+计划网页地址：<https://zjcrop.github.io/AromaSense/>
+
+**当前状态：GitHub Pages 尚未在 private 仓库的 Settings → Pages 中启用，因此该地址当前返回 404，不视为已发布。**
+
+启用条件：在 AromaSense 仓库打开 `Settings → Pages`，将 `Build and deployment → Source` 设为 **GitHub Actions**。启用后，`.github/workflows/pages.yml` 会从 `main` 构建 `site/` 并部署网页版本。
 
 网页版本与 Android 版本复用同一套杯测 UI、业务 controller、schema 与 migration：
 
 - Android：系统 `SQLiteDatabase`；
 - Web：`sql.js` WebAssembly SQLite + IndexedDB 持久化；
 - 两端均遵循 Local-first，不以网络请求作为杯测记录前置条件。
-
-> 发布说明：网页由 `.github/workflows/pages.yml` 从 `main` 自动构建并发布。当前仓库为 private，GitHub Pages 的实际公开可访问性仍取决于账户/仓库 Pages 权限与最新 Pages workflow 是否成功。只有页面实际返回成功并完成交互验收后，才视为“网页已验证发布”。
 
 ## 当前架构
 
