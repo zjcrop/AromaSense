@@ -23,9 +23,13 @@ Updated: 2026-08-24
 - [x] deterministic canonical revision serializer
 - [x] SHA-256 revision hashing
 - [x] transactional local cupping repository over SQLite driver contract
-- [ ] runtime SQLite driver adapter
-- [ ] transaction tests
-- [ ] crash/restart recovery tests
+- [x] Node 24 built-in SQLite runtime/reference adapter
+- [x] serialized field-write / context-switch controller
+- [x] transaction rollback test coverage added
+- [x] close/reopen recovery test coverage added
+- [ ] CI execution result observed and passing
+- [ ] target mobile/runtime SQLite adapter selected and validated
+- [ ] real process-kill recovery acceptance test
 
 ## Phase 3 — Cloud synchronization
 - [x] Worker health endpoint
@@ -40,12 +44,16 @@ Updated: 2026-08-24
 - [ ] authentication and per-user authorization
 
 ## Phase 4 — Cupping UI
-- [ ] batch sample setup
-- [ ] left sample rail and ordering
-- [ ] reusable sensory editor
-- [ ] collapsed flavor groups and tag ordering
-- [ ] preparation/high/mid/low stage progress
-- [ ] voice prompt event layer
+- [x] batch sample setup domain support
+- [x] left sample rail state model
+- [x] lightweight all-sample stage progress reader
+- [x] reusable screen/controller orchestration
+- [x] collapsed flavor groups and persistent group ordering state
+- [x] preparation/aroma/high/mid/low/final stage progress model
+- [x] voice prompt event layer
+- [ ] actual visual renderer / interaction shell
+- [ ] drag gesture integration for sample/tag ordering
+- [ ] reusable sensory control rendering from dictionary definitions
 - [ ] radar/summary and scrolling validation
 
 ## Phase 5 — Release validation
@@ -59,8 +67,10 @@ Updated: 2026-08-24
 
 ## Current gate
 
-Phase 1 domain core is now structurally complete enough for UI work.
+Phase 1 domain core is structurally complete.
 
-Phase 2 has a concrete LocalCuppingRepository that uses the production schema through a small SQLite driver contract, but the application runtime still needs a platform-specific driver adapter and real transaction/recovery tests before local persistence can be called release-ready.
+Phase 2 now includes a real Node SQLite reference adapter and executable test sources for atomic transaction rollback, reorder constraints, serialized observation writes, and database close/reopen recovery. Do not call these tests passing until an actual CI run/result is observed.
+
+Phase 4 has progressed through the framework-neutral application/controller layer. The next UI task is the actual renderer and gesture/control shell; it should consume the existing screen controller rather than duplicate persistence or stage logic inside components.
 
 Do not mark Phase 3 complete until the deployed Worker URL and real D1 binding/migration results are observed. UI development can proceed against the local repository contract without waiting for cloud availability.
