@@ -20,6 +20,44 @@ export interface CuppingScreenRendererOptions {
   syncLabel?: string;
 }
 
+const SAMPLE_DETAIL_FIELDS: readonly [string, string][] = [
+  ["country", "国家"],
+  ["region", "产区"],
+  ["farm", "庄园/处理站"],
+  ["variety", "品种"],
+  ["process", "处理法"],
+  ["roastDate", "烘焙日期"],
+  ["altitude", "海拔"],
+  ["flavorNotes", "风味"]
+];
+
+function readableMetadataValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function renderSampleDetails(metadata: Record<string, unknown>): HTMLElement | undefined {
+  const values = SAMPLE_DETAIL_FIELDS.flatMap(([key, label]) => {
+    const value = readableMetadataValue(metadata[key]);
+    return value ? [{ label, value }] : [];
+  });
+  if (!values.length) return undefined;
+  const details = element("div", "cupping-main__sample-details");
+  for (const item of values) {
+    const chip = element("span", "cupping-main__sample-detail");
+    chip.append(
+      element("small", "cupping-main__sample-detail-label", item.label),
+      element("span", "cupping-main__sample-detail-value", item.value)
+    );
+    details.append(chip);
+  }
+  return details;
+}
+
 export class CuppingScreenRenderer {
   private state?: CuppingScreenState;
   private flavorPreferences?: FlavorGroupPreferences;
@@ -34,6 +72,7 @@ export class CuppingScreenRenderer {
   private readonly mainRoot = element("main", "cupping-layout__main");
   private readonly headerRoot = element("header", "cupping-main__header");
   private readonly editorRoot = element("div", "cupping-main__editor");
+  private readonly stageStripRoot = element("nav", "cupping-main__stage-strip");
   private readonly footerRoot = element("footer", "cupping-main__footer");
   private readonly statusRoot = element("div", "cupping-status");
 
@@ -45,7 +84,8 @@ export class CuppingScreenRenderer {
     private readonly options: CuppingScreenRendererOptions
   ) {
     this.root.classList.add("aromasense-cupping");
-    this.mainRoot.append(this.headerRoot, this.statusRoot, this.editorRoot, this.footerRoot);
+    this.stageStripRoot.setAttribute("aria-label", "杯测流程");
+    this.mainRoot.append(this.headerRoot, this.statusRoot, this.editorRoot, this.stageStripRoot, this.footerRoot);
     this.layoutRoot.append(this.railRoot, this.mainRoot);
     this.root.append(this.layoutRoot);
   }
@@ -63,7 +103,9 @@ export class CuppingScreenRenderer {
 
   private disposeDragHandlers(): void {
     this.disposeRailDrag?.();
+    this.disposeRailDrag = undefined;
     this.disposeFlavorDrag?.();
+    this.disposeFlavorDrag = undefined;
     for (const dispose of this.disposeDescriptorDrags) dispose();
     this.disposeDescriptorDrags = [];
   }
@@ -103,7 +145,7 @@ export class CuppingScreenRenderer {
   private async leaveSession(): Promise<void> {
     const state = this.state;
     if (!state) return;
-    const confirmed = window.confirm("退出当前杯测？已输入内容会保留在本地，下次可从“继续未完成杯测”恢复。 ");
+    const confirmed = window.confirm("退出当前杯测？已输入内容会保留在本地，下次可从“继续未完成杯测”恢复。");
     if (!confirmed) return;
     this.setBusy(true);
     try {
@@ -136,7 +178,7 @@ export class CuppingScreenRenderer {
     this.setBusy(true);
     try {
       await this.options.onSync?.();
-      this.setStatus("同步任务已执行；未配置云端或未登录时，本地记录保持不变。 ");
+      this.setStatus("已执行同步检查；未配置云端或未登录时，本地记录保持不变。");
     } catch (error) {
       this.setStatus(`同步失败：${error instanceof Error ? error.message : String(error)}`, true);
     } finally {
@@ -176,6 +218,32 @@ export class CuppingScreenRenderer {
     });
   }
 
+  private renderStageStrip(state: CuppingScreenState, sampleId?: string, activeStageId?: StageId): void {
+    clearElement(this.stageStripRoot);
+    if (!sampleId || !activeStageId) {
+      this.stageStripRoot.hidden = true;
+      return;
+    }
+    const sample = state.rail.find((item) => item.sampleId === sampleId);
+    if (!sample) {
+      this.stageStripRoot.hidden = true;
+      return;
+    }
+    this.stageStripRoot.hidden = false;
+    for (const stage of sample.stages) {
+      const active = stage.stageId === activeStageId;
+      const step = button(
+        `cupping-stage-step cupping-stage-step--${stage.tone} is-${stage.status}${active ? " is-current" : ""}`,
+        stage.label,
+        () => this.select(sampleId, stage.stageId)
+      );
+      step.dataset.stageId = stage.stageId;
+      step.setAttribute("aria-current", active ? "step" : "false");
+      step.title = `${stage.label} · ${stage.status === "completed" ? "已完成" : stage.status === "active" ? "进行中" : "未开始"}`;
+      this.stageStripRoot.append(step);
+    }
+  }
+
   private async render(): Promise<void> {
     const state = this.state;
     if (!state) return;
@@ -198,6 +266,7 @@ export class CuppingScreenRenderer {
     clearElement(this.headerRoot);
     clearElement(this.editorRoot);
     clearElement(this.footerRoot);
+    this.renderStageStrip(state, state.active?.context.sampleId, state.active?.context.stageId);
 
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") {
       const done = element("section", "cupping-empty");
@@ -226,14 +295,16 @@ export class CuppingScreenRenderer {
     const stage = state.rail
       .find((item) => item.sampleId === active.context.sampleId)
       ?.stages.find((item) => item.stageId === active.context.stageId);
-    this.headerRoot.append(
-      element("div", "cupping-main__sample-number", String(active.slice.sample.displayNumber).padStart(2, "0")),
-      element("div", "cupping-main__titles")
-    );
-    const titles = this.headerRoot.querySelector<HTMLElement>(".cupping-main__titles");
-    titles?.append(
+    const titleBlock = element("div", "cupping-main__titles");
+    titleBlock.append(
       element("h1", "cupping-main__sample-title", sampleTitle),
       element("p", `cupping-main__stage cupping-main__stage--${stage?.tone ?? "neutral"}`, stage?.label ?? active.context.stageId)
+    );
+    const details = renderSampleDetails(active.slice.sample.metadata);
+    if (details) titleBlock.append(details);
+    this.headerRoot.append(
+      element("div", "cupping-main__sample-number", String(active.slice.sample.displayNumber).padStart(2, "0")),
+      titleBlock
     );
 
     const preferences = this.flavorPreferences ?? await this.flavorService.load();
