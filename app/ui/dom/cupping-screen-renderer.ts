@@ -13,6 +13,7 @@ import { renderSensoryEditor } from "./sensory-editor-renderer";
 export interface CuppingScreenRendererOptions {
   now(): string;
   voicePlayer?: VoicePromptPlayer;
+  onSessionFinished?(sessionId: string, finalRevisionId?: string): void | Promise<void>;
 }
 
 export class CuppingScreenRenderer {
@@ -99,19 +100,32 @@ export class CuppingScreenRenderer {
     renderSampleRail(this.railRoot, state.rail, {
       select: (sampleId, stageId) => this.select(sampleId, stageId)
     });
-    this.disposeRailDrag = attachDragReorder(this.railRoot, {
-      itemSelector: ".sample-rail__item",
-      itemIdAttribute: "data-sample-id",
-      onReorder: async (ids) => {
-        await this.run(async () => {
-          this.state = await this.controller.reorderSampleIds(ids, this.options.now());
-        });
-      }
-    });
+
+    if (state.sessionStatus !== "completed" && state.sessionStatus !== "archived") {
+      this.disposeRailDrag = attachDragReorder(this.railRoot, {
+        itemSelector: ".sample-rail__item",
+        itemIdAttribute: "data-sample-id",
+        onReorder: async (ids) => {
+          await this.run(async () => {
+            this.state = await this.controller.reorderSampleIds(ids, this.options.now());
+          });
+        }
+      });
+    }
 
     clearElement(this.headerRoot);
     clearElement(this.editorRoot);
     clearElement(this.footerRoot);
+
+    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") {
+      const done = element("section", "cupping-empty");
+      done.append(
+        element("h2", "cupping-empty__title", "本次杯测已完成"),
+        element("p", "cupping-empty__text", state.finalRevisionId ? `最终修订：${state.finalRevisionId}` : "本地记录已锁定为只读。")
+      );
+      this.editorRoot.append(done);
+      return;
+    }
 
     if (!state.active) {
       const empty = element("section", "cupping-empty");
@@ -206,5 +220,15 @@ export class CuppingScreenRenderer {
       })
     );
     this.footerRoot.append(previous, complete, next);
+
+    if (this.controller.canFinishSession()) {
+      const finish = button("cupping-nav cupping-nav--finish", "结束杯测并生成备份", () =>
+        this.run(async () => {
+          this.state = await this.controller.finishSession(this.options.now());
+          await this.options.onSessionFinished?.(this.state.sessionId, this.state.finalRevisionId);
+        })
+      );
+      this.footerRoot.append(finish);
+    }
   }
 }
