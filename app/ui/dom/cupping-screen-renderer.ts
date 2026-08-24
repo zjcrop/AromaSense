@@ -1,9 +1,12 @@
 import type { StageId } from "../../../shared/protocol/aromasense-v1";
+import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import type { FlavorGroupPreferenceService, FlavorGroupPreferences } from "../flavor-group-preferences";
+import { buildRadarSummary } from "../sample-summary-model";
 import type { VoicePromptPlayer } from "./browser-voice";
 import { attachDragReorder } from "./drag-reorder";
 import { button, clearElement, element } from "./dom-helpers";
+import { renderRadarSummary } from "./radar-renderer";
 import { renderSampleRail } from "./sample-rail-renderer";
 import { renderSensoryEditor } from "./sensory-editor-renderer";
 
@@ -29,6 +32,7 @@ export class CuppingScreenRenderer {
     private readonly root: HTMLElement,
     private readonly controller: CuppingScreenController,
     private readonly flavorService: FlavorGroupPreferenceService,
+    private readonly summaryReader: SampleSummaryReader,
     private readonly options: CuppingScreenRendererOptions
   ) {
     this.root.classList.add("aromasense-cupping");
@@ -152,6 +156,13 @@ export class CuppingScreenRenderer {
         }
       }
     });
+
+    if (active.context.stageId === "final") {
+      const observations = await this.summaryReader.listObservations(active.context.sampleId);
+      const summaryRoot = element("div", "cupping-main__summary");
+      renderRadarSummary(summaryRoot, buildRadarSummary(observations));
+      this.editorRoot.prepend(summaryRoot);
+    }
 
     const flavorGroups = this.editorRoot.querySelector<HTMLElement>(".flavor-groups");
     if (flavorGroups) {
