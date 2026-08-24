@@ -1,7 +1,7 @@
 html, body { margin: 0; min-height: 100%; background: #151515; color: #f4efe4; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 body { min-height: 100dvh; }
 #version { position: fixed; right: 10px; bottom: max(8px, env(safe-area-inset-bottom)); z-index: 30; font-size: 10px; color: #817b70; pointer-events: none; }
-.account-card { width: min(420px, calc(100vw - 32px)); margin: 12vh auto 0; display: grid; gap: 12px; padding: 22px; border: 1px solid rgba(185,153,90,.4); border-radius: 18px; background: #1d1d1d; }
+.account-card { width: min(460px, calc(100vw - 32px)); margin: 9vh auto 0; display: grid; gap: 12px; padding: 22px; border: 1px solid rgba(185,153,90,.4); border-radius: 18px; background: #1d1d1d; }
 .account-card__title { margin: 0; font-size: 22px; color: #b9995a; }
 .account-card__text { margin: 0 0 4px; color: #aaa49a; line-height: 1.55; font-size: 13px; }
 .account-card__input { width: 100%; min-height: 44px; border: 1px solid rgba(185,153,90,.4); border-radius: 10px; padding: 0 12px; background: #242424; color: #f4efe4; }
@@ -10,5 +10,12 @@ body { min-height: 100dvh; }
 .account-card__primary { border: 0; background: #b9995a; color: #111; }
 .account-card__secondary { border: 1px solid rgba(185,153,90,.5); background: transparent; color: #f4efe4; }
 .account-card__link { grid-column: 1 / -1; border: 0; background: transparent; color: #aaa49a; }
+.account-card__primary:disabled, .account-card__secondary:disabled { opacity: .42; cursor: not-allowed; }
 .account-card__status { padding: 8px 10px; border-radius: 8px; background: rgba(190,70,70,.16); color: #f4b4b4; font-size: 12px; }
+.account-card__cloud-state { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid rgba(232,154,85,.42); border-radius: 10px; background: rgba(232,154,85,.08); }
+.account-card__cloud-state-title { color: #e89a55; font-size: 13px; }
+.account-card__cloud-state-text { color: #aaa49a; font-size: 11px; line-height: 1.5; }
+.account-card__sync-summary { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px; border-radius: 10px; background: #171717; color: #aaa49a; font-size: 10px; }
+.account-card__sync-stat { padding: 4px 7px; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; }
+.account-card__sync-stat.is-warning { border-color: rgba(232,154,85,.55); color: #e89a55; }
 .cupping-nav--finish { grid-column: 1 / -1; border-color: #b9995a; background: #b9995a; color: #111; }
