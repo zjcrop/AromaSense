@@ -26,6 +26,28 @@ The following require explicit legal/license review before adoption:
 
 No production third-party OCR/model dependency is bundled in the repository at this infrastructure-baseline stage.
 
+The Node SQLite persistence adapter used by CI/recovery tests relies on Node.js built-in `node:sqlite`; no external SQLite npm runtime package is introduced.
+
+## Development toolchain
+
+### TypeScript
+
+- Status: development/build dependency
+- Version range: `^5.9.0`
+- Upstream: https://github.com/microsoft/TypeScript
+- License: Apache-2.0
+- Modified: no
+- Distribution implication: development tool only; not intended to be bundled as an application runtime dependency
+
+### @types/node
+
+- Status: development/type-check dependency
+- Version range: `^24.0.0`
+- Upstream: https://github.com/DefinitelyTyped/DefinitelyTyped
+- License: MIT for the package, subject to the package metadata for the resolved version
+- Modified: no
+- Distribution implication: type declarations used during development; not intended to be bundled as application runtime code
+
 ## Planned / under evaluation
 
 ### PaddleOCR / PP-OCR
