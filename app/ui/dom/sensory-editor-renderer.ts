@@ -1,5 +1,5 @@
 import type { SensoryObservation } from "../../../shared/protocol/aromasense-v1";
-import { DESCRIPTOR_GROUPS_V1 } from "../../core/sensory-dictionary-v1";
+import { DESCRIPTOR_GROUPS_V1, type SensoryAssessmentLayer } from "../../core/sensory-dictionary-v1";
 import type { FlavorGroupPreferences } from "../flavor-group-preferences";
 import { controlsForStage, type SensoryControlSpec } from "../sensory-control-model";
 import { button, clearElement, element, setPressed } from "./dom-helpers";
@@ -15,6 +15,12 @@ export interface SensoryEditorRenderInput {
   flavorPreferences: FlavorGroupPreferences;
   callbacks: SensoryEditorCallbacks;
 }
+
+const LAYER_LABELS: Partial<Record<SensoryAssessmentLayer, string>> = {
+  descriptive: "描述性记录",
+  affective: "质量印象",
+  notes: "补充记录"
+};
 
 function observationMap(observations: readonly SensoryObservation[]): Map<string, unknown> {
   return new Map(observations.map((item) => [item.fieldKey, item.value] as const));
@@ -117,33 +123,59 @@ function renderTagPicker(
   return root;
 }
 
+function renderControl(spec: SensoryControlSpec, value: unknown, input: SensoryEditorRenderInput): HTMLElement {
+  const field = element("section", `sensory-field sensory-field--${spec.kind}`);
+  field.dataset.assessmentLayer = spec.assessmentLayer;
+  const label = element("label", "sensory-field__label", spec.label);
+  if (spec.required) label.dataset.required = "true";
+  field.append(label);
+  const save = (next: unknown) => void input.callbacks.saveField(spec.fieldKey, next);
+
+  switch (spec.kind) {
+    case "slider":
+    case "score":
+      field.append(renderRange(spec, value, (next) => save(next)));
+      break;
+    case "toggle":
+      field.append(renderToggle(value, (next) => save(next)));
+      break;
+    case "text":
+      field.append(renderText(value, (next) => save(next)));
+      break;
+    case "tag-picker":
+      field.append(renderTagPicker(value, input.flavorPreferences, input.callbacks));
+      break;
+  }
+  return field;
+}
+
 export function renderSensoryEditor(root: HTMLElement, input: SensoryEditorRenderInput): void {
   clearElement(root);
   const values = observationMap(input.observations);
+  const controls = controlsForStage(input.stageId);
+  let activeLayer: SensoryAssessmentLayer | undefined;
 
-  for (const spec of controlsForStage(input.stageId)) {
-    const field = element("section", `sensory-field sensory-field--${spec.kind}`);
-    const label = element("label", "sensory-field__label", spec.label);
-    if (spec.required) label.dataset.required = "true";
-    field.append(label);
-    const value = values.get(spec.fieldKey);
-    const save = (next: unknown) => void input.callbacks.saveField(spec.fieldKey, next);
-
-    switch (spec.kind) {
-      case "slider":
-      case "score":
-        field.append(renderRange(spec, value, (next) => save(next)));
-        break;
-      case "toggle":
-        field.append(renderToggle(value, (next) => save(next)));
-        break;
-      case "text":
-        field.append(renderText(value, (next) => save(next)));
-        break;
-      case "tag-picker":
-        field.append(renderTagPicker(value, input.flavorPreferences, input.callbacks));
-        break;
+  for (const spec of controls) {
+    if (spec.assessmentLayer !== activeLayer) {
+      activeLayer = spec.assessmentLayer;
+      const label = LAYER_LABELS[activeLayer];
+      if (label) {
+        const heading = element("div", `sensory-layer sensory-layer--${activeLayer}`);
+        heading.append(
+          element("h2", "sensory-layer__title", label),
+          element(
+            "p",
+            "sensory-layer__note",
+            activeLayer === "descriptive"
+              ? "记录感知到的属性与强度，不表达喜欢或质量高低。"
+              : activeLayer === "affective"
+                ? "独立评价质量印象，不替代描述性强度记录。"
+                : ""
+          )
+        );
+        root.append(heading);
+      }
     }
-    root.append(field);
+    root.append(renderControl(spec, values.get(spec.fieldKey), input));
   }
 }
