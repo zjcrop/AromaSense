@@ -45,9 +45,11 @@ Updated: 2026-08-24
 
 ## Phase 4 — Cupping UI
 - [x] batch sample setup domain support
+- [x] actual batch sample setup visual screen
 - [x] left sample rail state model and DOM renderer
 - [x] lightweight all-sample stage progress reader
 - [x] reusable screen/controller orchestration
+- [x] runtime application composition/bootstrap over injected SQLite driver
 - [x] responsive visual interaction shell
 - [x] dictionary-driven slider/score/toggle/text/tag controls
 - [x] persistent flavor group collapse and group ordering
@@ -56,10 +58,8 @@ Updated: 2026-08-24
 - [x] preparation/aroma/high/mid/low/final stage progress model
 - [x] browser voice prompt adapter
 - [x] radar summary aggregation model and canvas renderer
+- [x] radar/summary integration into final-stage rendering
 - [x] scroll-safe editor/radar layout implemented
-- [ ] runtime application composition/bootstrap
-- [ ] actual batch sample setup visual screen
-- [ ] radar/summary integration into final-stage navigation
 - [ ] touch-device gesture acceptance validation
 - [ ] small-screen scrolling acceptance validation
 
@@ -76,8 +76,8 @@ Updated: 2026-08-24
 
 Phase 1 domain core is structurally complete.
 
-Phase 2 includes a real Node SQLite reference adapter and executable test sources for atomic transaction rollback, reorder constraints, serialized observation writes, and database close/reopen recovery. Do not call these tests passing until an actual CI run/result is observed.
+Phase 2 includes a real Node SQLite reference adapter and executable test sources for atomic transaction rollback, reorder constraints, serialized observation writes, and database close/reopen recovery. The repository now also contains a GitHub Actions workflow, but the connected GitHub status endpoint currently returns no observed status entries for the latest main commit; therefore CI is still not claimed as passing.
 
-Phase 4 now contains an actual framework-free DOM interaction shell rather than only view models. It renders the sample rail, sensory controls, persistent group/tag ordering, stage navigation, error state and voice events. The radar summary model/renderer exists and the main editor is scroll-safe in CSS. The remaining UI work is application bootstrap/runtime composition, the batch-setup visual screen, final-stage summary integration, and real touch/small-screen acceptance testing.
+Phase 4 is now assembled end-to-end at code level: batch setup persists a Session+Samples transaction, the DOM application bootstrap composes repositories/controllers/renderers over an injected SQLite driver, the cupping screen persists field edits and ordering, and the final stage explicitly loads sample summary observations for radar rendering. Remaining Phase 4 work is acceptance validation on real touch/small-screen targets rather than missing application flow code.
 
-Do not mark Phase 3 complete until the deployed Worker URL and real D1 binding/migration results are observed. UI development can proceed against the local repository contract without waiting for cloud availability.
+Do not mark Phase 3 complete until the deployed Worker URL and real D1 binding/migration results are observed.
