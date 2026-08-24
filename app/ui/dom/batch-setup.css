@@ -1,0 +1,39 @@
+.batch-setup {
+  min-height: 100dvh;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 18px max(24px, env(safe-area-inset-bottom));
+  background: #151515;
+  color: #f4efe4;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.batch-setup__header { margin-bottom: 20px; }
+.batch-setup__heading { margin: 0 0 5px; font-size: 24px; }
+.batch-setup__hint { margin: 0; color: #a8a39a; font-size: 13px; }
+.batch-setup__title,
+.batch-setup__sample-label {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(185,153,90,.42);
+  border-radius: 10px;
+  background: #242424;
+  color: #f4efe4;
+  padding: 9px 11px;
+}
+.batch-setup__title { margin-bottom: 14px; }
+.batch-setup__row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
+.batch-setup__remove,
+.batch-setup__add,
+.batch-setup__start {
+  min-height: 42px;
+  border: 1px solid rgba(185,153,90,.42);
+  border-radius: 10px;
+  background: #1d1d1d;
+  color: #f4efe4;
+  padding: 8px 12px;
+}
+.batch-setup__remove { color: #a8a39a; }
+.batch-setup__add { width: 100%; margin-top: 4px; }
+.batch-setup__start { width: 100%; margin-top: 18px; background: #b9995a; color: #111; font-weight: 700; }
+.batch-setup__status { margin-top: 12px; border-radius: 8px; padding: 8px 10px; background: rgba(185,153,90,.12); font-size: 12px; }
+.batch-setup__status.is-error { background: rgba(190,70,70,.16); color: #f4b4b4; }
