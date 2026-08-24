@@ -22,13 +22,13 @@ The following require explicit legal/license review before adoption:
 - non-commercial licenses
 - custom model/data/content licenses
 
-## Current runtime dependencies
+## Current application/runtime dependencies
 
-No production third-party OCR/model dependency is bundled in the repository at this infrastructure-baseline stage.
+AromaSense B0.1.a uses platform-provided browser/WebView and SQLite capabilities. No external SQLite runtime package is bundled. The Android shell uses Android framework `WebView` and `SQLiteDatabase` APIs.
 
-The Node SQLite persistence adapter used by CI/recovery tests relies on Node.js built-in `node:sqlite`; no external SQLite npm runtime package is introduced.
+The Node SQLite persistence adapter used by CI/recovery tests relies on Node.js built-in `node:sqlite` and is not part of the Android runtime.
 
-## Development toolchain
+## Development / build toolchain
 
 ### TypeScript
 
@@ -46,7 +46,24 @@ The Node SQLite persistence adapter used by CI/recovery tests relies on Node.js 
 - Upstream: https://github.com/DefinitelyTyped/DefinitelyTyped
 - License: MIT for the package, subject to the package metadata for the resolved version
 - Modified: no
-- Distribution implication: type declarations used during development; not intended to be bundled as application runtime code
+- Distribution implication: type declarations only
+
+### esbuild
+
+- Status: development/bundling dependency
+- Version: `0.28.2`
+- Upstream: https://github.com/evanw/esbuild
+- License: MIT
+- Modified: no
+- Distribution implication: build tool only; the esbuild executable is not shipped inside the Android application
+
+### Android build toolchain
+
+- Android Gradle Plugin: `9.3.0`
+- Gradle: `9.5.0`
+- Kotlin Android plugin: `2.3.21`
+- compileSdk / targetSdk: Android API 36
+- Distribution implication: build toolchain only; Android platform/framework licensing applies independently
 
 ## Planned / under evaluation
 
