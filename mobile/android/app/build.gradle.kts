@@ -30,3 +30,15 @@ android {
         jvmTarget = "17"
     }
 }
+
+val repoRoot = rootProject.projectDir.resolve("../..").canonicalFile
+val npmExecutable = if (System.getProperty("os.name").lowercase().contains("windows")) "npm.cmd" else "npm"
+
+val bundleWeb by tasks.registering(Exec::class) {
+    workingDir = repoRoot
+    commandLine(npmExecutable, "run", "bundle:web")
+}
+
+tasks.named("preBuild") {
+    dependsOn(bundleWeb)
+}
