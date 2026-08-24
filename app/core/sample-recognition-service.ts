@@ -214,7 +214,8 @@ function likelyLabel(text: string, fields: Record<string, string>, fallback: str
   const line = text.split(/\n+/)
     .map((item) => item.trim())
     .find((item) => item.length >= 2 && item.length <= 80 && /[A-Za-z\u3400-\u9FFF]/.test(item) && !excluded.test(item));
-  return line ?? fallback.replace(/\.[^.]+$/, "").slice(0, 80) || "未命名样品";
+  const fallbackLabel = fallback.replace(/\.[^.]+$/, "").slice(0, 80) || "未命名样品";
+  return line ?? fallbackLabel;
 }
 
 export class SampleRecognitionService {
