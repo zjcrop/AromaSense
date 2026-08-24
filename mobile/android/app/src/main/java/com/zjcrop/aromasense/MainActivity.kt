@@ -1,6 +1,7 @@
 package com.zjcrop.aromasense
 
 import android.app.Activity
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -26,7 +27,8 @@ class MainActivity : Activity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT
         }
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        WebView.setWebContentsDebuggingEnabled(debuggable)
         webView.addJavascriptInterface(AromaSenseSQLiteBridge(database), "AromaSenseSQLite")
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
