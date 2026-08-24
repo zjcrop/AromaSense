@@ -28,4 +28,8 @@ export class UserPreferencesRepository {
       [key, JSON.stringify(value), now]
     );
   }
+
+  async remove(key: string): Promise<void> {
+    await this.db.run("DELETE FROM user_preferences WHERE preference_key = ?", [key]);
+  }
 }
