@@ -2,11 +2,13 @@ import { CloudflareAuthClient } from "../core/auth-client";
 import { CuppingSessionController, type ObservationIdFactory } from "../core/cupping-session-controller";
 import { CuppingSetupService } from "../core/cupping-setup-service";
 import { RevisionCheckpointService } from "../core/revision-checkpoint-service";
+import { SampleRecognitionService } from "../core/sample-recognition-service";
 import { CloudflareSyncRepository } from "../core/sync-repository";
 import { SyncEngine, type SyncRunResult } from "../core/sync-engine";
 import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { LocalCuppingRepository } from "../storage/local-cupping-repository";
+import { RecentSessionReader } from "../storage/recent-session-reader";
 import { SampleSummaryReader } from "../storage/sample-summary-reader";
 import { StageProgressReader } from "../storage/stage-progress-reader";
 import { SyncQueueStore } from "../storage/sync-queue-store";
@@ -62,41 +64,50 @@ export class AromaSenseDomApp {
 
   async start(): Promise<void> {
     await this.syncEngine?.recoverInterrupted();
-    if (this.authClient) {
-      await this.showAccount();
-    } else {
-      this.showSetup();
-    }
+    await this.showSetup();
   }
 
-  async showAccount(): Promise<void> {
+  async showAccount(returnSessionId?: string): Promise<void> {
     this.screen?.dispose();
+    this.screen = undefined;
     this.root.replaceChildren();
-    if (!this.authClient) {
-      this.showSetup();
-      return;
-    }
     await new AccountRenderer(this.root, this.authClient, {
       onAuthenticated: async () => {
         await this.syncPending();
-        this.showSetup();
+        if (returnSessionId) await this.openSession(returnSessionId);
+        else await this.showSetup();
       },
-      onSkip: () => this.showSetup()
+      onSkip: async () => {
+        if (returnSessionId) await this.openSession(returnSessionId);
+        else await this.showSetup();
+      },
+      onSync: async () => { await this.syncPending(); },
+      getSyncSummary: () => this.syncQueue.counts()
     }).render();
   }
 
-  showSetup(): void {
+  async showSetup(): Promise<void> {
     this.screen?.dispose();
+    this.screen = undefined;
     this.root.replaceChildren();
     const localRepository = new LocalCuppingRepository(this.db);
+    const recentSessions = await new RecentSessionReader(this.db).list(10);
+    const current = await this.authClient?.current();
+    const counts = await this.syncQueue.counts();
+    const waiting = counts.pending + counts.failed + counts.conflict;
     const setup = new BatchSetupRenderer(
       this.root,
       new CuppingSetupService(localRepository),
+      new SampleRecognitionService(),
       {
         now: this.options.now,
         createSessionId: this.options.createSessionId,
         createSampleId: this.options.createSampleId,
-        onCreated: (sessionId) => this.openSession(sessionId)
+        onCreated: (sessionId) => this.openSession(sessionId),
+        onResume: (sessionId) => this.openSession(sessionId),
+        onOpenAccount: () => this.showAccount(),
+        recentSessions,
+        syncLabel: current ? (waiting ? `同步 ${waiting}` : "账户 · 已登录") : "账户 / 同步"
       }
     );
     setup.render();
@@ -115,6 +126,8 @@ export class AromaSenseDomApp {
       this.revisions
     );
     const flavorService = new FlavorGroupPreferenceService(this.preferences);
+    const counts = await this.syncQueue.counts();
+    const waiting = counts.pending + counts.failed + counts.conflict;
     this.screen = new CuppingScreenRenderer(
       this.root,
       controller,
@@ -123,6 +136,10 @@ export class AromaSenseDomApp {
       {
         now: this.options.now,
         voicePlayer: new BrowserVoicePromptPlayer(),
+        syncLabel: waiting ? `同步 ${waiting}` : "同步",
+        onExit: async () => { await this.showSetup(); },
+        onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); },
+        onSync: async () => { await this.syncPending(); },
         onSessionFinished: async () => {
           await this.syncPending();
         }
