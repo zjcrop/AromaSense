@@ -51,7 +51,7 @@ test("sample rail exposes progress without loading observations", async () => {
   }
 });
 
-test("flavor groups default collapsed and persist explicit order", async () => {
+test("flavor groups and descriptors persist explicit order", async () => {
   const f = fixture();
   try {
     const service = new FlavorGroupPreferenceService(new UserPreferencesRepository(f.db));
@@ -61,10 +61,15 @@ test("flavor groups default collapsed and persist explicit order", async () => {
     const expanded = await service.setCollapsed("floral", false, "2026-08-24T20:31:00+08:00");
     assert.equal(expanded.collapsedGroupIds.includes("floral"), false);
 
-    const reverse = [...expanded.orderedGroupIds].reverse();
-    await service.reorder(reverse, "2026-08-24T20:32:00+08:00");
+    const reverseGroups = [...expanded.orderedGroupIds].reverse();
+    await service.reorder(reverseGroups, "2026-08-24T20:32:00+08:00");
+
+    const floral = [...(expanded.descriptorOrderByGroup.floral ?? [])].reverse();
+    await service.reorderDescriptors("floral", floral, "2026-08-24T20:33:00+08:00");
+
     const recovered = await service.load();
-    assert.deepEqual(recovered.orderedGroupIds, reverse);
+    assert.deepEqual(recovered.orderedGroupIds, reverseGroups);
+    assert.deepEqual(recovered.descriptorOrderByGroup.floral, floral);
     assert.equal(recovered.collapsedGroupIds.includes("floral"), false);
   } finally {
     f.db.close();
