@@ -67,12 +67,20 @@ export class CuppingScreenController {
   }
 
   async goNext(now: string): Promise<CuppingScreenState> {
-    const active = this.requireActive();
-    const stageId = nextStage(active.context.stageId);
+    const activeBeforeCompletion = this.requireActive();
+    const stageId = nextStage(activeBeforeCompletion.context.stageId);
+    const sampleId = activeBeforeCompletion.context.sampleId;
+
+    await this.editor.completeActiveStage(now);
     if (!stageId) {
-      return this.completeStage(now);
+      const completed = this.editor.current();
+      if (!completed) {
+        throw new Error("NO_ACTIVE_EDITING_CONTEXT");
+      }
+      return this.refreshState(completed);
     }
-    return this.select(active.context.sampleId, stageId, now);
+
+    return this.select(sampleId, stageId, now);
   }
 
   async goPrevious(now: string): Promise<CuppingScreenState> {
