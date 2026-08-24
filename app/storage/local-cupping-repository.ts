@@ -115,15 +115,8 @@ export class LocalCuppingRepository {
         `INSERT INTO sessions (
           session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          session.sessionId,
-          session.title ?? null,
-          session.status,
-          session.taxonomyVersion,
-          session.createdAt,
-          session.updatedAt,
-          session.completedAt ?? null
-        ]
+        [session.sessionId, session.title ?? null, session.status, session.taxonomyVersion,
+          session.createdAt, session.updatedAt, session.completedAt ?? null]
       );
 
       for (const sample of samples) {
@@ -131,54 +124,38 @@ export class LocalCuppingRepository {
           `INSERT INTO samples (
             sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            sample.sampleId,
-            sample.sessionId,
-            sample.displayNumber,
-            sample.sortOrder,
-            sample.label ?? null,
-            JSON.stringify(sample.metadata),
-            sample.createdAt,
-            sample.updatedAt
-          ]
+          [sample.sampleId, sample.sessionId, sample.displayNumber, sample.sortOrder,
+            sample.label ?? null, JSON.stringify(sample.metadata), sample.createdAt, sample.updatedAt]
         );
       }
     });
   }
 
+  async getSession(sessionId: string): Promise<CuppingSession> {
+    const row = await this.db.get<SessionRow>(
+      `SELECT session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
+       FROM sessions WHERE session_id = ?`, [sessionId]
+    );
+    if (!row) throw new Error(`SESSION_NOT_FOUND:${sessionId}`);
+    return sessionFromRow(row);
+  }
+
   async saveSession(session: CuppingSession): Promise<void> {
     await this.db.run(
-      `UPDATE sessions
-       SET title = ?, status = ?, taxonomy_version = ?, updated_at = ?, completed_at = ?
+      `UPDATE sessions SET title = ?, status = ?, taxonomy_version = ?, updated_at = ?, completed_at = ?
        WHERE session_id = ?`,
-      [
-        session.title ?? null,
-        session.status,
-        session.taxonomyVersion,
-        session.updatedAt,
-        session.completedAt ?? null,
-        session.sessionId
-      ]
+      [session.title ?? null, session.status, session.taxonomyVersion, session.updatedAt,
+        session.completedAt ?? null, session.sessionId]
     );
   }
 
   async replaceSampleOrder(sessionId: string, samples: readonly SampleRecord[]): Promise<void> {
-    if (samples.some((sample) => sample.sessionId !== sessionId)) {
-      throw new Error("SAMPLE_SESSION_MISMATCH");
-    }
-
+    if (samples.some((sample) => sample.sessionId !== sessionId)) throw new Error("SAMPLE_SESSION_MISMATCH");
     await this.db.transaction(async () => {
-      // Move existing values outside the valid positive range first so both UNIQUE
-      // constraints remain valid while the final order is applied.
-      await this.db.run(
-        `UPDATE samples SET sort_order = -sort_order WHERE session_id = ?`,
-        [sessionId]
-      );
-
+      await this.db.run(`UPDATE samples SET sort_order = -sort_order WHERE session_id = ?`, [sessionId]);
       for (const sample of samples) {
         await this.db.run(
-          `UPDATE samples SET sort_order = ?, updated_at = ?
-           WHERE session_id = ? AND sample_id = ?`,
+          `UPDATE samples SET sort_order = ?, updated_at = ? WHERE session_id = ? AND sample_id = ?`,
           [sample.sortOrder, sample.updatedAt, sessionId, sample.sampleId]
         );
       }
@@ -186,13 +163,8 @@ export class LocalCuppingRepository {
   }
 
   async setStageState(
-    sessionId: string,
-    sampleId: string,
-    stageId: StageId,
-    status: StageStatus,
-    now: string,
-    startedAt?: string,
-    completedAt?: string
+    sessionId: string, sampleId: string, stageId: StageId, status: StageStatus,
+    now: string, startedAt?: string, completedAt?: string
   ): Promise<void> {
     await this.db.run(
       `INSERT INTO stage_state (
@@ -203,15 +175,7 @@ export class LocalCuppingRepository {
         started_at = COALESCE(stage_state.started_at, excluded.started_at),
         completed_at = excluded.completed_at,
         updated_at = excluded.updated_at`,
-      [
-        sessionId,
-        sampleId,
-        stageId,
-        status,
-        startedAt ?? null,
-        completedAt ?? null,
-        now
-      ]
+      [sessionId, sampleId, stageId, status, startedAt ?? null, completedAt ?? null, now]
     );
   }
 
@@ -226,68 +190,65 @@ export class LocalCuppingRepository {
         value_json = excluded.value_json,
         dictionary_version = excluded.dictionary_version,
         updated_at = excluded.updated_at`,
-      [
-        observation.observationId,
-        observation.sessionId,
-        observation.sampleId,
-        observation.stageId,
-        observation.fieldKey,
-        JSON.stringify(observation.value),
-        observation.dictionaryVersion,
-        observation.updatedAt,
-        observation.updatedAt
-      ]
+      [observation.observationId, observation.sessionId, observation.sampleId, observation.stageId,
+        observation.fieldKey, JSON.stringify(observation.value), observation.dictionaryVersion,
+        observation.updatedAt, observation.updatedAt]
     );
   }
 
   async loadEditingSlice(sessionId: string, sampleId: string, stageId: StageId): Promise<EditingSlice> {
-    const sessionRow = await this.db.get<SessionRow>(
-      `SELECT session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
-       FROM sessions WHERE session_id = ?`,
-      [sessionId]
-    );
-    if (!sessionRow) {
-      throw new Error(`SESSION_NOT_FOUND:${sessionId}`);
-    }
-
+    const session = await this.getSession(sessionId);
     const sampleRow = await this.db.get<SampleRow>(
       `SELECT sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at
-       FROM samples WHERE session_id = ? AND sample_id = ?`,
-      [sessionId, sampleId]
+       FROM samples WHERE session_id = ? AND sample_id = ?`, [sessionId, sampleId]
     );
-    if (!sampleRow) {
-      throw new Error(`SAMPLE_NOT_FOUND:${sampleId}`);
-    }
-
+    if (!sampleRow) throw new Error(`SAMPLE_NOT_FOUND:${sampleId}`);
     const stageRow = await this.db.get<StageRow>(
-      `SELECT status FROM stage_state WHERE sample_id = ? AND stage_id = ?`,
-      [sampleId, stageId]
+      `SELECT status FROM stage_state WHERE sample_id = ? AND stage_id = ?`, [sampleId, stageId]
     );
-
-    const observationRows = await this.db.all<ObservationRow>(
-      `SELECT observation_id, session_id, sample_id, stage_id, field_key, value_json,
-              dictionary_version, updated_at
-       FROM observations
-       WHERE sample_id = ? AND stage_id = ?
-       ORDER BY field_key`,
-      [sampleId, stageId]
-    );
-
+    const observations = await this.listObservationsForStage(sampleId, stageId);
     return {
-      session: sessionFromRow(sessionRow),
+      session,
       sample: sampleFromRow(sampleRow),
       stageId,
       stageStatus: stageRow?.status ?? "not_started",
-      observations: observationRows.map(observationFromRow)
+      observations
     };
   }
 
   async listSamples(sessionId: string): Promise<readonly SampleRecord[]> {
     const rows = await this.db.all<SampleRow>(
       `SELECT sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at
-       FROM samples WHERE session_id = ? ORDER BY sort_order ASC`,
-      [sessionId]
+       FROM samples WHERE session_id = ? ORDER BY sort_order ASC`, [sessionId]
     );
     return rows.map(sampleFromRow);
+  }
+
+  async listObservationsForStage(sampleId: string, stageId: StageId): Promise<readonly SensoryObservation[]> {
+    const rows = await this.db.all<ObservationRow>(
+      `SELECT observation_id, session_id, sample_id, stage_id, field_key, value_json,
+              dictionary_version, updated_at
+       FROM observations WHERE sample_id = ? AND stage_id = ? ORDER BY field_key`,
+      [sampleId, stageId]
+    );
+    return rows.map(observationFromRow);
+  }
+
+  async listObservationsForSample(sampleId: string): Promise<readonly SensoryObservation[]> {
+    const rows = await this.db.all<ObservationRow>(
+      `SELECT observation_id, session_id, sample_id, stage_id, field_key, value_json,
+              dictionary_version, updated_at
+       FROM observations WHERE sample_id = ? ORDER BY stage_id, field_key`, [sampleId]
+    );
+    return rows.map(observationFromRow);
+  }
+
+  async listObservationsForSession(sessionId: string): Promise<readonly SensoryObservation[]> {
+    const rows = await this.db.all<ObservationRow>(
+      `SELECT observation_id, session_id, sample_id, stage_id, field_key, value_json,
+              dictionary_version, updated_at
+       FROM observations WHERE session_id = ? ORDER BY sample_id, stage_id, field_key`, [sessionId]
+    );
+    return rows.map(observationFromRow);
   }
 }
