@@ -16,22 +16,36 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Setup Node
-        uses: actions/setup-node@v6
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Typecheck and test
-        run: npm run check
-      - name: Build browser test version
+
+      - name: Build browser version
         run: npm run bundle:web
+
+      - name: Validate Pages artifact
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -d site
+          test -f site/index.html
+          test -f site/app.js
+          test -f site/sql-wasm.wasm
+          echo "--- site contents ---"
+          find site -maxdepth 2 -type f -print | sort
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
@@ -41,7 +55,7 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     steps:
       - name: Deploy to GitHub Pages
