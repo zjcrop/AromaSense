@@ -40,7 +40,7 @@ function renderRange(spec: SensoryControlSpec, value: unknown, onSave: (value: n
   return wrap;
 }
 
-function renderToggle(spec: SensoryControlSpec, value: unknown, onSave: (value: boolean) => void): HTMLElement {
+function renderToggle(value: unknown, onSave: (value: boolean) => void): HTMLElement {
   const node = button("sensory-toggle", value === true ? "有" : "无", () => {
     const next = node.getAttribute("aria-pressed") !== "true";
     setPressed(node, next);
@@ -92,15 +92,22 @@ function renderTagPicker(
 
     if (!collapsed) {
       const tags = element("div", "flavor-group__tags");
-      for (const descriptor of group.descriptors) {
-        const selectedNow = selected.has(descriptor.id);
+      tags.dataset.groupId = groupId;
+      const byId = new Map(group.descriptors.map((descriptor) => [descriptor.id, descriptor] as const));
+      const orderedIds = preferences.descriptorOrderByGroup[groupId]
+        ?? group.descriptors.map((descriptor) => descriptor.id);
+      for (const descriptorId of orderedIds) {
+        const descriptor = byId.get(descriptorId);
+        if (!descriptor) continue;
         const tag = button("flavor-tag", descriptor.label, () => {
           if (selected.has(descriptor.id)) selected.delete(descriptor.id);
           else selected.add(descriptor.id);
           void callbacks.saveField("flavor_tags", [...selected]);
           setPressed(tag, selected.has(descriptor.id));
         });
-        setPressed(tag, selectedNow);
+        tag.dataset.descriptorId = descriptor.id;
+        tag.draggable = true;
+        setPressed(tag, selected.has(descriptor.id));
         tags.append(tag);
       }
       section.append(tags);
@@ -128,7 +135,7 @@ export function renderSensoryEditor(root: HTMLElement, input: SensoryEditorRende
         field.append(renderRange(spec, value, (next) => save(next)));
         break;
       case "toggle":
-        field.append(renderToggle(spec, value, (next) => save(next)));
+        field.append(renderToggle(value, (next) => save(next)));
         break;
       case "text":
         field.append(renderText(value, (next) => save(next)));
