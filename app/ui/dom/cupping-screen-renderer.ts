@@ -14,6 +14,10 @@ export interface CuppingScreenRendererOptions {
   now(): string;
   voicePlayer?: VoicePromptPlayer;
   onSessionFinished?(sessionId: string, finalRevisionId?: string): void | Promise<void>;
+  onExit?(sessionId: string): void | Promise<void>;
+  onOpenAccount?(sessionId: string): void | Promise<void>;
+  onSync?(): void | Promise<void>;
+  syncLabel?: string;
 }
 
 export class CuppingScreenRenderer {
@@ -22,7 +26,11 @@ export class CuppingScreenRenderer {
   private disposeRailDrag?: () => void;
   private disposeFlavorDrag?: () => void;
   private disposeDescriptorDrags: (() => void)[] = [];
+  private railCompact = false;
+  private readonly expandedSampleIds = new Set<string>();
+  private readonly layoutRoot = element("div", "cupping-layout");
   private readonly railRoot = element("aside", "cupping-layout__rail");
+  private readonly railListRoot = element("div", "cupping-layout__rail-list");
   private readonly mainRoot = element("main", "cupping-layout__main");
   private readonly headerRoot = element("header", "cupping-main__header");
   private readonly editorRoot = element("div", "cupping-main__editor");
@@ -38,9 +46,8 @@ export class CuppingScreenRenderer {
   ) {
     this.root.classList.add("aromasense-cupping");
     this.mainRoot.append(this.headerRoot, this.statusRoot, this.editorRoot, this.footerRoot);
-    const layout = element("div", "cupping-layout");
-    layout.append(this.railRoot, this.mainRoot);
-    this.root.append(layout);
+    this.layoutRoot.append(this.railRoot, this.mainRoot);
+    this.root.append(this.layoutRoot);
   }
 
   async initialize(sessionId: string): Promise<void> {
@@ -62,6 +69,7 @@ export class CuppingScreenRenderer {
   }
 
   private async select(sampleId: string, stageId: StageId): Promise<void> {
+    this.expandedSampleIds.add(sampleId);
     await this.run(async () => {
       this.state = await this.controller.select(sampleId, stageId, this.options.now());
       if (this.state.voicePrompt) this.options.voicePlayer?.play(this.state.voicePrompt);
@@ -92,17 +100,91 @@ export class CuppingScreenRenderer {
     this.statusRoot.hidden = text.length === 0;
   }
 
+  private async leaveSession(): Promise<void> {
+    const state = this.state;
+    if (!state) return;
+    const confirmed = window.confirm("退出当前杯测？已输入内容会保留在本地，下次可从“继续未完成杯测”恢复。 ");
+    if (!confirmed) return;
+    this.setBusy(true);
+    try {
+      await this.controller.leaveSession();
+      this.options.voicePlayer?.cancel();
+      await this.options.onExit?.(state.sessionId);
+    } catch (error) {
+      this.setStatus(`退出前保存失败：${error instanceof Error ? error.message : String(error)}`, true);
+    } finally {
+      this.setBusy(false);
+    }
+  }
+
+  private async openAccount(): Promise<void> {
+    const state = this.state;
+    if (!state) return;
+    this.setBusy(true);
+    try {
+      await this.controller.leaveSession();
+      this.options.voicePlayer?.cancel();
+      await this.options.onOpenAccount?.(state.sessionId);
+    } catch (error) {
+      this.setStatus(`打开账户前保存失败：${error instanceof Error ? error.message : String(error)}`, true);
+    } finally {
+      this.setBusy(false);
+    }
+  }
+
+  private async syncNow(): Promise<void> {
+    this.setBusy(true);
+    try {
+      await this.options.onSync?.();
+      this.setStatus("同步任务已执行；未配置云端或未登录时，本地记录保持不变。 ");
+    } catch (error) {
+      this.setStatus(`同步失败：${error instanceof Error ? error.message : String(error)}`, true);
+    } finally {
+      this.setBusy(false);
+    }
+  }
+
+  private renderRail(state: CuppingScreenState): void {
+    clearElement(this.railRoot);
+    this.layoutRoot.classList.toggle("is-rail-compact", this.railCompact);
+
+    const tools = element("div", "cupping-rail-tools");
+    const toggle = button("cupping-rail-tools__toggle", this.railCompact ? "›" : "‹", async () => {
+      this.railCompact = !this.railCompact;
+      await this.render();
+    });
+    toggle.title = this.railCompact ? "展开样品便签栏" : "收起样品便签栏";
+    tools.append(toggle);
+    if (!this.railCompact) {
+      tools.append(
+        button("cupping-rail-tools__action", "账户", () => this.openAccount()),
+        button("cupping-rail-tools__action", this.options.syncLabel ?? "同步", () => this.syncNow())
+      );
+    }
+    this.railRoot.append(tools, this.railListRoot);
+
+    renderSampleRail(this.railListRoot, state.rail, {
+      select: (sampleId, stageId) => this.select(sampleId, stageId),
+      toggleExpanded: async (sampleId) => {
+        if (this.expandedSampleIds.has(sampleId)) this.expandedSampleIds.delete(sampleId);
+        else this.expandedSampleIds.add(sampleId);
+        await this.render();
+      }
+    }, {
+      compact: this.railCompact,
+      expandedSampleIds: this.expandedSampleIds
+    });
+  }
+
   private async render(): Promise<void> {
     const state = this.state;
     if (!state) return;
 
     this.disposeDragHandlers();
-    renderSampleRail(this.railRoot, state.rail, {
-      select: (sampleId, stageId) => this.select(sampleId, stageId)
-    });
+    this.renderRail(state);
 
-    if (state.sessionStatus !== "completed" && state.sessionStatus !== "archived") {
-      this.disposeRailDrag = attachDragReorder(this.railRoot, {
+    if (!this.railCompact && state.sessionStatus !== "completed" && state.sessionStatus !== "archived") {
+      this.disposeRailDrag = attachDragReorder(this.railListRoot, {
         itemSelector: ".sample-rail__item",
         itemIdAttribute: "data-sample-id",
         onReorder: async (ids) => {
@@ -124,6 +206,7 @@ export class CuppingScreenRenderer {
         element("p", "cupping-empty__text", state.finalRevisionId ? `最终修订：${state.finalRevisionId}` : "本地记录已锁定为只读。")
       );
       this.editorRoot.append(done);
+      this.footerRoot.append(button("cupping-nav cupping-nav--exit", "返回", () => this.options.onExit?.(state.sessionId)));
       return;
     }
 
@@ -131,9 +214,10 @@ export class CuppingScreenRenderer {
       const empty = element("section", "cupping-empty");
       empty.append(
         element("h2", "cupping-empty__title", "选择一个样品开始记录"),
-        element("p", "cupping-empty__text", "左侧样品可拖动排序；点击样品或温段进入记录。")
+        element("p", "cupping-empty__text", "左侧便签点击进入样品，展开后可直接切换温段；便签栏可整体收起。")
       );
       this.editorRoot.append(empty);
+      this.footerRoot.append(button("cupping-nav cupping-nav--exit", "退出杯测", () => this.leaveSession()));
       return;
     }
 
@@ -207,19 +291,18 @@ export class CuppingScreenRenderer {
       );
     }
 
+    const exit = button("cupping-nav cupping-nav--exit", "退出杯测", () => this.leaveSession());
     const previous = button("cupping-nav cupping-nav--previous", "上一步", () =>
       this.run(async () => { this.state = await this.controller.goPrevious(this.options.now()); })
     );
-    const complete = button("cupping-nav cupping-nav--complete", "完成本段", () =>
-      this.run(async () => { this.state = await this.controller.completeStage(this.options.now()); })
-    );
-    const next = button("cupping-nav cupping-nav--next", "下一步", () =>
+    const nextLabel = active.context.stageId === "final" ? "完成本样品" : "下一步";
+    const next = button("cupping-nav cupping-nav--next", nextLabel, () =>
       this.run(async () => {
         this.state = await this.controller.goNext(this.options.now());
         if (this.state.voicePrompt) this.options.voicePlayer?.play(this.state.voicePrompt);
       })
     );
-    this.footerRoot.append(previous, complete, next);
+    this.footerRoot.append(exit, previous, next);
 
     if (this.controller.canFinishSession()) {
       const finish = button("cupping-nav cupping-nav--finish", "结束杯测并生成备份", () =>
