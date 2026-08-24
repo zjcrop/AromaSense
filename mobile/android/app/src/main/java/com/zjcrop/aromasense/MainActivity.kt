@@ -22,6 +22,7 @@ class MainActivity : Activity() {
             domStorageEnabled = true
             allowFileAccess = true
             allowContentAccess = false
+            allowUniversalAccessFromFileURLs = true
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT
         }
@@ -34,7 +35,17 @@ class MainActivity : Activity() {
             }
         }
         setContentView(webView)
-        webView.loadUrl("file:///android_asset/www/index.html")
+
+        if (savedInstanceState == null) {
+            webView.loadUrl("file:///android_asset/www/index.html")
+        } else {
+            webView.restoreState(savedInstanceState)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        webView.saveState(outState)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onBackPressed() {
