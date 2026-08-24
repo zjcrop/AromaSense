@@ -25,6 +25,10 @@ jobs:
         run: npm run check
       - name: Bundle WebView application
         run: npm run bundle:web
+      - name: Install Worker dependencies
+        run: npm install --prefix cloud/worker --no-audit --no-fund
+      - name: Typecheck Cloudflare Worker
+        run: npm --prefix cloud/worker run typecheck
 
   android-debug:
     runs-on: ubuntu-latest
@@ -52,6 +56,8 @@ jobs:
         with:
           gradle-version: '9.5.0'
       - name: Assemble B0.1.a debug APK
+        env:
+          AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
         run: gradle -p mobile/android :app:assembleDebug
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
