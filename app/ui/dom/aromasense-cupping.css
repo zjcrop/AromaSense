@@ -49,11 +49,17 @@
 .stage-chip--completed.stage-chip--white, .stage-chip--active.stage-chip--white { border-color: var(--as-white); color: var(--as-white); }
 .stage-chip--completed { background: rgba(255,255,255,.05); }
 
+.sensory-layer { margin: 18px 0 4px; padding: 10px 12px; border-left: 2px solid var(--as-gold); background: rgba(185,153,90,.07); border-radius: 0 10px 10px 0; }
+.sensory-layer--affective { border-left-color: var(--as-blue); background: rgba(122,168,216,.07); }
+.sensory-layer__title { margin: 0; font-size: 14px; }
+.sensory-layer__note { margin: 4px 0 0; font-size: 10px; line-height: 1.5; color: var(--as-muted); }
 .sensory-field { padding: 13px 0 15px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.sensory-field[data-assessment-layer="affective"] .sensory-range__value { border-color: rgba(122,168,216,.55); color: var(--as-blue); }
 .sensory-field__label { display: block; margin-bottom: 10px; font-size: 13px; font-weight: 650; }
 .sensory-field__label[data-required="true"]::after { content: " · 必填"; color: var(--as-gold); font-size: 10px; font-weight: 400; }
 .sensory-range { display: grid; grid-template-columns: 1fr 44px; gap: 12px; align-items: center; }
 .sensory-range__input { width: 100%; accent-color: var(--as-gold); }
+.sensory-field[data-assessment-layer="affective"] .sensory-range__input { accent-color: var(--as-blue); }
 .sensory-range__value { text-align: center; border: 1px solid var(--as-line); border-radius: 7px; padding: 4px; color: var(--as-gold); }
 .sensory-toggle { min-width: 80px; border: 1px solid var(--as-line); border-radius: 999px; padding: 8px 14px; background: transparent; color: var(--as-muted); }
 .sensory-toggle[aria-pressed="true"] { background: var(--as-gold); color: #111; }
