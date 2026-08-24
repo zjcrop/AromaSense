@@ -36,7 +36,8 @@ export function renderSampleRail(
   root.classList.toggle("is-compact", Boolean(options.compact));
 
   for (const item of items) {
-    const expanded = !options.compact && (options.expandedSampleIds?.has(item.sampleId) ?? item.active);
+    const explicitlyExpanded = options.expandedSampleIds?.has(item.sampleId) ?? false;
+    const expanded = !options.compact && (explicitlyExpanded || item.active);
     const card = element(
       "article",
       `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${expanded ? " is-expanded" : " is-collapsed"}`
