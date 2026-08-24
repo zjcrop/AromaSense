@@ -28,6 +28,8 @@ export interface AromaSenseDomAppOptions {
   cloudBaseUrl?: string;
 }
 
+type RootMode = "setup" | "cupping" | "account" | "empty";
+
 export class AromaSenseDomApp {
   private screen?: CuppingScreenRenderer;
   private readonly preferences: UserPreferencesRepository;
@@ -70,7 +72,7 @@ export class AromaSenseDomApp {
   async showAccount(returnSessionId?: string): Promise<void> {
     this.screen?.dispose();
     this.screen = undefined;
-    this.root.replaceChildren();
+    this.setRootMode("account");
     await new AccountRenderer(this.root, this.authClient, {
       onAuthenticated: async () => {
         await this.syncPending();
@@ -89,7 +91,7 @@ export class AromaSenseDomApp {
   async showSetup(): Promise<void> {
     this.screen?.dispose();
     this.screen = undefined;
-    this.root.replaceChildren();
+    this.setRootMode("setup");
     const localRepository = new LocalCuppingRepository(this.db);
     const recentSessions = await new RecentSessionReader(this.db).list(10);
     const current = await this.authClient?.current();
@@ -115,7 +117,8 @@ export class AromaSenseDomApp {
 
   async openSession(sessionId: string): Promise<void> {
     this.screen?.dispose();
-    this.root.replaceChildren();
+    this.screen = undefined;
+    this.setRootMode("cupping");
 
     const repository = new LocalCuppingRepository(this.db);
     const editor = new CuppingSessionController(repository, this.options.observationIdFactory);
@@ -160,6 +163,15 @@ export class AromaSenseDomApp {
   dispose(): void {
     this.screen?.dispose();
     this.screen = undefined;
+    this.setRootMode("empty");
+  }
+
+  private setRootMode(mode: RootMode): void {
     this.root.replaceChildren();
+    this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen");
+    if (mode === "setup") this.root.classList.add("batch-setup");
+    if (mode === "cupping") this.root.classList.add("aromasense-cupping");
+    if (mode === "account") this.root.classList.add("account-screen");
+    this.root.dataset.screen = mode;
   }
 }
