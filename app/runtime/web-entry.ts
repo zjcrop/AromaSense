@@ -1,5 +1,6 @@
 import localSchema from "../storage/0001_local_schema.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
+import { LocalMigrationRunner } from "../storage/local-migration-runner";
 import { AromaSenseDomApp } from "./dom-app";
 import { PRODUCT_VERSION } from "../version";
 
@@ -11,7 +12,10 @@ async function main(): Promise<void> {
   if (version) version.textContent = PRODUCT_VERSION;
 
   const db = AndroidSQLiteDriver.fromWindow();
-  db.exec(localSchema);
+  await new LocalMigrationRunner(db).apply(
+    [{ id: 1, name: "local_schema_v1", sql: localSchema }],
+    new Date().toISOString()
+  );
 
   const app = new AromaSenseDomApp(root, db, {
     now: () => new Date().toISOString(),
