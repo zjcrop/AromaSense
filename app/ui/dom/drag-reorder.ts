@@ -8,8 +8,15 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
   let dragging: HTMLElement | undefined;
 
   const onDragStart = (event: DragEvent): void => {
-    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(options.itemSelector);
-    if (!target) return;
+    const eventTarget = event.target as HTMLElement | null;
+    const target = eventTarget?.closest<HTMLElement>(options.itemSelector);
+    if (!target || target.parentElement !== container) return;
+
+    // If a nested draggable (for example a flavor tag inside a draggable group)
+    // originated the event, the outer reorder scope must ignore it.
+    const nearestDraggable = eventTarget?.closest<HTMLElement>("[draggable='true']");
+    if (nearestDraggable && nearestDraggable !== target) return;
+
     dragging = target;
     target.classList.add("is-dragging");
     event.dataTransfer?.setData("text/plain", target.getAttribute(options.itemIdAttribute) ?? "");
@@ -31,6 +38,7 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
     dragging.classList.remove("is-dragging");
     dragging = undefined;
     const orderedIds = [...container.querySelectorAll<HTMLElement>(options.itemSelector)]
+      .filter((item) => item.parentElement === container)
       .map((item) => item.getAttribute(options.itemIdAttribute))
       .filter((id): id is string => Boolean(id));
     void options.onReorder(orderedIds);
