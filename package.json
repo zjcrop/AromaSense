@@ -9,6 +9,9 @@
     "test": "npm run build && node --test dist/tests",
     "check": "npm run typecheck && npm test"
   },
+  "dependencies": {
+    "sql.js": "1.14.2"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "esbuild": "0.28.2",
