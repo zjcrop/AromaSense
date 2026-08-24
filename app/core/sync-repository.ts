@@ -11,13 +11,24 @@ export interface SyncRepository {
   getRevision(revisionId: string): Promise<RevisionEnvelope | null>;
 }
 
+export interface AccessTokenProvider {
+  token(): Promise<string | undefined>;
+}
+
 export class CloudflareSyncRepository implements SyncRepository {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly accessTokenProvider: AccessTokenProvider
+  ) {}
 
   async uploadRevision(revision: RevisionEnvelope): Promise<UploadRevisionResult> {
+    const token = await this.requireToken();
     const response = await fetch(`${this.baseUrl}/api/v1/revisions`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`
+      },
       body: JSON.stringify(revision)
     });
 
@@ -32,7 +43,10 @@ export class CloudflareSyncRepository implements SyncRepository {
   }
 
   async getRevision(revisionId: string): Promise<RevisionEnvelope | null> {
-    const response = await fetch(`${this.baseUrl}/api/v1/revisions/${encodeURIComponent(revisionId)}`);
+    const token = await this.requireToken();
+    const response = await fetch(`${this.baseUrl}/api/v1/revisions/${encodeURIComponent(revisionId)}`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`SYNC_HTTP_${response.status}`);
     const body = (await response.json()) as { ok: true; revision: Record<string, unknown> };
@@ -49,5 +63,11 @@ export class CloudflareSyncRepository implements SyncRepository {
       contentHash: row.content_hash as string,
       payload: JSON.parse(row.payload_json as string) as Record<string, unknown>
     };
+  }
+
+  private async requireToken(): Promise<string> {
+    const token = await this.accessTokenProvider.token();
+    if (!token) throw new Error("SYNC_AUTH_REQUIRED");
+    return token;
   }
 }
