@@ -1,5 +1,5 @@
 import type { StageId } from "../../shared/protocol/aromasense-v1";
-import { fieldsForStage, type SensoryFieldDefinition } from "../core/sensory-dictionary-v1";
+import { fieldsForStage, type SensoryAssessmentLayer, type SensoryFieldDefinition } from "../core/sensory-dictionary-v1";
 
 export type SensoryControlKind = "slider" | "score" | "toggle" | "text" | "tag-picker";
 
@@ -7,6 +7,7 @@ export interface SensoryControlSpec {
   fieldKey: string;
   label: string;
   kind: SensoryControlKind;
+  assessmentLayer: SensoryAssessmentLayer;
   required: boolean;
   min?: number;
   max?: number;
@@ -15,16 +16,11 @@ export interface SensoryControlSpec {
 
 function controlKind(field: SensoryFieldDefinition): SensoryControlKind {
   switch (field.valueKind) {
-    case "intensity":
-      return "slider";
-    case "score":
-      return "score";
-    case "boolean":
-      return "toggle";
-    case "text":
-      return "text";
-    case "tags":
-      return "tag-picker";
+    case "intensity": return "slider";
+    case "score": return "score";
+    case "boolean": return "toggle";
+    case "text": return "text";
+    case "tags": return "tag-picker";
   }
 }
 
@@ -33,6 +29,7 @@ export function controlsForStage(stageId: StageId): readonly SensoryControlSpec[
     fieldKey: field.key,
     label: field.label,
     kind: controlKind(field),
+    assessmentLayer: field.assessmentLayer,
     required: field.required ?? false,
     min: field.min,
     max: field.max,
