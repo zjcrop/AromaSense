@@ -45,16 +45,23 @@ Updated: 2026-08-24
 
 ## Phase 4 — Cupping UI
 - [x] batch sample setup domain support
-- [x] left sample rail state model
+- [x] left sample rail state model and DOM renderer
 - [x] lightweight all-sample stage progress reader
 - [x] reusable screen/controller orchestration
-- [x] collapsed flavor groups and persistent group ordering state
+- [x] responsive visual interaction shell
+- [x] dictionary-driven slider/score/toggle/text/tag controls
+- [x] persistent flavor group collapse and group ordering
+- [x] persistent descriptor/tag ordering within groups
+- [x] nested drag gesture isolation
 - [x] preparation/aroma/high/mid/low/final stage progress model
-- [x] voice prompt event layer
-- [ ] actual visual renderer / interaction shell
-- [ ] drag gesture integration for sample/tag ordering
-- [ ] reusable sensory control rendering from dictionary definitions
-- [ ] radar/summary and scrolling validation
+- [x] browser voice prompt adapter
+- [x] radar summary aggregation model and canvas renderer
+- [x] scroll-safe editor/radar layout implemented
+- [ ] runtime application composition/bootstrap
+- [ ] actual batch sample setup visual screen
+- [ ] radar/summary integration into final-stage navigation
+- [ ] touch-device gesture acceptance validation
+- [ ] small-screen scrolling acceptance validation
 
 ## Phase 5 — Release validation
 - [ ] offline-only full session
@@ -69,8 +76,8 @@ Updated: 2026-08-24
 
 Phase 1 domain core is structurally complete.
 
-Phase 2 now includes a real Node SQLite reference adapter and executable test sources for atomic transaction rollback, reorder constraints, serialized observation writes, and database close/reopen recovery. Do not call these tests passing until an actual CI run/result is observed.
+Phase 2 includes a real Node SQLite reference adapter and executable test sources for atomic transaction rollback, reorder constraints, serialized observation writes, and database close/reopen recovery. Do not call these tests passing until an actual CI run/result is observed.
 
-Phase 4 has progressed through the framework-neutral application/controller layer. The next UI task is the actual renderer and gesture/control shell; it should consume the existing screen controller rather than duplicate persistence or stage logic inside components.
+Phase 4 now contains an actual framework-free DOM interaction shell rather than only view models. It renders the sample rail, sensory controls, persistent group/tag ordering, stage navigation, error state and voice events. The radar summary model/renderer exists and the main editor is scroll-safe in CSS. The remaining UI work is application bootstrap/runtime composition, the batch-setup visual screen, final-stage summary integration, and real touch/small-screen acceptance testing.
 
 Do not mark Phase 3 complete until the deployed Worker URL and real D1 binding/migration results are observed. UI development can proceed against the local repository contract without waiting for cloud availability.
