@@ -14,14 +14,19 @@ const schema = readFileSync("app/storage/0001_local_schema.sql", "utf8");
 
 class FakeRemote implements SyncRepository {
   public uploads = 0;
-  constructor(private readonly mode: "ok" | "fail" | "conflict" = "ok") {}
+  constructor(private readonly mode: "ok" | "already" | "fail" | "conflict" = "ok") {}
   async uploadRevision(revision: RevisionEnvelope): Promise<UploadRevisionResult> {
     this.uploads += 1;
     if (this.mode === "fail") throw new Error("NETWORK_DOWN");
     if (this.mode === "conflict") {
       return { ok: false, error: "REVISION_CONFLICT", revisionId: revision.revisionId, existingHash: "different" };
     }
-    return { ok: true, revisionId: revision.revisionId, contentHash: revision.contentHash, status: "created" };
+    return {
+      ok: true,
+      revisionId: revision.revisionId,
+      contentHash: revision.contentHash,
+      status: this.mode === "already" ? "already_present" : "created"
+    };
   }
   async getRevision(): Promise<RevisionEnvelope | null> { return null; }
 }
@@ -54,6 +59,19 @@ test("sync engine uploads pending revision and marks it synced", async () => {
     const engine = new SyncEngine(f.queue, remote, { now: () => new Date("2026-08-24T13:31:00Z") });
     const result = await engine.runOnce();
     assert.deepEqual(result, { attempted: 1, synced: 1, conflicted: 0, failed: 0 });
+    assert.equal((await f.queue.counts()).synced, 1);
+  } finally { f.db.close(); rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("already-present ACK is treated as successful idempotent retry", async () => {
+  const f = fixture();
+  try {
+    await f.queue.enqueue(await revision("r-idempotent", 0), "q-idempotent", "2026-08-24T21:30:00+08:00");
+    const remote = new FakeRemote("already");
+    const engine = new SyncEngine(f.queue, remote, { now: () => new Date("2026-08-24T13:31:00Z") });
+    const result = await engine.runOnce();
+    assert.equal(result.synced, 1);
+    assert.equal(result.conflicted, 0);
     assert.equal((await f.queue.counts()).synced, 1);
   } finally { f.db.close(); rmSync(f.dir, { recursive: true, force: true }); }
 });
