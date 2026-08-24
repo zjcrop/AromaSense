@@ -51,7 +51,8 @@ export class AndroidSQLiteDriver implements SQLiteDriver {
   }
 
   async get<T>(sql: string, params: readonly SqlValue[] = []): Promise<T | undefined> {
-    return parse<T | undefined>(this.bridge.get(sql, JSON.stringify(params)));
+    const value = parse<T | null>(this.bridge.get(sql, JSON.stringify(params)));
+    return value ?? undefined;
   }
 
   async all<T>(sql: string, params: readonly SqlValue[] = []): Promise<readonly T[]> {
