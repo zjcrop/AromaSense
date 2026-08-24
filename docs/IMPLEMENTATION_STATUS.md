@@ -13,16 +13,17 @@ Updated: 2026-08-24
 - [x] Single active `sample + stage` editing context model
 - [x] Deterministic stage state transitions
 - [x] Provider-neutral SyncRepository boundary
-- [ ] Sensory dictionary v1
-- [ ] Sample batch import/reorder domain service
-- [ ] Session lifecycle service
+- [x] Sensory dictionary v1 (`sensory-dictionary/1.0`)
+- [x] Sample batch import/reorder domain service
+- [x] Session lifecycle service
 
 ## Phase 2 — Local-first persistence
 - [x] SQLite production schema v1
 - [x] observations / stage state / revisions / sync queue
 - [x] deterministic canonical revision serializer
 - [x] SHA-256 revision hashing
-- [ ] concrete SQLite repository implementation
+- [x] transactional local cupping repository over SQLite driver contract
+- [ ] runtime SQLite driver adapter
 - [ ] transaction tests
 - [ ] crash/restart recovery tests
 
@@ -57,5 +58,9 @@ Updated: 2026-08-24
 - [ ] schema migration compatibility
 
 ## Current gate
+
+Phase 1 domain core is now structurally complete enough for UI work.
+
+Phase 2 has a concrete LocalCuppingRepository that uses the production schema through a small SQLite driver contract, but the application runtime still needs a platform-specific driver adapter and real transaction/recovery tests before local persistence can be called release-ready.
 
 Do not mark Phase 3 complete until the deployed Worker URL and real D1 binding/migration results are observed. UI development can proceed against the local repository contract without waiting for cloud availability.
