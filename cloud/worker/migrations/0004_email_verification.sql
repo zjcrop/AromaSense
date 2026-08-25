@@ -1,6 +1,11 @@
 ALTER TABLE users ADD COLUMN email_verified_at TEXT;
 ALTER TABLE users ADD COLUMN verification_last_sent_at TEXT;
 
+-- Accounts created before email verification existed are grandfathered as verified.
+UPDATE users
+SET email_verified_at = COALESCE(email_verified_at, created_at)
+WHERE email_verified_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS email_verification_tokens (
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
