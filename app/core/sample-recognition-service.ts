@@ -1,12 +1,12 @@
 import { buildOCRLayoutDocument, type OCRLineInput } from "./ocr-layout-model";
 import {
-  LUCKYBEAN_RECOGNITION_COMPAT_VERSION,
-  loadLuckyBeanRecognitionBook,
-  parseLuckyBeanSemanticText,
-  type LuckyBeanSemanticResult
-} from "./luckybean-recognition-compat";
-import { decideSampleFields, type SampleFieldDecisionResult } from "./sample-field-decision-engine";
-import { segmentSamples, type SampleLayoutType } from "./sample-layout-segmenter";
+  loadBundledLuckyBeanRecognitionBook,
+  luckyBeanCoreVersion,
+  requireLuckyBeanRecognitionCore,
+  type LuckyBeanAnalysisField,
+  type LuckyBeanRecognitionAnalysis
+} from "./luckybean-upstream-adapter";
+import { segmentSamples, type SampleLayoutType, type SampleLayoutSegment } from "./sample-layout-segmenter";
 
 export interface SampleRecognitionProgress {
   index: number;
@@ -240,28 +240,69 @@ function ocrLines(result: NativeRecognitionResult): OCRLineInput[] {
   }));
 }
 
-function metadataFields(decision: SampleFieldDecisionResult): Record<string, string> {
-  const accepted = { ...decision.accepted };
-  if (accepted.flavor) {
-    accepted.flavorNotes = accepted.flavor;
-    delete accepted.flavor;
-  }
-  return accepted;
+const UPSTREAM_FIELD_MAP: Readonly<Record<string, string>> = Object.freeze({
+  countryCode: "country",
+  regionCode: "region",
+  entityCode: "farm",
+  varietyCode: "variety",
+  processCode: "process",
+  roastCode: "roast",
+  roastDate: "roastDate",
+  harvestYear: "harvest",
+  roastColor: "roastColor",
+  roasterName: "roaster",
+  altitude: "altitude",
+  initialWeight: "weight",
+  flavorCodes: "flavorNotes"
+});
+
+const PARSED_SCALAR_FIELDS = [
+  "productionDate",
+  "packDate",
+  "bestBefore",
+  "expiryDate",
+  "lot",
+  "grade"
+] as const;
+
+function targetField(field: unknown): string {
+  const source = String(field ?? "");
+  return UPSTREAM_FIELD_MAP[source] ?? source;
 }
 
-function normalizedDecisionField(field: string | undefined): string {
-  return field === "flavor" ? "flavorNotes" : String(field ?? "");
+function analysisFields(analysis: LuckyBeanRecognitionAnalysis): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const item of analysis.fields ?? []) {
+    const key = targetField(item.field);
+    const value = cleanText(item.standardValue ?? item.rawValue);
+    if (key && value) fields[key] = value;
+  }
+  const parsed = analysis.parsed ?? {};
+  for (const key of PARSED_SCALAR_FIELDS) {
+    const value = parsed[key];
+    if (value !== undefined && value !== null && cleanText(value)) fields[key] = cleanText(value);
+  }
+  return fields;
 }
 
-function mergeLuckyBeanFields(
-  baseline: Record<string, string>,
-  lucky: LuckyBeanSemanticResult
-): Record<string, string> {
-  const enhanced = { ...lucky.fields };
-  if (enhanced.farm && [baseline.farm, baseline.station, baseline.producer, baseline.cooperative].some(Boolean)) {
-    delete enhanced.farm;
-  }
-  return { ...baseline, ...enhanced };
+function analysisReview(analysis: LuckyBeanRecognitionAnalysis): Array<Record<string, unknown>> {
+  return (analysis.fields ?? []).filter((item) => item.status === "review").map((item) => ({
+    field: targetField(item.field),
+    value: cleanText(item.standardValue ?? item.rawValue),
+    confidence: Number(item.confidence ?? 0),
+    candidates: (item.resolution?.candidates ?? []).map((candidate) => ({
+      value: cleanText(candidate.value),
+      normalizedValue: cleanText(candidate.value),
+      score: Number(candidate.confidence ?? candidate.score ?? 0)
+    }))
+  }));
+}
+
+function analysisConfidence(analysis: LuckyBeanRecognitionAnalysis, fallback: number): number {
+  const values = (analysis.fields ?? [])
+    .map((item) => Number(item.confidence))
+    .filter((value) => Number.isFinite(value));
+  return values.length ? Math.max(...values) : fallback;
 }
 
 function likelyLabel(fields: Record<string, string>, sampleIndex: number): string {
@@ -271,33 +312,70 @@ function likelyLabel(fields: Record<string, string>, sampleIndex: number): strin
   return `待确认样品 ${String(sampleIndex + 1).padStart(2, "0")}`;
 }
 
+function luckyBeanBlocks(segment: SampleLayoutSegment, imageId: string) {
+  return segment.lines.map((line, index) => ({
+    id: line.id,
+    imageId,
+    imageRole: "front",
+    order: index,
+    text: line.text,
+    confidence: line.confidence,
+    polygon: line.polygon.length
+      ? line.polygon
+      : [
+          { x: line.box.left, y: line.box.top },
+          { x: line.box.right, y: line.box.top },
+          { x: line.box.right, y: line.box.bottom },
+          { x: line.box.left, y: line.box.bottom }
+        ]
+  }));
+}
+
+function analyzeWithLuckyBean(
+  segment: SampleLayoutSegment,
+  imageId: string,
+  engine: string
+): LuckyBeanRecognitionAnalysis {
+  const core = requireLuckyBeanRecognitionCore();
+  const book = loadBundledLuckyBeanRecognitionBook();
+  const document = core.createRecognitionDocument({
+    images: [{ id: imageId, role: "front", roleLabel: "样品图片" }],
+    blocks: luckyBeanBlocks(segment, imageId),
+    engine,
+    fullText: segment.text
+  });
+  return core.analyzeRecognitionDocument(document, book);
+}
+
 export class SampleRecognitionService {
   async warmup(): Promise<{ engine: string; ready: boolean; message: string }> {
-    const knowledge = loadLuckyBeanRecognitionBook().catch(() => undefined);
+    try {
+      requireLuckyBeanRecognitionCore();
+      loadBundledLuckyBeanRecognitionBook();
+    } catch (error) {
+      return { engine: "unavailable", ready: false, message: error instanceof Error ? error.message : String(error) };
+    }
+    const version = luckyBeanCoreVersion();
     if (typeof runtimeWindow().AromaSenseRecognitionBridge?.recognizeSampleImage === "function") {
-      const resolved = await knowledge;
       return {
-        engine: "android-mlkit+luckybean",
+        engine: "android-mlkit+luckybean-production",
         ready: true,
-        message: resolved
-          ? `Android 本地图像识别 + LuckyBean ${resolved.source === "remote-codebook" ? "完整编码表" : "缓存/回退编码表"}已就绪`
-          : "Android 本地图像识别已就绪"
+        message: `Android 本地图像识别 + LuckyBean 正式识别核心 ${version} 已就绪`
       };
     }
     if (typeof runtimeWindow().TextDetector === "function") {
-      const resolved = await knowledge;
       return {
-        engine: "browser-text-detector+luckybean",
+        engine: "browser-text-detector+luckybean-production",
         ready: true,
-        message: resolved ? "浏览器图像识别 + LuckyBean 语义解析已就绪" : "浏览器图像识别已就绪"
+        message: `浏览器图像识别 + LuckyBean 正式识别核心 ${version} 已就绪`
       };
     }
     try {
-      const [, resolved] = await Promise.all([ensureTesseractWorker(), knowledge]);
+      await ensureTesseractWorker();
       return {
-        engine: `tesseract.js-${TESSERACT_VERSION}+luckybean`,
+        engine: `tesseract.js-${TESSERACT_VERSION}+luckybean-production`,
         ready: true,
-        message: resolved ? "网页图像识别 + LuckyBean 语义解析已就绪" : "网页图像识别已就绪"
+        message: `网页图像识别 + LuckyBean 正式识别核心 ${version} 已就绪`
       };
     } catch (error) {
       return { engine: "unavailable", ready: false, message: error instanceof Error ? error.message : String(error) };
@@ -306,7 +384,6 @@ export class SampleRecognitionService {
 
   async recognizePage(file: File, index = 0): Promise<RecognizedPage> {
     const id = `sample-image-${Date.now().toString(36)}-${index}`;
-    const knowledgePromise = loadLuckyBeanRecognitionBook();
     let result = await recognizeNative(file, id);
     if (!result) result = await recognizeTextDetector(file);
     if (!result || !cleanText(result.fullText ?? result.text)) result = await recognizeTesseract(file);
@@ -322,37 +399,24 @@ export class SampleRecognitionService {
     });
     const layout = segmentSamples(document);
     const engine = result.engine ?? "OCR";
-    const knowledge = await knowledgePromise;
-    const samples = await Promise.all(layout.segments.map(async (segment, sampleIndex) => {
-      const decision = decideSampleFields(segment);
-      const lucky = parseLuckyBeanSemanticText(segment.text, knowledge.book, knowledge.source);
-      const fields = mergeLuckyBeanFields(metadataFields(decision), lucky);
-      const luckyResolved = new Set(
-        Object.keys(lucky.fields).filter((key) => Number(lucky.confidence[key] ?? 0) >= 0.86)
-      );
-      const review = decision.review.filter((item) => !luckyResolved.has(normalizedDecisionField(item.field)));
-      const luckyNeedsReview = Object.keys(lucky.fields).some((key) => Number(lucky.confidence[key] ?? 0) < 0.86);
-      const semanticConfidence = Object.keys(lucky.confidence).length
-        ? Math.max(...Object.values(lucky.confidence))
-        : 0;
-      const confidence = Math.min(
-        segment.confidence,
-        Math.max(
-          semanticConfidence,
-          decision.decisions.length ? Math.max(...decision.decisions.map((item) => item.confidence)) : Number(result.confidence ?? 0.55)
-        )
-      );
-      const requiresReview = layout.requiresReview || review.length > 0 || luckyNeedsReview || !Object.keys(fields).length;
+    const samples = layout.segments.map((segment, sampleIndex) => {
+      const analysis = analyzeWithLuckyBean(segment, id, engine);
+      const fields = analysisFields(analysis);
+      const review = analysisReview(analysis);
+      const semanticConfidence = analysisConfidence(analysis, Number(result.confidence ?? 0.55));
+      const confidence = Math.min(segment.confidence, semanticConfidence);
+      const requiresReview = layout.requiresReview || Number(analysis.reviewCount ?? 0) > 0 || !Object.keys(fields).length;
+      const upstreamDocument = analysis.document ?? {};
       return {
         label: likelyLabel(fields, sampleIndex),
         rawText: segment.text,
-        engine: `${engine}+LuckyBean-${LUCKYBEAN_RECOGNITION_COMPAT_VERSION}`,
+        engine: `${engine}+${String(analysis.pipelineVersion ?? luckyBeanCoreVersion())}`,
         confidence,
         requiresReview,
         metadata: {
           ...fields,
           recognition: {
-            schemaVersion: "aromasense-recognition/2.1",
+            schemaVersion: "aromasense-recognition/3.0",
             source: "photo",
             fileName: file.name,
             mimeType: file.type,
@@ -363,16 +427,16 @@ export class SampleRecognitionService {
             segmentId: segment.id,
             segmentBox: segment.box,
             rawText: segment.text,
-            acceptedFields: decision.accepted,
             review,
-            rejected: decision.rejected,
-            luckyBeanCompat: {
-              version: LUCKYBEAN_RECOGNITION_COMPAT_VERSION,
-              source: lucky.source,
-              codebookVersion: lucky.codebookVersion,
-              fields: lucky.fields,
-              confidence: lucky.confidence,
-              evidence: lucky.evidence
+            luckyBeanUpstream: {
+              pipelineVersion: analysis.pipelineVersion,
+              documentSchemaVersion: upstreamDocument.schemaVersion,
+              parserVersion: upstreamDocument.parserVersion,
+              blockCount: Array.isArray(upstreamDocument.blocks) ? upstreamDocument.blocks.length : 0,
+              relationCount: Array.isArray(upstreamDocument.relations) ? upstreamDocument.relations.length : 0,
+              resolvedCount: analysis.resolvedCount,
+              reviewCount: analysis.reviewCount,
+              semanticText: analysis.semanticText
             },
             evidenceLines: segment.lines.map((line) => ({
               id: line.id,
@@ -384,7 +448,7 @@ export class SampleRecognitionService {
           }
         }
       } satisfies RecognizedSample;
-    }));
+    });
     if (!samples.length) throw new Error("未能从图片中形成有效样品区块，请重新拍摄或手工添加");
     return {
       fileName: file.name,
@@ -417,7 +481,9 @@ export class SampleRecognitionService {
           total: files.length,
           fileName: file.name,
           status: "completed",
-          message: recognized.samples.length > 1 ? `识别到 ${recognized.samples.length} 个样品区块` : "LuckyBean 语义解析完成"
+          message: recognized.samples.length > 1
+            ? `识别到 ${recognized.samples.length} 个样品区块 · LuckyBean 正式识别核心完成`
+            : "LuckyBean 正式识别核心完成"
         });
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error(String(error));
