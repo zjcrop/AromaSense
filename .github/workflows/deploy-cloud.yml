@@ -16,7 +16,7 @@ concurrency:
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+  CLOUDFLARE_ACCOUNT_ID: 1b9a110253133e879ff609ad0bb0e1c2
   AROMASENSE_D1_DATABASE_NAME: ${{ vars.AROMASENSE_D1_DATABASE_NAME }}
   AROMASENSE_PUBLIC_APP_URL: ${{ vars.AROMASENSE_PUBLIC_APP_URL }}
   AROMASENSE_CLOUD_URL_FALLBACK: ${{ vars.AROMASENSE_CLOUD_URL }}
@@ -54,11 +54,7 @@ jobs:
           set -euo pipefail
           missing=0
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN is not visible as a Repository secret to this workflow. Put it under Settings > Secrets and variables > Actions > Repository secrets, not Variables or an Environment-only secret."
-            missing=1
-          fi
-          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            echo "::error title=Cloudflare configuration::Missing CLOUDFLARE_ACCOUNT_ID. It may be either a Repository secret or Repository variable."
+            echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN is not visible as a Repository secret to this workflow. Put the newly generated token under Settings > Secrets and variables > Actions > Repository secrets."
             missing=1
           fi
           case "${AROMASENSE_PUBLIC_APP_URL:-}" in
