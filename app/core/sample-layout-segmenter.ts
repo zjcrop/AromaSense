@@ -27,6 +27,8 @@ interface OCRRow {
   fieldAnchors: Set<string>;
 }
 
+const IDENTITY_FIELDS = new Set(["country", "origin", "region", "farm", "producer", "station", "cooperative"]);
+
 function unionBox(lines: readonly OCRLayoutLine[]): OCRBox {
   const boxes = lines.map((line) => line.normalizedBox);
   const left = Math.min(...boxes.map((box) => box.left));
@@ -100,12 +102,19 @@ function segmentFromLines(document: OCRLayoutDocument, index: number, lines: rea
 }
 
 function tableSegments(document: OCRLayoutDocument, rows: readonly OCRRow[]): SampleLayoutResult | undefined {
-  const headerIndex = rows.findIndex((row, index) => index < 3 && (row.fieldAnchors.size >= 2 || fieldAliasCount(row.text) >= 2));
+  const headerIndex = rows.findIndex((row, index) => index < 3 && row.lines.length >= 2 && (row.fieldAnchors.size >= 2 || fieldAliasCount(row.text) >= 2));
   if (headerIndex < 0 || rows.length - headerIndex < 3) return undefined;
+  const header = rows[headerIndex];
   const body = rows.slice(headerIndex + 1).filter((row) => row.text.trim());
   if (body.length < 2) return undefined;
-  const similarRows = body.filter((row) => row.box.width >= 0.28 || row.lines.length >= 2).length;
-  if (similarRows / body.length < 0.65) return undefined;
+
+  // A real table has multiple OCR cells on most body rows. A normal coffee bag often
+  // has a wide heading followed by unrelated single text lines; the previous rule
+  // incorrectly treated those lines as separate samples.
+  const minimumCells = Math.max(2, Math.min(3, header.lines.length - 1));
+  const tabularRows = body.filter((row) => row.lines.length >= minimumCells && row.box.width >= 0.28).length;
+  if (tabularRows / body.length < 0.75) return undefined;
+
   const segments = body.map((row, index) => segmentFromLines(document, index, row.lines, 0.9));
   return { layoutType: "table", confidence: 0.9, requiresReview: false, segments };
 }
@@ -132,6 +141,20 @@ function columnClusters(rows: readonly OCRRow[], medianHeight: number): OCRRow[]
   return clusters.sort((a, b) => Math.min(...a.map((row) => row.box.left)) - Math.min(...b.map((row) => row.box.left)));
 }
 
+function blockFields(rows: readonly OCRRow[]): Set<string> {
+  return new Set(rows.flatMap((row) => [...row.fieldAnchors]));
+}
+
+function startsRecord(row: OCRRow): boolean {
+  return [...row.fieldAnchors].some((field) => IDENTITY_FIELDS.has(field));
+}
+
+function blockLooksLikeRecord(rows: readonly OCRRow[]): boolean {
+  const fields = blockFields(rows);
+  const hasIdentity = [...fields].some((field) => IDENTITY_FIELDS.has(field));
+  return (hasIdentity && fields.size >= 2) || fields.size >= 3;
+}
+
 function splitColumnIntoBlocks(rows: readonly OCRRow[], medianHeight: number): OCRRow[][] {
   if (!rows.length) return [];
   const sorted = [...rows].sort((a, b) => a.box.top - b.box.top);
@@ -142,13 +165,16 @@ function splitColumnIntoBlocks(rows: readonly OCRRow[], medianHeight: number): O
     const previous = sorted[index - 1];
     const gapRatio = Math.max(0, current.box.top - previous.box.bottom) / Math.max(0.008, medianHeight);
     const repeatedAnchor = [...current.fieldAnchors].some((field) => seenFields.has(field));
-    const currentStartsRecord = current.fieldAnchors.has("country") || current.fieldAnchors.has("origin") || current.fieldAnchors.has("region") || current.fieldAnchors.has("farm");
+    const currentStartsRecord = startsRecord(current);
     const previousBlock = blocks[blocks.length - 1];
-    const previousFieldCount = new Set(previousBlock.flatMap((row) => [...row.fieldAnchors])).size;
+    const previousFieldCount = blockFields(previousBlock).size;
     const visualBreak = gapRatio >= 1.45;
     const semanticBreak = repeatedAnchor && previousFieldCount >= 2;
     const anchorRestart = currentStartsRecord && previousFieldCount >= 3 && gapRatio >= 0.45;
-    if (visualBreak || semanticBreak || anchorRestart) {
+
+    // Whitespace alone is not enough to declare a new sample. Coffee packaging often
+    // separates origin, roast and tasting-note sections with large visual gaps.
+    if ((visualBreak && (currentStartsRecord || repeatedAnchor)) || semanticBreak || anchorRestart) {
       blocks.push([current]);
       seenFields = new Set(current.fieldAnchors);
     } else {
@@ -159,13 +185,19 @@ function splitColumnIntoBlocks(rows: readonly OCRRow[], medianHeight: number): O
   return blocks;
 }
 
+function explicitRowRecord(row: OCRRow): boolean {
+  if (row.lines.length !== 1) return false;
+  const text = row.lines[0]?.text ?? "";
+  const tokenCount = text.split(/[\s|,，、/]+/).filter(Boolean).length;
+  const delimited = /[|｜]/.test(text);
+  const numbered = /^\s*(?:#?\d{1,3}|[A-Z]\d{1,3})[.)、:\s-]+/i.test(text);
+  return tokenCount >= 3 && row.box.width >= 0.45 && (delimited || numbered);
+}
+
 function rowListSegments(document: OCRLayoutDocument, rows: readonly OCRRow[], medianHeight: number): SampleLayoutResult | undefined {
   if (rows.length < 2) return undefined;
-  const dense = rows.filter((row) => {
-    const tokenCount = row.text.split(/[\s|,，、/]+/).filter(Boolean).length;
-    return tokenCount >= 3 && row.box.width >= 0.45;
-  });
-  if (dense.length / rows.length < 0.72) return undefined;
+  const explicitRecords = rows.filter(explicitRowRecord);
+  if (explicitRecords.length / rows.length < 0.72) return undefined;
   const gaps = rows.slice(1).map((row, index) => Math.max(0, row.box.top - rows[index].box.bottom) / Math.max(0.008, medianHeight));
   const regularGaps = gaps.filter((gap) => gap <= 1.35).length;
   if (gaps.length && regularGaps / gaps.length < 0.65) return undefined;
@@ -194,7 +226,14 @@ export function segmentSamples(document: OCRLayoutDocument): SampleLayoutResult 
     return { layoutType: "single", confidence: 0.9, requiresReview: false, segments: [segmentFromLines(document, 0, document.lines, 0.9)] };
   }
 
-  const orderedBlocks = meaningful.sort((a, b) => {
+  // Only auto-split when at least two blocks independently look like complete coffee
+  // records. A two-column label/value design must remain one sample.
+  const recordBlocks = meaningful.filter(blockLooksLikeRecord);
+  if (recordBlocks.length < 2) {
+    return { layoutType: "single", confidence: 0.9, requiresReview: false, segments: [segmentFromLines(document, 0, document.lines, 0.9)] };
+  }
+
+  const orderedBlocks = recordBlocks.sort((a, b) => {
     const aBox = unionBox(a.flatMap((row) => row.lines));
     const bBox = unionBox(b.flatMap((row) => row.lines));
     const rowTolerance = Math.max(aBox.height, bBox.height) * 0.28;
@@ -202,7 +241,7 @@ export function segmentSamples(document: OCRLayoutDocument): SampleLayoutResult 
     return aBox.top - bBox.top;
   });
 
-  const multiColumn = columns.length >= 2 && columns.filter((column) => column.length >= 2).length >= 2;
+  const multiColumn = columns.length >= 2 && orderedBlocks.some((block) => unionBox(block.flatMap((row) => row.lines)).left > 0.45);
   const layoutType: SampleLayoutType = multiColumn ? "grid" : "vertical-block-list";
   const baseConfidence = multiColumn ? 0.86 : 0.84;
   const segments = orderedBlocks.map((block, index) =>
