@@ -6,8 +6,8 @@ const root = resolve(import.meta.dirname, "..");
 const androidOut = resolve(root, "mobile/android/app/src/main/assets/www");
 const pagesOut = resolve(root, "site");
 const cloudBaseUrl = process.env.AROMASENSE_CLOUD_URL ?? "";
-const firebaseApiKey = process.env.AROMASENSE_FIREBASE_API_KEY || "AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84";
-const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID || "aromasense-139da";
+const firebaseApiKey = process.env.AROMASENSE_FIREBASE_API_KEY || "AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0";
+const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID || "romasense-f23eb";
 const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
 const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
@@ -92,7 +92,14 @@ async function buildTarget(out) {
     legalComments: "none"
   });
 
-  for (const file of ["aromasense-cupping.css", "product-shell.css", "batch-setup.css", "account.css", "startup.css"]) {
+  for (const file of [
+    "aromasense-cupping.css",
+    "product-shell.css",
+    "batch-setup.css",
+    "account.css",
+    "startup.css",
+    "luckybean-flat-theme.css"
+  ]) {
     await cp(resolve(root, `app/ui/dom/${file}`), resolve(out, file));
   }
 
