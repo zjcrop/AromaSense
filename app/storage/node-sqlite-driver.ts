@@ -1,6 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import type { SQLiteDriver, SqlValue } from "./local-cupping-repository";
 
+function normalizeRow<T>(row: unknown): T {
+  if (typeof row !== "object" || row === null) return row as T;
+  return Object.assign({}, row) as T;
+}
+
 export class NodeSQLiteDriver implements SQLiteDriver {
   private transactionDepth = 0;
 
@@ -27,12 +32,13 @@ export class NodeSQLiteDriver implements SQLiteDriver {
 
   async get<T>(sql: string, params: readonly SqlValue[] = []): Promise<T | undefined> {
     const statement = this.db.prepare(sql);
-    return statement.get(...params) as T | undefined;
+    const row = statement.get(...params);
+    return row === undefined ? undefined : normalizeRow<T>(row);
   }
 
   async all<T>(sql: string, params: readonly SqlValue[] = []): Promise<readonly T[]> {
     const statement = this.db.prepare(sql);
-    return statement.all(...params) as T[];
+    return statement.all(...params).map((row) => normalizeRow<T>(row));
   }
 
   async transaction<T>(work: () => Promise<T>): Promise<T> {
