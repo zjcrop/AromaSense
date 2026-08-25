@@ -20,8 +20,8 @@ env:
   AROMASENSE_D1_DATABASE_NAME: ${{ vars.AROMASENSE_D1_DATABASE_NAME }}
   AROMASENSE_PUBLIC_APP_URL: ${{ vars.AROMASENSE_PUBLIC_APP_URL }}
   AROMASENSE_CLOUD_URL_FALLBACK: ${{ vars.AROMASENSE_CLOUD_URL }}
-  FIREBASE_PROJECT_ID: aromasense-139da
-  FIREBASE_WEB_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
+  FIREBASE_PROJECT_ID: romasense-f23eb
+  FIREBASE_WEB_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
 
 jobs:
   cloud:
@@ -181,8 +181,8 @@ jobs:
     needs: cloud
     env:
       AROMASENSE_CLOUD_URL: ${{ needs.cloud.outputs.worker_url }}
-      AROMASENSE_FIREBASE_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
-      AROMASENSE_FIREBASE_PROJECT_ID: aromasense-139da
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+      AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -236,8 +236,8 @@ jobs:
     needs: cloud
     env:
       AROMASENSE_CLOUD_URL: ${{ needs.cloud.outputs.worker_url }}
-      AROMASENSE_FIREBASE_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
-      AROMASENSE_FIREBASE_PROJECT_ID: aromasense-139da
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+      AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
     steps:
       - name: Checkout
         uses: actions/checkout@v7
