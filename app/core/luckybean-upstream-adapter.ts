@@ -25,6 +25,42 @@ export interface LuckyBeanCoreBlock {
   polygon?: readonly ({ x: number; y: number } | readonly [number, number])[];
   corners?: readonly ({ x: number; y: number } | readonly [number, number])[];
   boundingBox?: Record<string, number>;
+  [key: string]: unknown;
+}
+
+export interface LuckyBeanPreparedImage {
+  blob: Blob;
+  originalName?: string;
+  originalSize?: number;
+  width?: number;
+  height?: number;
+  processedWidth?: number;
+  processedHeight?: number;
+  score?: number;
+  status?: string;
+  nativeSource?: boolean;
+  warnings?: readonly string[];
+  metrics?: unknown;
+}
+
+export interface LuckyBeanOCRImage {
+  id: string;
+  role: string;
+  roleLabel: string;
+  blob: Blob;
+  nativeSource?: boolean;
+  fileName?: string;
+}
+
+export interface LuckyBeanOCRResult {
+  engine?: string;
+  blocks?: readonly LuckyBeanCoreBlock[];
+  fullText?: string;
+  results?: readonly unknown[];
+  serial?: boolean;
+  queueConcurrency?: number;
+  batch?: unknown;
+  [key: string]: unknown;
 }
 
 export interface LuckyBeanRecognitionDocument {
@@ -79,6 +115,12 @@ export interface LuckyBeanRecognitionAnalysis {
 export interface LuckyBeanRecognitionCore {
   RECOGNITION_DOCUMENT_SCHEMA?: string;
   RECOGNITION_PIPELINE_VERSION?: string;
+  preparePackageImage(file: Blob, options?: { maxEdge?: number }): Promise<LuckyBeanPreparedImage>;
+  recognizeCoffeeBag(
+    images: readonly LuckyBeanOCRImage[],
+    options?: { locale?: string; onProgress?(progress: unknown): void }
+  ): Promise<LuckyBeanOCRResult>;
+  getRecognitionCapabilities?(): { native?: boolean; webPaddle?: boolean; textDetector?: boolean };
   createRecognitionDocument(input: {
     images?: readonly { id?: string; role?: string; roleLabel?: string }[];
     blocks?: readonly LuckyBeanCoreBlock[];
@@ -98,7 +140,12 @@ function runtimeCore(): LuckyBeanRecognitionCore | undefined {
 
 export function requireLuckyBeanRecognitionCore(): LuckyBeanRecognitionCore {
   const core = runtimeCore();
-  if (typeof core?.createRecognitionDocument !== "function" || typeof core?.analyzeRecognitionDocument !== "function") {
+  if (
+    typeof core?.preparePackageImage !== "function" ||
+    typeof core?.recognizeCoffeeBag !== "function" ||
+    typeof core?.createRecognitionDocument !== "function" ||
+    typeof core?.analyzeRecognitionDocument !== "function"
+  ) {
     throw new Error("LuckyBean 正式识别核心未加载；AromaSense 不再使用兼容版识别器");
   }
   return core;
