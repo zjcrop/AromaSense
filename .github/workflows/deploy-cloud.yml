@@ -18,9 +18,10 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   AROMASENSE_D1_DATABASE_NAME: ${{ vars.AROMASENSE_D1_DATABASE_NAME }}
-  AROMASENSE_EMAIL_FROM: ${{ vars.AROMASENSE_EMAIL_FROM }}
   AROMASENSE_PUBLIC_APP_URL: ${{ vars.AROMASENSE_PUBLIC_APP_URL }}
   AROMASENSE_CLOUD_URL_FALLBACK: ${{ vars.AROMASENSE_CLOUD_URL }}
+  FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+  FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
 
 jobs:
   cloud:
@@ -47,7 +48,7 @@ jobs:
           echo "AROMASENSE_D1_DATABASE_NAME=${AROMASENSE_D1_DATABASE_NAME:-aromasense-db}" >> "$GITHUB_ENV"
           echo "AROMASENSE_PUBLIC_APP_URL=${AROMASENSE_PUBLIC_APP_URL:-https://zjcrop.github.io/AromaSense/}" >> "$GITHUB_ENV"
 
-      - name: Validate external Cloudflare prerequisites
+      - name: Validate external prerequisites
         shell: bash
         run: |
           set -euo pipefail
@@ -60,8 +61,12 @@ jobs:
             echo "::error title=Cloudflare configuration::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"
             missing=1
           fi
-          if [ -z "${AROMASENSE_EMAIL_FROM:-}" ]; then
-            echo "::error title=Cloudflare Email Service::Missing repository variable AROMASENSE_EMAIL_FROM. It must be an address on a domain onboarded to Cloudflare Email Service."
+          if [ -z "${FIREBASE_PROJECT_ID:-}" ]; then
+            echo "::error title=Firebase configuration::Missing repository variable FIREBASE_PROJECT_ID"
+            missing=1
+          fi
+          if [ -z "${FIREBASE_WEB_API_KEY:-}" ]; then
+            echo "::error title=Firebase configuration::Missing repository variable FIREBASE_WEB_API_KEY"
             missing=1
           fi
           case "${AROMASENSE_PUBLIC_APP_URL:-}" in
@@ -121,12 +126,8 @@ jobs:
               database_id: process.env.AROMASENSE_D1_DATABASE_ID,
               migrations_dir: 'migrations'
             }],
-            send_email: [{
-              name: 'EMAIL',
-              allowed_sender_addresses: [process.env.AROMASENSE_EMAIL_FROM]
-            }],
             vars: {
-              EMAIL_FROM: process.env.AROMASENSE_EMAIL_FROM,
+              FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
               PUBLIC_APP_URL: process.env.AROMASENSE_PUBLIC_APP_URL
             }
           };
@@ -168,8 +169,8 @@ jobs:
               const response = await fetch(`${base}/health`, { cache: 'no-store' });
               const body = await response.json();
               console.log(`health attempt ${attempt}`, body);
-              if (response.ok && body.ok === true && body.database === 'configured' && body.email === 'configured') process.exit(0);
-              last = new Error(`health contract incomplete: database=${body.database}, email=${body.email}`);
+              if (response.ok && body.ok === true && body.database === 'configured' && body.authentication === 'firebase-configured') process.exit(0);
+              last = new Error(`health contract incomplete: database=${body.database}, authentication=${body.authentication}`);
             } catch (error) {
               last = error;
             }
@@ -183,11 +184,13 @@ jobs:
         run: rm -f wrangler.deploy.jsonc d1-list.json deploy.log
 
   connected-web:
-    name: Build web with deployed Worker URL
+    name: Build web with Worker + Firebase
     runs-on: ubuntu-24.04
     needs: cloud
     env:
       AROMASENSE_CLOUD_URL: ${{ needs.cloud.outputs.worker_url }}
+      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
+      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -197,11 +200,13 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Validate Worker URL from cloud job
+      - name: Validate connected configuration
         shell: bash
         run: |
           set -euo pipefail
           test -n "$AROMASENSE_CLOUD_URL"
+          test -n "$AROMASENSE_FIREBASE_API_KEY"
+          test -n "$AROMASENSE_FIREBASE_PROJECT_ID"
           case "$AROMASENSE_CLOUD_URL" in
             https://*) ;;
             *) echo "Worker URL must use https://"; exit 1 ;;
@@ -220,8 +225,10 @@ jobs:
           test -f site/index.html
           test -f site/app.js
           test -f site/sql-wasm.wasm
-          ! grep -q '__CLOUD_BASE_URL__' site/index.html
+          ! grep -q '__CLOUD_BASE_URL__\|__FIREBASE_API_KEY__\|__FIREBASE_PROJECT_ID__' site/index.html
           grep -Fq "data-cloud-base-url=\"$AROMASENSE_CLOUD_URL\"" site/index.html
+          grep -Fq "data-firebase-api-key=\"$AROMASENSE_FIREBASE_API_KEY\"" site/index.html
+          grep -Fq "data-firebase-project-id=\"$AROMASENSE_FIREBASE_PROJECT_ID\"" site/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -230,6 +237,45 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
+
+  connected-android:
+    name: Build Android with Worker + Firebase
+    runs-on: ubuntu-24.04
+    needs: cloud
+    env:
+      AROMASENSE_CLOUD_URL: ${{ needs.cloud.outputs.worker_url }}
+      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
+      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android 16 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Setup Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Assemble connected B0.1.a debug APK
+        run: gradle -p mobile/android :app:assembleDebug
+      - name: Upload connected debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AromaSense-B0.1.a-connected-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
 
   deploy-pages:
     name: Publish connected web

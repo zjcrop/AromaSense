@@ -55,7 +55,7 @@ export class AccountRenderer {
       element("h1", "account-card__title", "AromaSense · 香迹"),
       status,
       element("p", "account-card__text", current.email),
-      element("p", "account-card__text", "自动同步已启用。登录后不需要第二个同步开关；本机新增和已完成杯测会进入同步队列。"),
+      element("p", "account-card__text", "身份认证由 Firebase Authentication 管理；杯测与同步数据仍由 AromaSense Cloudflare Worker + D1 管理。"),
       this.renderSyncSummary(summary)
     );
     const message = element("div", "account-card__inline-message");
@@ -94,7 +94,7 @@ export class AccountRenderer {
     const note = element(
       "p",
       "account-card__text",
-      "这是 AromaSense 唯一的云端账户。登录后自动同步，不需要在其他位置再次登录或开启同步；本地杯测始终不依赖登录。"
+      "邮箱注册、验证和密码找回由 Firebase Authentication 提供；登录后 AromaSense 仅取得身份凭据用于 D1 数据同步，本地杯测始终不依赖登录。"
     );
     const email = element("input", "account-card__input");
     email.type = "email";
@@ -132,12 +132,12 @@ export class AccountRenderer {
       status.hidden = false;
       try {
         if (registering) {
-          status.textContent = "正在提交注册信息…";
+          status.textContent = "正在通过 Firebase 创建账户…";
           const result = await this.auth!.register(email.value, password.value);
           this.renderPendingVerification(result.email, summary);
           return;
         }
-        status.textContent = "正在登录服务器同步账户…";
+        status.textContent = "正在验证 Firebase 身份并连接 AromaSense 云端…";
         const session = await this.auth!.login(email.value, password.value);
         status.classList.add("account-card__status--good");
         status.textContent = "登录成功，正在核对本机与云端数据…";
@@ -145,7 +145,7 @@ export class AccountRenderer {
       } catch (error) {
         status.classList.remove("account-card__status--good");
         status.textContent = error instanceof Error ? error.message : String(error);
-        if (error instanceof AuthClientError && (error.code === "ACCOUNT_PENDING_VERIFICATION" || error.code === "EMAIL_NOT_VERIFIED")) {
+        if (error instanceof AuthClientError && error.code === "EMAIL_NOT_VERIFIED") {
           const pendingEmail = email.value.trim().toLowerCase();
           window.setTimeout(() => this.renderPendingVerification(pendingEmail, summary), 0);
         }
@@ -155,9 +155,12 @@ export class AccountRenderer {
     const actions = element("div", "account-card__actions");
     actions.append(
       button("account-card__secondary", registering ? "已有账户" : "注册账户", () => this.render(registering ? "login" : "register", "")),
-      button("account-card__primary", registering ? "提交注册" : "登录", submit),
-      button("account-card__link", "离线使用 / 返回", () => this.options.onSkip())
+      button("account-card__primary", registering ? "提交注册" : "登录", submit)
     );
+    if (!registering) {
+      actions.append(button("account-card__link", "忘记密码", () => this.renderPasswordReset(email.value, summary)));
+    }
+    actions.append(button("account-card__link", "离线使用 / 返回", () => this.options.onSkip()));
     for (const input of [email, password, confirm]) {
       input.addEventListener("keydown", (event) => { if (event.key === "Enter") void submit(); });
     }
@@ -168,35 +171,91 @@ export class AccountRenderer {
   private renderPendingVerification(email: string, summary?: AccountSyncSummary): void {
     const card = element("section", "account-card account-card--verification");
     card.append(
-      element("h1", "account-card__title", "注册信息已提交"),
-      element("p", "account-card__verification-main", `验证邮件已发送至 ${email}。请查阅邮箱并完成账户激活，激活后返回 AromaSense 使用相同邮箱和密码登录。`),
-      element("p", "account-card__text", "若未收到邮件，请检查垃圾邮件或广告邮件文件夹。验证链接 24 小时内有效。"),
+      element("h1", "account-card__title", "等待邮箱验证"),
+      element("p", "account-card__verification-main", `Firebase 验证邮件已发送至 ${email}。完成邮箱验证后，返回 AromaSense 使用相同邮箱和密码登录。`),
+      element("p", "account-card__text", "若未收到邮件，请检查垃圾邮件目录。需要重新发送时，请在下方再次输入账户密码。"),
       this.renderSyncSummary(summary)
     );
+    const password = element("input", "account-card__input");
+    password.type = "password";
+    password.autocomplete = "current-password";
+    password.placeholder = "账户密码（用于重新发送验证邮件）";
     const status = element("div", "account-card__inline-message");
     status.hidden = true;
     const actions = element("div", "account-card__actions");
     const resend = button("account-card__secondary", "重新发送验证邮件", async () => {
+      if (password.value.length < 10) {
+        status.hidden = false;
+        status.textContent = "请输入当前账户密码后再重新发送验证邮件。";
+        return;
+      }
       resend.disabled = true;
       status.hidden = false;
-      status.textContent = "正在重新发送验证邮件…";
+      status.textContent = "正在请求 Firebase 重新发送验证邮件…";
       try {
-        await this.auth?.resendVerification(email);
+        await this.auth?.resendVerification(email, password.value);
         status.textContent = "验证邮件已重新发送，请查阅邮箱。";
         this.startResendCooldown(resend, 60);
       } catch (error) {
         status.textContent = error instanceof Error ? error.message : String(error);
-        const seconds = error instanceof AuthClientError ? error.retryAfterSeconds : undefined;
-        if (seconds) this.startResendCooldown(resend, seconds);
-        else resend.disabled = false;
+        resend.disabled = false;
       }
     });
     actions.append(
-      button("account-card__primary", "返回登录", () => this.render("login", "完成邮箱激活后，请使用相同邮箱和密码登录。")),
+      button("account-card__primary", "返回登录", () => this.render("login", "完成邮箱验证后，请使用相同邮箱和密码登录。")),
       resend,
+      button("account-card__link", "忘记密码", () => this.renderPasswordReset(email, summary)),
       button("account-card__link", "继续离线使用", () => this.options.onSkip())
     );
-    card.append(status, actions);
+    password.addEventListener("keydown", (event) => { if (event.key === "Enter") resend.click(); });
+    card.append(password, status, actions);
+    this.root.replaceChildren(card);
+  }
+
+  private renderPasswordReset(presetEmail = "", summary?: AccountSyncSummary): void {
+    const card = element("section", "account-card");
+    const email = element("input", "account-card__input");
+    email.type = "email";
+    email.autocomplete = "email";
+    email.placeholder = "注册邮箱";
+    email.value = presetEmail.trim();
+    const status = element("div", "account-card__inline-message");
+    status.hidden = true;
+    const send = button("account-card__primary", "发送密码重置邮件", async () => {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) {
+        status.hidden = false;
+        status.textContent = "请输入有效邮箱地址。";
+        return;
+      }
+      send.disabled = true;
+      status.hidden = false;
+      status.textContent = "正在请求 Firebase 发送密码重置邮件…";
+      try {
+        await this.auth?.requestPasswordReset(email.value);
+        status.classList.add("account-card__status--good");
+        status.textContent = "如果该邮箱对应 AromaSense 账户，Firebase 将发送密码重置邮件。";
+      } catch (error) {
+        status.classList.remove("account-card__status--good");
+        status.textContent = error instanceof Error ? error.message : String(error);
+      } finally {
+        send.disabled = false;
+      }
+    });
+    email.addEventListener("keydown", (event) => { if (event.key === "Enter") send.click(); });
+    const actions = element("div", "account-card__actions");
+    actions.append(
+      send,
+      button("account-card__secondary", "返回登录", () => this.render("login", "")),
+      button("account-card__link", "继续离线使用", () => this.options.onSkip())
+    );
+    card.append(
+      element("h1", "account-card__title", "忘记密码"),
+      element("p", "account-card__text", "密码重置邮件由 Firebase Authentication 发送；AromaSense Worker 不保存或发送密码重置邮件。"),
+      this.renderSyncSummary(summary),
+      email,
+      status,
+      actions
+    );
     this.root.replaceChildren(card);
   }
 
@@ -220,8 +279,8 @@ export class AccountRenderer {
     const card = element("section", "account-card account-card--unavailable");
     const status = element("div", "account-card__cloud-state");
     status.append(
-      element("strong", "account-card__cloud-state-title", "云服务未配置"),
-      element("span", "account-card__cloud-state-text", "当前构建没有 AROMASENSE_CLOUD_URL，因此注册、登录和上传暂不可执行；本地杯测与本地记录不受影响。")
+      element("strong", "account-card__cloud-state-title", "云端认证尚未配置"),
+      element("span", "account-card__cloud-state-text", "当前构建缺少 Cloudflare Worker URL 或 Firebase Authentication 配置，因此注册、登录和上传暂不可执行；本地杯测与本地记录不受影响。")
     );
     const disabledActions = element("div", "account-card__actions");
     const login = button("account-card__primary", "登录", () => undefined);
@@ -231,7 +290,7 @@ export class AccountRenderer {
     disabledActions.append(login, register, button("account-card__link", "返回本地杯测", () => this.options.onSkip()));
     card.append(
       element("h1", "account-card__title", "账户与同步"),
-      element("p", "account-card__text", "账户入口保持可见，避免把“后端尚未配置”误认为“产品没有账户功能”。"),
+      element("p", "account-card__text", "Firebase 负责账户身份；Cloudflare 负责 AromaSense 数据。两端配置完整后才开放云端账户功能。"),
       status,
       this.renderSyncSummary(summary),
       disabledActions

@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
+      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
+      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -26,11 +28,13 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Validate manual cloud endpoint override
+      - name: Validate manual connected configuration
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${AROMASENSE_CLOUD_URL:-}" || (echo "Manual Pages deployment requires repository variable AROMASENSE_CLOUD_URL. Normal production deployment is handled by deploy-cloud.yml and does not require this variable." && exit 1)
+          test -n "${AROMASENSE_CLOUD_URL:-}" || (echo "Manual Pages deployment requires repository variable AROMASENSE_CLOUD_URL." && exit 1)
+          test -n "${AROMASENSE_FIREBASE_API_KEY:-}" || (echo "Manual Pages deployment requires FIREBASE_WEB_API_KEY." && exit 1)
+          test -n "${AROMASENSE_FIREBASE_PROJECT_ID:-}" || (echo "Manual Pages deployment requires FIREBASE_PROJECT_ID." && exit 1)
           case "$AROMASENSE_CLOUD_URL" in
             https://*) ;;
             *) echo "AROMASENSE_CLOUD_URL must use https://"; exit 1 ;;
@@ -49,8 +53,10 @@ jobs:
           test -f site/index.html
           test -f site/app.js
           test -f site/sql-wasm.wasm
-          ! grep -q '__CLOUD_BASE_URL__' site/index.html
+          ! grep -q '__CLOUD_BASE_URL__\|__FIREBASE_API_KEY__\|__FIREBASE_PROJECT_ID__' site/index.html
           grep -Fq "data-cloud-base-url=\"$AROMASENSE_CLOUD_URL\"" site/index.html
+          grep -Fq "data-firebase-api-key=\"$AROMASENSE_FIREBASE_API_KEY\"" site/index.html
+          grep -Fq "data-firebase-project-id=\"$AROMASENSE_FIREBASE_PROJECT_ID\"" site/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

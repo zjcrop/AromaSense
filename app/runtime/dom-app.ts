@@ -26,6 +26,8 @@ export interface AromaSenseDomAppOptions {
   createSampleId(index: number): string;
   observationIdFactory: ObservationIdFactory;
   cloudBaseUrl?: string;
+  firebaseApiKey?: string;
+  firebaseProjectId?: string;
 }
 
 export interface AppPreloadState {
@@ -66,9 +68,14 @@ export class AromaSenseDomApp {
       { revisionId: () => crypto.randomUUID(), queueId: () => crypto.randomUUID() }
     );
 
-    if (options.cloudBaseUrl) {
-      this.authClient = new CloudflareAuthClient(options.cloudBaseUrl, this.authStore, this.pendingRegistrationStore);
-      const remote = new CloudflareSyncRepository(options.cloudBaseUrl, {
+    if (this.hasCloudAuthConfiguration()) {
+      this.authClient = new CloudflareAuthClient(
+        options.cloudBaseUrl!,
+        options.firebaseApiKey!,
+        this.authStore,
+        this.pendingRegistrationStore
+      );
+      const remote = new CloudflareSyncRepository(options.cloudBaseUrl!, {
         token: async () => (await this.authClient?.current())?.token
       });
       this.syncEngine = new SyncEngine(this.syncQueue, remote);
@@ -86,7 +93,8 @@ export class AromaSenseDomApp {
         new RecentSessionReader(this.db).list(50)
       ]);
       const waiting = counts.pending + counts.failed + counts.conflict;
-      const account = !this.options.cloudBaseUrl
+      const configured = this.hasCloudAuthConfiguration();
+      const account = !configured
         ? "cloud-unconfigured" as const
         : session
           ? "signed-in" as const
@@ -95,12 +103,12 @@ export class AromaSenseDomApp {
             : "signed-out" as const;
       return {
         account,
-        accountMessage: !this.options.cloudBaseUrl
-          ? "云服务未配置，本地功能可用"
+        accountMessage: !configured
+          ? "Firebase / Cloudflare 云端认证尚未配置，本地功能可用"
           : session
             ? `已读取登录账户 ${session.email}`
             : pending
-              ? `等待邮箱激活：${pending.email}`
+              ? `等待 Firebase 邮箱验证：${pending.email}`
               : "未登录，本地功能可用",
         syncMessage: waiting ? `${waiting} 项任务等待处理` : "本地同步队列已恢复",
         unfinishedSessions: recent.filter((item) => item.status === "draft" || item.status === "active").length
@@ -165,7 +173,7 @@ export class AromaSenseDomApp {
         syncLabel: current
           ? (waiting ? `同步 ${waiting}` : "账户 · 已登录")
           : pending
-            ? "账户 · 待激活"
+            ? "账户 · 待验证"
             : "账户 / 同步"
       }
     );
@@ -214,6 +222,10 @@ export class AromaSenseDomApp {
     this.screen?.dispose();
     this.screen = undefined;
     this.setRootMode("empty");
+  }
+
+  private hasCloudAuthConfiguration(): boolean {
+    return Boolean(this.options.cloudBaseUrl && this.options.firebaseApiKey && this.options.firebaseProjectId);
   }
 
   private setRootMode(mode: RootMode): void {

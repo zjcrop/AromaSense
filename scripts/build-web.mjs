@@ -6,6 +6,16 @@ const root = resolve(import.meta.dirname, "..");
 const androidOut = resolve(root, "mobile/android/app/src/main/assets/www");
 const pagesOut = resolve(root, "site");
 const cloudBaseUrl = process.env.AROMASENSE_CLOUD_URL ?? "";
+const firebaseApiKey = process.env.AROMASENSE_FIREBASE_API_KEY ?? "";
+const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID ?? "";
+
+function escapeAttribute(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
 
 async function buildTarget(out) {
   await rm(out, { recursive: true, force: true });
@@ -30,14 +40,11 @@ async function buildTarget(out) {
   await cp(resolve(root, "node_modules/sql.js/dist/sql-wasm.wasm"), resolve(out, "sql-wasm.wasm"));
 
   const template = await readFile(resolve(root, "web/index.template.html"), "utf8");
-  await writeFile(
-    resolve(out, "index.html"),
-    template.replaceAll(
-      "__CLOUD_BASE_URL__",
-      cloudBaseUrl.replaceAll("&", "&amp;").replaceAll('"', "&quot;")
-    ),
-    "utf8"
-  );
+  const html = template
+    .replaceAll("__CLOUD_BASE_URL__", escapeAttribute(cloudBaseUrl))
+    .replaceAll("__FIREBASE_API_KEY__", escapeAttribute(firebaseApiKey))
+    .replaceAll("__FIREBASE_PROJECT_ID__", escapeAttribute(firebaseProjectId));
+  await writeFile(resolve(out, "index.html"), html, "utf8");
   await writeFile(resolve(out, ".nojekyll"), "", "utf8");
 }
 

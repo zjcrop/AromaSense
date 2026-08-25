@@ -48,7 +48,9 @@ async function main(): Promise<void> {
     createSessionId: () => crypto.randomUUID(),
     createSampleId: () => crypto.randomUUID(),
     observationIdFactory: (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`,
-    cloudBaseUrl: document.documentElement.dataset.cloudBaseUrl || undefined
+    cloudBaseUrl: document.documentElement.dataset.cloudBaseUrl || undefined,
+    firebaseApiKey: document.documentElement.dataset.firebaseApiKey || undefined,
+    firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
 
   startup.allowEnter();
