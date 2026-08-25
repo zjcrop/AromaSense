@@ -23,7 +23,7 @@ async function buildTarget(out) {
     legalComments: "none"
   });
 
-  for (const file of ["aromasense-cupping.css", "product-shell.css", "batch-setup.css", "account.css"]) {
+  for (const file of ["aromasense-cupping.css", "product-shell.css", "batch-setup.css", "account.css", "startup.css"]) {
     await cp(resolve(root, `app/ui/dom/${file}`), resolve(out, file));
   }
 
