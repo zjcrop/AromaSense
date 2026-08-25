@@ -2,143 +2,313 @@ export interface DragReorderOptions {
   itemSelector: string;
   itemIdAttribute: string;
   onReorder(orderedIds: readonly string[]): void | Promise<void>;
+  handleSelector?: string;
   longPressMs?: number;
+  movementCancelPx?: number;
+  animationMs?: number;
+  autoScrollEdgePx?: number;
+}
+
+interface DragState {
+  source: HTMLElement;
+  placeholder: HTMLElement;
+  ghost: HTMLElement;
+  pointerId: number;
+  pointerOffsetX: number;
+  pointerOffsetY: number;
+  originalNextSibling: ChildNode | null;
+  originalParent: HTMLElement;
+  active: boolean;
+  lastClientX: number;
+  lastClientY: number;
+}
+
+function directItems(container: HTMLElement, selector: string): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>(selector)]
+    .filter((item) => item.parentElement === container && !item.classList.contains("drag-reorder__source-detached"));
 }
 
 function orderedIds(container: HTMLElement, options: DragReorderOptions): string[] {
-  return [...container.querySelectorAll<HTMLElement>(options.itemSelector)]
-    .filter((item) => item.parentElement === container)
+  return directItems(container, options.itemSelector)
     .map((item) => item.getAttribute(options.itemIdAttribute))
     .filter((id): id is string => Boolean(id));
 }
 
-function moveAgainstPointer(container: HTMLElement, dragging: HTMLElement, x: number, y: number, selector: string): void {
-  const hit = document.elementFromPoint(x, y) as HTMLElement | null;
-  const target = hit?.closest<HTMLElement>(selector);
-  if (!target || target === dragging || target.parentElement !== container) return;
-  const rect = target.getBoundingClientRect();
-  const vertical = container.scrollHeight >= container.scrollWidth;
-  const before = vertical
-    ? y < rect.top + rect.height / 2
-    : x < rect.left + rect.width / 2;
-  container.insertBefore(dragging, before ? target : target.nextSibling);
+function rectMap(container: HTMLElement, selector: string): Map<HTMLElement, DOMRect> {
+  return new Map(directItems(container, selector).map((item) => [item, item.getBoundingClientRect()] as const));
+}
+
+function animateFlip(before: Map<HTMLElement, DOMRect>, after: Map<HTMLElement, DOMRect>, duration: number): void {
+  for (const [item, next] of after) {
+    const previous = before.get(item);
+    if (!previous) continue;
+    const dx = previous.left - next.left;
+    const dy = previous.top - next.top;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+    item.animate?.(
+      [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+      { duration, easing: "cubic-bezier(.2,.7,.2,1)" }
+    );
+  }
+}
+
+function buildPlaceholder(source: HTMLElement): HTMLElement {
+  const rect = source.getBoundingClientRect();
+  const placeholder = document.createElement("div");
+  placeholder.className = "drag-reorder__placeholder";
+  placeholder.style.width = `${rect.width}px`;
+  placeholder.style.height = `${rect.height}px`;
+  placeholder.style.flex = getComputedStyle(source).flex;
+  placeholder.setAttribute("aria-hidden", "true");
+  return placeholder;
+}
+
+function buildGhost(source: HTMLElement): HTMLElement {
+  const rect = source.getBoundingClientRect();
+  const ghost = source.cloneNode(true) as HTMLElement;
+  ghost.classList.add("drag-reorder__ghost");
+  ghost.removeAttribute("id");
+  ghost.querySelectorAll<HTMLElement>("[id]").forEach((node) => node.removeAttribute("id"));
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.height = `${rect.height}px`;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  document.body.append(ghost);
+  return ghost;
+}
+
+function moveGhost(state: DragState, clientX: number, clientY: number): void {
+  state.lastClientX = clientX;
+  state.lastClientY = clientY;
+  state.ghost.style.left = `${clientX - state.pointerOffsetX}px`;
+  state.ghost.style.top = `${clientY - state.pointerOffsetY}px`;
+}
+
+function nearestTarget(container: HTMLElement, selector: string, x: number, y: number): { item: HTMLElement; rect: DOMRect } | undefined {
+  let best: { item: HTMLElement; rect: DOMRect; distance: number } | undefined;
+  for (const item of directItems(container, selector)) {
+    const rect = item.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const distance = (x - cx) ** 2 + (y - cy) ** 2;
+    if (!best || distance < best.distance) best = { item, rect, distance };
+  }
+  return best;
+}
+
+function movePlaceholder(
+  container: HTMLElement,
+  placeholder: HTMLElement,
+  selector: string,
+  x: number,
+  y: number,
+  animationMs: number
+): void {
+  const target = nearestTarget(container, selector, x, y);
+  if (!target) return;
+  const beforeRects = rectMap(container, selector);
+  const sameRow = Math.abs(y - (target.rect.top + target.rect.height / 2)) < target.rect.height * 0.62;
+  const beforeTarget = sameRow
+    ? x < target.rect.left + target.rect.width / 2
+    : y < target.rect.top + target.rect.height / 2;
+  const anchor = beforeTarget ? target.item : target.item.nextSibling;
+  if (anchor === placeholder || anchor === placeholder.nextSibling) return;
+  container.insertBefore(placeholder, anchor);
+  const afterRects = rectMap(container, selector);
+  animateFlip(beforeRects, afterRects, animationMs);
+}
+
+function scrollByPointer(container: HTMLElement, x: number, y: number, edge: number): void {
+  const rect = container.getBoundingClientRect();
+  const maxStep = 18;
+  let dx = 0;
+  let dy = 0;
+  if (y < rect.top + edge) dy = -maxStep * Math.max(0, Math.min(1, (rect.top + edge - y) / edge));
+  else if (y > rect.bottom - edge) dy = maxStep * Math.max(0, Math.min(1, (y - (rect.bottom - edge)) / edge));
+  if (x < rect.left + edge) dx = -maxStep * Math.max(0, Math.min(1, (rect.left + edge - x) / edge));
+  else if (x > rect.right - edge) dx = maxStep * Math.max(0, Math.min(1, (x - (rect.right - edge)) / edge));
+
+  const canScrollY = container.scrollHeight > container.clientHeight + 2;
+  const canScrollX = container.scrollWidth > container.clientWidth + 2;
+  if (canScrollY || canScrollX) {
+    container.scrollBy({ left: canScrollX ? dx : 0, top: canScrollY ? dy : 0, behavior: "auto" });
+  } else if (dy !== 0) {
+    window.scrollBy({ top: dy, behavior: "auto" });
+  }
 }
 
 export function attachDragReorder(container: HTMLElement, options: DragReorderOptions): () => void {
-  let dragging: HTMLElement | undefined;
-  let pointerId: number | undefined;
-  let longPressTimer: number | undefined;
-  let pointerStartX = 0;
-  let pointerStartY = 0;
+  let state: DragState | undefined;
   let pointerCandidate: HTMLElement | undefined;
-  const longPressMs = options.longPressMs ?? 350;
+  let candidatePointerId: number | undefined;
+  let candidateStartX = 0;
+  let candidateStartY = 0;
+  let longPressTimer: number | undefined;
+  let autoScrollFrame: number | undefined;
+  const longPressMs = options.longPressMs ?? 320;
+  const movementCancelPx = options.movementCancelPx ?? 12;
+  const animationMs = options.animationMs ?? 160;
+  const autoScrollEdgePx = options.autoScrollEdgePx ?? 48;
 
-  const begin = (target: HTMLElement): void => {
-    dragging = target;
-    target.classList.add("is-dragging");
-    container.classList.add("is-reordering");
+  const stopAutoScroll = () => {
+    if (autoScrollFrame !== undefined) cancelAnimationFrame(autoScrollFrame);
+    autoScrollFrame = undefined;
   };
 
-  const finish = (): void => {
-    if (longPressTimer !== undefined) {
-      window.clearTimeout(longPressTimer);
-      longPressTimer = undefined;
-    }
-    pointerCandidate = undefined;
-    pointerId = undefined;
-    if (!dragging) return;
-    dragging.classList.remove("is-dragging");
-    dragging = undefined;
-    container.classList.remove("is-reordering");
-    void options.onReorder(orderedIds(container, options));
+  const runAutoScroll = () => {
+    if (!state?.active) return;
+    scrollByPointer(container, state.lastClientX, state.lastClientY, autoScrollEdgePx);
+    movePlaceholder(container, state.placeholder, options.itemSelector, state.lastClientX, state.lastClientY, animationMs);
+    autoScrollFrame = requestAnimationFrame(runAutoScroll);
   };
 
-  const cancelCandidate = (): void => {
-    if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
+  const clearPending = () => {
+    if (longPressTimer !== undefined) clearTimeout(longPressTimer);
     longPressTimer = undefined;
     pointerCandidate = undefined;
-    pointerId = undefined;
+    candidatePointerId = undefined;
   };
 
-  const onDragStart = (event: DragEvent): void => {
-    const eventTarget = event.target as HTMLElement | null;
-    const target = eventTarget?.closest<HTMLElement>(options.itemSelector);
-    if (!target || target.parentElement !== container) return;
-    const nearestDraggable = eventTarget?.closest<HTMLElement>("[draggable='true']");
-    if (nearestDraggable && nearestDraggable !== target) return;
-    begin(target);
-    event.dataTransfer?.setData("text/plain", target.getAttribute(options.itemIdAttribute) ?? "");
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  const restoreSource = (drag: DragState, cancelled: boolean) => {
+    drag.ghost.remove();
+    drag.placeholder.remove();
+    drag.source.classList.remove("drag-reorder__source-detached", "is-dragging");
+    drag.source.removeAttribute("aria-grabbed");
+    if (cancelled) {
+      if (drag.originalNextSibling && drag.originalNextSibling.parentNode === drag.originalParent) {
+        drag.originalParent.insertBefore(drag.source, drag.originalNextSibling);
+      } else {
+        drag.originalParent.append(drag.source);
+      }
+    }
   };
 
-  const onDragOver = (event: DragEvent): void => {
-    if (!dragging) return;
+  const activate = (source: HTMLElement, event: PointerEvent) => {
+    const rect = source.getBoundingClientRect();
+    const placeholder = buildPlaceholder(source);
+    const ghost = buildGhost(source);
+    const originalNextSibling = source.nextSibling;
+    const originalParent = source.parentElement;
+    if (!originalParent) return;
+    originalParent.insertBefore(placeholder, source);
+    source.remove();
+    source.classList.add("drag-reorder__source-detached", "is-dragging");
+    source.setAttribute("aria-grabbed", "true");
+    container.classList.add("is-reordering");
+    document.body.classList.add("drag-reorder--active");
+    state = {
+      source,
+      placeholder,
+      ghost,
+      pointerId: event.pointerId,
+      pointerOffsetX: event.clientX - rect.left,
+      pointerOffsetY: event.clientY - rect.top,
+      originalNextSibling,
+      originalParent,
+      active: true,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY
+    };
+    moveGhost(state, event.clientX, event.clientY);
+    navigator.vibrate?.(10);
+    try { container.setPointerCapture(event.pointerId); } catch { /* browser may already own capture */ }
+    stopAutoScroll();
+    autoScrollFrame = requestAnimationFrame(runAutoScroll);
+  };
+
+  const finish = (event: PointerEvent, cancelled: boolean) => {
+    clearPending();
+    stopAutoScroll();
+    const drag = state;
+    state = undefined;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    moveAgainstPointer(container, dragging, event.clientX, event.clientY, options.itemSelector);
+    try { container.releasePointerCapture(event.pointerId); } catch { /* no active capture */ }
+    if (!cancelled) {
+      drag.placeholder.replaceWith(drag.source);
+      drag.ghost.remove();
+      drag.source.classList.remove("drag-reorder__source-detached", "is-dragging");
+      drag.source.removeAttribute("aria-grabbed");
+      drag.source.dataset.dragSuppressClick = "1";
+      window.setTimeout(() => { delete drag.source.dataset.dragSuppressClick; }, 420);
+      void options.onReorder(orderedIds(container, options));
+    } else {
+      restoreSource(drag, true);
+    }
+    container.classList.remove("is-reordering");
+    document.body.classList.remove("drag-reorder--active");
   };
 
   const onPointerDown = (event: PointerEvent): void => {
-    if (event.pointerType === "mouse" || event.button !== 0) return;
+    if (event.button !== 0) return;
     const eventTarget = event.target as HTMLElement | null;
-    const target = eventTarget?.closest<HTMLElement>(options.itemSelector);
-    if (!target || target.parentElement !== container) return;
+    const source = eventTarget?.closest<HTMLElement>(options.itemSelector);
+    if (!source || source.parentElement !== container) return;
+    if (options.handleSelector && !eventTarget?.closest(options.handleSelector)) return;
 
-    // Nested reorder scopes own their nearest item and must not activate an outer scope.
-    const nestedItem = eventTarget?.closest<HTMLElement>("[data-descriptor-id], [data-group-id], [data-sample-id]");
-    if (nestedItem && nestedItem !== target && nestedItem.parentElement !== container) return;
+    clearPending();
+    candidatePointerId = event.pointerId;
+    pointerCandidate = source;
+    candidateStartX = event.clientX;
+    candidateStartY = event.clientY;
 
-    pointerId = event.pointerId;
-    pointerCandidate = target;
-    pointerStartX = event.clientX;
-    pointerStartY = event.clientY;
+    const activateNow = event.pointerType === "mouse";
+    if (activateNow) {
+      event.preventDefault();
+      activate(source, event);
+      return;
+    }
     longPressTimer = window.setTimeout(() => {
-      if (pointerCandidate && pointerId === event.pointerId) {
-        begin(pointerCandidate);
-        try { container.setPointerCapture(event.pointerId); } catch { /* WebView may already own capture. */ }
-      }
+      if (pointerCandidate === source && candidatePointerId === event.pointerId) activate(source, event);
     }, longPressMs);
   };
 
   const onPointerMove = (event: PointerEvent): void => {
-    if (pointerId !== event.pointerId) return;
-    if (!dragging) {
-      const distance = Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY);
-      if (distance > 10) cancelCandidate();
+    if (state?.pointerId === event.pointerId) {
+      event.preventDefault();
+      moveGhost(state, event.clientX, event.clientY);
+      movePlaceholder(container, state.placeholder, options.itemSelector, event.clientX, event.clientY, animationMs);
       return;
     }
-    event.preventDefault();
-    moveAgainstPointer(container, dragging, event.clientX, event.clientY, options.itemSelector);
+    if (candidatePointerId !== event.pointerId || !pointerCandidate) return;
+    if (Math.hypot(event.clientX - candidateStartX, event.clientY - candidateStartY) > movementCancelPx) clearPending();
   };
 
-  const onPointerEnd = (event: PointerEvent): void => {
-    if (pointerId !== event.pointerId) return;
-    if (dragging) {
+  const onPointerUp = (event: PointerEvent): void => {
+    if (state?.pointerId === event.pointerId) finish(event, false);
+    else if (candidatePointerId === event.pointerId) clearPending();
+  };
+
+  const onPointerCancel = (event: PointerEvent): void => {
+    if (state?.pointerId === event.pointerId) finish(event, true);
+    else if (candidatePointerId === event.pointerId) clearPending();
+  };
+
+  const onClickCapture = (event: MouseEvent) => {
+    const item = (event.target as HTMLElement | null)?.closest<HTMLElement>(options.itemSelector);
+    if (item?.dataset.dragSuppressClick === "1") {
       event.preventDefault();
-      try { container.releasePointerCapture(event.pointerId); } catch { /* no active capture */ }
-      finish();
-    } else {
-      cancelCandidate();
+      event.stopImmediatePropagation();
     }
   };
 
-  container.addEventListener("dragstart", onDragStart);
-  container.addEventListener("dragover", onDragOver);
-  container.addEventListener("drop", finish);
-  container.addEventListener("dragend", finish);
   container.addEventListener("pointerdown", onPointerDown);
   container.addEventListener("pointermove", onPointerMove, { passive: false });
-  container.addEventListener("pointerup", onPointerEnd);
-  container.addEventListener("pointercancel", onPointerEnd);
+  container.addEventListener("pointerup", onPointerUp);
+  container.addEventListener("pointercancel", onPointerCancel);
+  container.addEventListener("click", onClickCapture, true);
 
   return () => {
-    cancelCandidate();
-    container.removeEventListener("dragstart", onDragStart);
-    container.removeEventListener("dragover", onDragOver);
-    container.removeEventListener("drop", finish);
-    container.removeEventListener("dragend", finish);
+    clearPending();
+    stopAutoScroll();
+    if (state) {
+      const synthetic = new PointerEvent("pointercancel", { pointerId: state.pointerId });
+      finish(synthetic, true);
+    }
     container.removeEventListener("pointerdown", onPointerDown);
     container.removeEventListener("pointermove", onPointerMove);
-    container.removeEventListener("pointerup", onPointerEnd);
-    container.removeEventListener("pointercancel", onPointerEnd);
+    container.removeEventListener("pointerup", onPointerUp);
+    container.removeEventListener("pointercancel", onPointerCancel);
+    container.removeEventListener("click", onClickCapture, true);
   };
 }
