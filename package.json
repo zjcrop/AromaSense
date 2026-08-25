@@ -10,7 +10,7 @@
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "luckybean-static-app": "github:zjcrop/luckybean#1f8b5265359adbb1325f6791e3b8d0288606d89f",
+    "luckybean-static-app": "github:zjcrop/luckybean#1b35df3665d1159aee790d2a87f95e05755d1019",
     "sql.js": "1.14.2"
   },
   "devDependencies": {
