@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
-      AROMASENSE_FIREBASE_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
-      AROMASENSE_FIREBASE_PROJECT_ID: aromasense-139da
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+      AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
     steps:
       - name: Checkout
         uses: actions/checkout@v7
