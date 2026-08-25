@@ -81,6 +81,17 @@ async function buildTarget(out) {
   await mkdir(out, { recursive: true });
 
   await build({
+    entryPoints: [resolve(root, "app/vendor/luckybean-recognition-entry.js")],
+    outfile: resolve(out, "luckybean-recognition-core.js"),
+    bundle: true,
+    platform: "browser",
+    target: ["chrome110"],
+    format: "iife",
+    sourcemap: true,
+    legalComments: "none"
+  });
+
+  await build({
     entryPoints: [resolve(root, "app/runtime/web-entry.ts")],
     outfile: resolve(out, "app.js"),
     bundle: true,
@@ -110,7 +121,7 @@ async function buildTarget(out) {
     .replaceAll("__CLOUD_BASE_URL__", escapeAttribute(cloudBaseUrl))
     .replaceAll("__FIREBASE_API_KEY__", escapeAttribute(firebaseApiKey))
     .replaceAll("__FIREBASE_PROJECT_ID__", escapeAttribute(firebaseProjectId))
-    .replace("  <script src=\"app.js\"></script>", `${recognitionBootstrap ? `  ${recognitionBootstrap}\n` : ""}  <script src=\"app.js\"></script>`);
+    .replace("  <script src=\"app.js\"></script>", `${recognitionBootstrap ? `  ${recognitionBootstrap}\n` : ""}  <script src=\"luckybean-recognition-core.js\"></script>\n  <script src=\"app.js\"></script>`);
   await writeFile(resolve(out, "index.html"), html, "utf8");
   await writeFile(resolve(out, ".nojekyll"), "", "utf8");
 }
