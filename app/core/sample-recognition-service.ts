@@ -1,3 +1,7 @@
+import { buildOCRLayoutDocument, type OCRLineInput } from "./ocr-layout-model";
+import { decideSampleFields, type SampleFieldDecisionResult } from "./sample-field-decision-engine";
+import { segmentSamples, type SampleLayoutType } from "./sample-layout-segmenter";
+
 export interface SampleRecognitionProgress {
   index: number;
   total: number;
@@ -11,7 +15,26 @@ export interface RecognizedSample {
   rawText: string;
   engine: string;
   confidence?: number;
+  requiresReview: boolean;
   metadata: Record<string, unknown>;
+}
+
+export interface RecognizedPage {
+  fileName: string;
+  engine: string;
+  layoutType: SampleLayoutType;
+  segmentationConfidence: number;
+  requiresSegmentationReview: boolean;
+  samples: readonly RecognizedSample[];
+}
+
+interface NativeOCRLine {
+  id?: string;
+  blockId?: string;
+  text?: string;
+  confidence?: number;
+  polygon?: readonly (readonly [number, number] | { x: number; y: number })[];
+  box?: Record<string, number>;
 }
 
 interface NativeRecognitionResult {
@@ -19,23 +42,23 @@ interface NativeRecognitionResult {
   fullText?: string;
   engine?: string;
   confidence?: number;
-  fields?: Record<string, unknown>;
+  blocks?: readonly NativeOCRLine[];
+  lines?: readonly NativeOCRLine[];
+  sourceWidth?: number;
+  sourceHeight?: number;
+  error?: string;
 }
 
 interface NativeRecognitionBridge {
-  recognizeSampleImage?(payload: {
-    id: string;
-    fileName: string;
-    mimeType: string;
-    dataUrl: string;
-    locale: string;
-  }): NativeRecognitionResult | string | Promise<NativeRecognitionResult | string>;
+  recognizeSampleImage?(payloadJson: string): NativeRecognitionResult | string | Promise<NativeRecognitionResult | string>;
 }
 
 interface TextDetection {
   rawValue?: string;
   text?: string;
   confidence?: number;
+  boundingBox?: DOMRectReadOnly | { x: number; y: number; width: number; height: number };
+  cornerPoints?: readonly { x: number; y: number }[];
 }
 
 interface TextDetectorLike {
@@ -90,24 +113,28 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+function parseNativeResult(value: NativeRecognitionResult | string): NativeRecognitionResult {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as NativeRecognitionResult;
+  } catch {
+    return { fullText: value, engine: "android-native-ocr" };
+  }
+}
+
 async function recognizeNative(file: File, id: string): Promise<NativeRecognitionResult | undefined> {
   const bridge = runtimeWindow().AromaSenseRecognitionBridge;
   if (typeof bridge?.recognizeSampleImage !== "function") return undefined;
-  const value = await bridge.recognizeSampleImage({
+  const payload = JSON.stringify({
     id,
     fileName: file.name,
     mimeType: file.type || "image/jpeg",
     dataUrl: await blobToDataUrl(file),
     locale: "zh-CN"
   });
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value) as NativeRecognitionResult;
-    } catch {
-      return { fullText: value, engine: "android-native-ocr" };
-    }
-  }
-  return value;
+  const result = parseNativeResult(await bridge.recognizeSampleImage(payload));
+  if (result.error) throw new Error(result.error);
+  return result;
 }
 
 async function recognizeTextDetector(file: File): Promise<NativeRecognitionResult | undefined> {
@@ -116,13 +143,29 @@ async function recognizeTextDetector(file: File): Promise<NativeRecognitionResul
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   try {
     const detections = await new Detector().detect(bitmap);
-    const texts = detections.map((item) => cleanText(item.rawValue ?? item.text)).filter(Boolean);
-    if (!texts.length) return undefined;
-    const confidenceValues = detections
-      .map((item) => Number(item.confidence))
-      .filter((value) => Number.isFinite(value));
+    const lines: NativeOCRLine[] = detections.flatMap((item, index) => {
+      const text = cleanText(item.rawValue ?? item.text);
+      if (!text) return [];
+      const box = item.boundingBox;
+      const polygon = item.cornerPoints?.length
+        ? item.cornerPoints
+        : box
+          ? [
+              { x: box.x, y: box.y },
+              { x: box.x + box.width, y: box.y },
+              { x: box.x + box.width, y: box.y + box.height },
+              { x: box.x, y: box.y + box.height }
+            ]
+          : undefined;
+      return [{ id: `browser-line-${index + 1}`, text, confidence: item.confidence, polygon }];
+    });
+    if (!lines.length) return undefined;
+    const confidenceValues = lines.map((item) => Number(item.confidence)).filter(Number.isFinite);
     return {
-      fullText: texts.join("\n"),
+      fullText: lines.map((item) => item.text).join("\n"),
+      lines,
+      sourceWidth: bitmap.width,
+      sourceHeight: bitmap.height,
       engine: "browser-text-detector",
       confidence: confidenceValues.length
         ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
@@ -156,10 +199,9 @@ function ensureTesseract(): Promise<TesseractLike> {
   return tesseractLoader;
 }
 
-async function recognizeTesseract(
-  file: File,
+async function ensureTesseractWorker(
   onEngineProgress?: (message: string, progress: number) => void
-): Promise<NativeRecognitionResult> {
+): Promise<TesseractWorkerLike> {
   if (!workerPromise) {
     workerPromise = ensureTesseract().then((tesseract) => tesseract.createWorker(["chi_sim", "eng"], 1, {
       logger(message) {
@@ -167,7 +209,11 @@ async function recognizeTesseract(
       }
     }));
   }
-  const worker = await workerPromise;
+  return workerPromise;
+}
+
+async function recognizeTesseract(file: File): Promise<NativeRecognitionResult> {
+  const worker = await ensureTesseractWorker();
   await worker.setParameters?.({ tessedit_pageseg_mode: "11", preserve_interword_spaces: "1", user_defined_dpi: "300" });
   const result = await worker.recognize(file);
   return {
@@ -177,90 +223,144 @@ async function recognizeTesseract(
   };
 }
 
-const FIELD_ALIASES: readonly [string, readonly string[]][] = [
-  ["country", ["国家", "产地", "country", "origin"]],
-  ["region", ["产区", "地区", "region", "area"]],
-  ["farm", ["庄园", "农场", "处理站", "farm", "estate", "station"]],
-  ["variety", ["豆种", "品种", "variety", "cultivar"]],
-  ["process", ["处理法", "处理方式", "process", "processing"]],
-  ["roastDate", ["烘焙日期", "烘焙日", "roast date", "roasted on", "roasted"]],
-  ["altitude", ["海拔", "altitude", "elevation"]],
-  ["flavorNotes", ["风味", "风味描述", "flavor", "flavour", "tasting notes", "notes"]]
-];
-
-function parseFields(text: string): Record<string, string> {
-  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  const fields: Record<string, string> = {};
-  for (const line of lines) {
-    for (const [field, aliases] of FIELD_ALIASES) {
-      if (fields[field]) continue;
-      for (const alias of aliases) {
-        const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const match = line.match(new RegExp(`(?:^|\\s)${escaped}\\s*[:：/\\-]?\\s*(.+)$`, "i"));
-        if (match?.[1]?.trim()) {
-          fields[field] = match[1].trim();
-          break;
-        }
-      }
-    }
-  }
-  return fields;
+function ocrLines(result: NativeRecognitionResult): OCRLineInput[] {
+  return [...(result.lines ?? result.blocks ?? [])].map((line, index) => ({
+    id: line.id ?? `ocr-line-${index + 1}`,
+    blockId: line.blockId,
+    text: line.text,
+    confidence: line.confidence,
+    polygon: line.polygon,
+    box: line.box
+  }));
 }
 
-function likelyLabel(text: string, fields: Record<string, string>, fallback: string): string {
-  const composed = [fields.farm, fields.region, fields.variety].filter(Boolean).slice(0, 2).join(" · ");
-  if (composed) return composed.slice(0, 80);
-  const excluded = /^(coffee|specialty coffee|咖啡|精品咖啡|product|产品|净含量|net weight|roast date|烘焙日期)\b/i;
-  const line = text.split(/\n+/)
-    .map((item) => item.trim())
-    .find((item) => item.length >= 2 && item.length <= 80 && /[A-Za-z\u3400-\u9FFF]/.test(item) && !excluded.test(item));
-  const fallbackLabel = fallback.replace(/\.[^.]+$/, "").slice(0, 80) || "未命名样品";
-  return line ?? fallbackLabel;
+function metadataFields(decision: SampleFieldDecisionResult): Record<string, string> {
+  const accepted = { ...decision.accepted };
+  if (accepted.flavor) {
+    accepted.flavorNotes = accepted.flavor;
+    delete accepted.flavor;
+  }
+  return accepted;
+}
+
+function likelyLabel(fields: Record<string, string>, sampleIndex: number): string {
+  const parts = [fields.farm, fields.station, fields.region, fields.origin, fields.variety, fields.country]
+    .filter((value): value is string => Boolean(value));
+  if (parts.length) return [...new Set(parts)].slice(0, 2).join(" · ").slice(0, 80);
+  return `待确认样品 ${String(sampleIndex + 1).padStart(2, "0")}`;
 }
 
 export class SampleRecognitionService {
-  async recognize(file: File, index = 0): Promise<RecognizedSample> {
+  async warmup(): Promise<{ engine: string; ready: boolean; message: string }> {
+    if (typeof runtimeWindow().AromaSenseRecognitionBridge?.recognizeSampleImage === "function") {
+      return { engine: "android-mlkit", ready: true, message: "Android 本地图像识别已就绪" };
+    }
+    if (typeof runtimeWindow().TextDetector === "function") {
+      return { engine: "browser-text-detector", ready: true, message: "浏览器图像识别已就绪" };
+    }
+    try {
+      await ensureTesseractWorker();
+      return { engine: `tesseract.js-${TESSERACT_VERSION}`, ready: true, message: "网页图像识别已就绪" };
+    } catch (error) {
+      return { engine: "unavailable", ready: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async recognizePage(file: File, index = 0): Promise<RecognizedPage> {
     const id = `sample-image-${Date.now().toString(36)}-${index}`;
     let result = await recognizeNative(file, id);
     if (!result) result = await recognizeTextDetector(file);
-    if (!result || !cleanText(result.fullText ?? result.text)) {
-      result = await recognizeTesseract(file);
-    }
+    if (!result || !cleanText(result.fullText ?? result.text)) result = await recognizeTesseract(file);
     const rawText = cleanText(result.fullText ?? result.text);
     if (!rawText) throw new Error("没有识别到可用文字，请补拍或手工填写样品名称");
-    const fields = { ...parseFields(rawText), ...(result.fields ?? {}) };
+
+    const document = buildOCRLayoutDocument({
+      imageId: id,
+      lines: ocrLines(result),
+      sourceWidth: result.sourceWidth,
+      sourceHeight: result.sourceHeight,
+      fallbackText: rawText
+    });
+    const layout = segmentSamples(document);
+    const engine = result.engine ?? "OCR";
+    const samples = layout.segments.map((segment, sampleIndex) => {
+      const decision = decideSampleFields(segment);
+      const fields = metadataFields(decision);
+      const confidence = Math.min(
+        segment.confidence,
+        decision.decisions.length
+          ? Math.max(...decision.decisions.map((item) => item.confidence))
+          : Number(result.confidence ?? 0.55)
+      );
+      const requiresReview = layout.requiresReview || decision.review.length > 0 || !Object.keys(fields).length;
+      return {
+        label: likelyLabel(fields, sampleIndex),
+        rawText: segment.text,
+        engine,
+        confidence,
+        requiresReview,
+        metadata: {
+          ...fields,
+          recognition: {
+            schemaVersion: "aromasense-recognition/2.0",
+            source: "photo",
+            fileName: file.name,
+            mimeType: file.type,
+            engine,
+            pageLayout: layout.layoutType,
+            segmentationConfidence: segment.confidence,
+            segmentationRequiresReview: layout.requiresReview,
+            segmentId: segment.id,
+            segmentBox: segment.box,
+            rawText: segment.text,
+            acceptedFields: decision.accepted,
+            review: decision.review,
+            rejected: decision.rejected,
+            evidenceLines: segment.lines.map((line) => ({
+              id: line.id,
+              blockId: line.blockId,
+              text: line.text,
+              confidence: line.confidence,
+              box: line.normalizedBox
+            }))
+          }
+        }
+      } satisfies RecognizedSample;
+    });
+    if (!samples.length) throw new Error("未能从图片中形成有效样品区块，请重新拍摄或手工添加");
     return {
-      label: likelyLabel(rawText, fields as Record<string, string>, file.name),
-      rawText,
-      engine: result.engine ?? "OCR",
-      confidence: result.confidence,
-      metadata: {
-        recognition: {
-          source: "photo",
-          fileName: file.name,
-          mimeType: file.type,
-          engine: result.engine ?? "OCR",
-          confidence: result.confidence,
-          rawText,
-          fields
-        },
-        ...fields
-      }
+      fileName: file.name,
+      engine,
+      layoutType: layout.layoutType,
+      segmentationConfidence: layout.confidence,
+      requiresSegmentationReview: layout.requiresReview,
+      samples
     };
+  }
+
+  async recognize(file: File, index = 0): Promise<RecognizedSample> {
+    const page = await this.recognizePage(file, index);
+    return page.samples[0];
   }
 
   async recognizeBatch(
     files: readonly File[],
     onProgress?: (progress: SampleRecognitionProgress) => void
-  ): Promise<readonly (RecognizedSample | Error)[]> {
-    const results: (RecognizedSample | Error)[] = [];
+  ): Promise<readonly (RecognizedPage | Error)[]> {
+    const results: (RecognizedPage | Error)[] = [];
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
       onProgress?.({ index: index + 1, total: files.length, fileName: file.name, status: "processing" });
       try {
-        const recognized = await this.recognize(file, index);
+        const recognized = await this.recognizePage(file, index);
         results.push(recognized);
-        onProgress?.({ index: index + 1, total: files.length, fileName: file.name, status: "completed" });
+        onProgress?.({
+          index: index + 1,
+          total: files.length,
+          fileName: file.name,
+          status: "completed",
+          message: recognized.samples.length > 1 ? `识别到 ${recognized.samples.length} 个样品区块` : undefined
+        });
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error(String(error));
         results.push(normalized);
