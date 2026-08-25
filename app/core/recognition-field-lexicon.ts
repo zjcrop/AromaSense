@@ -112,6 +112,40 @@ export function splitInlineFieldPair(value: unknown): InlineFieldPair | undefine
   return undefined;
 }
 
+export interface LeadingFieldPair extends FieldAnchor {
+  label: string;
+  value: string;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const LEADING_FIELD_ALIASES = (Object.entries(RECOGNITION_FIELD_ALIASES) as [RecognitionFieldKey, readonly string[]][])
+  .flatMap(([field, aliases]) => aliases.map((alias) => ({ field, alias, normalized: semanticText(alias) })))
+  .filter((item) => /[\u3400-\u9fff]/u.test(item.normalized) || anchorKey(item.normalized).length >= 3)
+  .sort((a, b) => b.normalized.length - a.normalized.length);
+
+export function splitLeadingFieldPair(value: unknown): LeadingFieldPair | undefined {
+  const text = semanticText(value);
+  if (!text || /[:：=|｜]/.test(text)) return undefined;
+  for (const item of LEADING_FIELD_ALIASES) {
+    const match = text.match(new RegExp(`^(${escapeRegex(item.normalized)})\\s+(.+)$`, "i"));
+    if (!match) continue;
+    const remainder = cleanRecognitionText(match[2]);
+    if (!remainder) continue;
+    if (detectFieldAnchor(remainder)) continue;
+    return {
+      field: item.field,
+      alias: item.alias,
+      confidence: 0.97,
+      label: cleanRecognitionText(match[1]),
+      value: remainder
+    };
+  }
+  return undefined;
+}
+
 export function fieldAliasCount(value: unknown): number {
   const text = cleanRecognitionText(value);
   if (!text) return 0;
