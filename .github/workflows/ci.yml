@@ -10,12 +10,66 @@ permissions:
   contents: read
 
 jobs:
-  core-persistence:
+  firebase-auth-config:
     runs-on: ubuntu-latest
     env:
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+      AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
+      AROMASENSE_PUBLIC_APP_URL: https://zjcrop.github.io/AromaSense/
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify Firebase API key and authorized domain
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const key = process.env.AROMASENSE_FIREBASE_API_KEY;
+          const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${encodeURIComponent(key)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              identifier: `aromasense-smoke-${Date.now()}@example.invalid`,
+              continueUri: process.env.AROMASENSE_PUBLIC_APP_URL
+            })
+          });
+          const body = await response.json();
+          console.log('Firebase createAuthUri status:', response.status);
+          if (!response.ok) throw new Error(`Firebase API key / authorized-domain check failed: ${body?.error?.message ?? response.status}`);
+          NODE
+      - name: Verify email password provider is enabled
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const key = process.env.AROMASENSE_FIREBASE_API_KEY;
+          const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(key)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              email: `aromasense-smoke-${Date.now()}@example.invalid`,
+              password: 'AromaSense-Smoke-Only-9x!',
+              returnSecureToken: true
+            })
+          });
+          const body = await response.json();
+          const code = body?.error?.message ?? '';
+          console.log('Firebase password-provider probe:', response.status, code);
+          if (response.ok) throw new Error('Unexpected smoke account matched an existing Firebase user');
+          if (code === 'OPERATION_NOT_ALLOWED') throw new Error('Firebase Email/Password provider is disabled');
+          if (/API_KEY|PROJECT_NOT_FOUND|CONFIGURATION_NOT_FOUND/.test(code)) throw new Error(`Firebase project configuration invalid: ${code}`);
+          if (!/EMAIL_NOT_FOUND|INVALID_PASSWORD|INVALID_LOGIN_CREDENTIALS|USER_NOT_FOUND/.test(code)) {
+            throw new Error(`Unexpected Firebase auth response: ${code || response.status}`);
+          }
+          NODE
+
+  core-persistence:
+    runs-on: ubuntu-latest
+    needs: firebase-auth-config
+    env:
       AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
-      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
-      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+      AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -62,8 +116,8 @@ jobs:
       - name: Assemble B0.1.a debug APK
         env:
           AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
-          AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
-          AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+          AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
         run: gradle -p mobile/android :app:assembleDebug
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
