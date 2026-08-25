@@ -11,6 +11,7 @@ const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID || "romasen
 const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
 const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
+const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
 
 function escapeAttribute(value) {
   return value
@@ -58,7 +59,12 @@ async function buildRecognitionBootstrap() {
       flavors: rawBook.flavors,
       labelLexicon: {
         version: rawLexicon?.version,
-        fields: rawLexicon?.fields ?? {}
+        updatedAt: rawLexicon?.updatedAt ?? "",
+        fields: rawLexicon?.fields ?? {},
+        valueAliases: rawLexicon?.valueAliases ?? {},
+        dateRecognition: rawLexicon?.dateRecognition ?? {},
+        harvestRecognition: rawLexicon?.harvestRecognition ?? {},
+        numericRecognition: rawLexicon?.numericRecognition ?? {}
       }
     };
     const serialized = JSON.stringify(book);
@@ -75,6 +81,20 @@ async function buildRecognitionBootstrap() {
 }
 
 const recognitionBootstrap = await buildRecognitionBootstrap();
+
+async function validateRecognitionArtifacts(out) {
+  const coreSource = await readFile(resolve(out, "luckybean-recognition-core.js"), "utf8");
+  if (!coreSource.includes(requiredPipelineVersion)) {
+    throw new Error(`LuckyBean production recognition pipeline missing from artifact: ${requiredPipelineVersion}`);
+  }
+  if (!coreSource.includes("preparePackageImage") || !coreSource.includes("recognizeCoffeeBag")) {
+    throw new Error("LuckyBean production image/OCR pipeline missing from artifact");
+  }
+  const appSource = await readFile(resolve(out, "app.js"), "utf8");
+  if (/1\.24B-compat|luckyBeanCompat|parseLuckyBeanSemanticText/.test(appSource)) {
+    throw new Error("Deprecated AromaSense LuckyBean compatibility parser leaked into production artifact");
+  }
+}
 
 async function buildTarget(out) {
   await rm(out, { recursive: true, force: true });
@@ -102,6 +122,8 @@ async function buildTarget(out) {
     loader: { ".sql": "text" },
     legalComments: "none"
   });
+
+  await validateRecognitionArtifacts(out);
 
   for (const file of [
     "aromasense-cupping.css",
