@@ -48,20 +48,13 @@ jobs:
           echo "AROMASENSE_D1_DATABASE_NAME=${AROMASENSE_D1_DATABASE_NAME:-aromasense-db}" >> "$GITHUB_ENV"
           echo "AROMASENSE_PUBLIC_APP_URL=${AROMASENSE_PUBLIC_APP_URL:-https://zjcrop.github.io/AromaSense/}" >> "$GITHUB_ENV"
 
-      - name: Reject API token stored as repository variable
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' && vars.CLOUDFLARE_API_TOKEN != '' }}
-        shell: bash
-        run: |
-          echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN was found in Repository variables. Delete it there and create it under Settings > Secrets and variables > Actions > Repository secrets."
-          exit 1
-
       - name: Validate external prerequisites
         shell: bash
         run: |
           set -euo pipefail
           missing=0
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN is not visible as a Repository secret to this workflow. Do not put it in Variables or an Environment-only secret."
+            echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN is not visible as a Repository secret to this workflow. Put it under Settings > Secrets and variables > Actions > Repository secrets, not Variables or an Environment-only secret."
             missing=1
           fi
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
