@@ -22,6 +22,7 @@ export interface BatchReviewDialogOptions {
   index: number;
   total: number;
   confirmed: number;
+  finalPending?: boolean;
   previewUrl?: string;
   recognitionStatus?: string;
   rawText?: string;
@@ -47,6 +48,11 @@ function readValue(overlay: HTMLElement): BatchReviewValue {
     if (key && value) fields[key] = value;
   }
   return { label, fields };
+}
+
+function validConfirmedLabel(value: string): boolean {
+  const label = value.trim();
+  return Boolean(label) && !/^待确认样品\s+\d+$/u.test(label);
 }
 
 export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchReviewDialogHandle {
@@ -146,12 +152,15 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   const footer = element("footer", "batch-review__footer");
   const previousButton = button("batch-review__secondary", "上一个", () => options.onPrevious?.(readValue(overlay)));
   previousButton.disabled = !options.onPrevious;
-  const confirmButton = button("batch-review__primary", options.index === options.total - 1 ? "确认并完成" : "确认并下一个", async () => {
+  const confirmButton = button("batch-review__primary", options.finalPending ? "确认并完成" : "确认并下一个", async () => {
     const value = readValue(overlay);
-    if (!value.label) {
-      validation.textContent = "样品名称不能为空。请确认名称后继续。";
+    if (!validConfirmedLabel(value.label)) {
+      validation.textContent = value.label
+        ? "当前仍是系统生成的待确认名称，请修改为有效样品名称后继续。"
+        : "样品名称不能为空。请确认名称后继续。";
       validation.hidden = false;
       nameInput.focus();
+      nameInput.select();
       return;
     }
     validation.hidden = true;
