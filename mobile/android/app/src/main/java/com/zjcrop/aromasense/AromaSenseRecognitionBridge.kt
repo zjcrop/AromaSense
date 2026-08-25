@@ -39,25 +39,29 @@ class AromaSenseRecognitionBridge(
             val fileName = request.optString("fileName", "")
             val source = sourceForRequest(imageId, fileName)
 
+            // LuckyBean production behavior: when preparePackageImage supplied a data URL,
+            // OCR that normalized bitmap first. Only use the original Android URI when the
+            // web preparation layer could not produce a processed image.
+            decodedBitmap = decodeDataUrl(request.optString("dataUrl", ""))
             val input: InputImage
             val sourceBinding: String
-            if (source != null) {
-                // Prefer the Android URI because InputImage.fromFilePath preserves the
-                // original file and its orientation metadata. The Web data URL remains
-                // an exact-image fallback if URI binding is unavailable.
-                input = InputImage.fromFilePath(activity, source)
-                sourceBinding = "android-uri"
-            } else {
-                decodedBitmap = decodeDataUrl(request.optString("dataUrl", ""))
-                    ?: throw IllegalArgumentException("Android 原图引用不可用，且图片数据回退失败，请重新选择照片")
+            if (decodedBitmap != null) {
                 input = InputImage.fromBitmap(decodedBitmap!!, 0)
-                sourceBinding = "web-data-url"
+                sourceBinding = "luckybean-prepared-data-url"
+            } else if (source != null) {
+                input = InputImage.fromFilePath(activity, source)
+                sourceBinding = "android-uri-fallback"
+            } else {
+                throw IllegalArgumentException("无法读取照片数据，LuckyBean 预处理图和 Android 原图均不可用")
             }
 
             val chineseTask = chineseRecognizer.process(input)
             val latinTask = latinRecognizer.process(input)
             Tasks.await(Tasks.whenAllComplete(chineseTask, latinTask), 30, TimeUnit.SECONDS)
 
+            // Match LuckyBean: Chinese pass is inserted first, then Latin; duplicate
+            // normalized text keeps the first result and RecognitionDocument performs
+            // its own spatial sort from polygons later.
             val unique = LinkedHashMap<String, JSONObject>()
             if (chineseTask.isSuccessful) appendLines(unique, chineseTask.result, "zh")
             if (latinTask.isSuccessful) appendLines(unique, latinTask.result, "latin")
@@ -67,8 +71,6 @@ class AromaSenseRecognitionBridge(
             }
 
             val lines = unique.values.toList()
-                .sortedWith(compareBy<JSONObject> { polygonTop(it.optJSONArray("polygon")) }
-                    .thenBy { polygonLeft(it.optJSONArray("polygon")) })
             val fullText = lines.joinToString("\n") { it.optString("text") }
             JSONObject()
                 .put("engine", "android-mlkit-bundled-16.0.1")
@@ -109,7 +111,7 @@ class AromaSenseRecognitionBridge(
                 if (value.isEmpty()) continue
                 val key = value.lowercase(Locale.ROOT)
                     .replace(Regex("[\\s，,。.;；:：/_\\-·•]+"), "")
-                if (key.isEmpty()) continue
+                if (key.isEmpty() || target.containsKey(key)) continue
 
                 val polygon = JSONArray()
                 val corners = line.cornerPoints
@@ -124,52 +126,14 @@ class AromaSenseRecognitionBridge(
                     }
                 }
 
-                val next = JSONObject()
+                target[key] = JSONObject()
                     .put("id", "$languageHint-$blockIndex-$lineIndex")
                     .put("blockId", "$languageHint-block-$blockIndex")
                     .put("text", value)
                     .put("confidence", 0.86)
                     .put("language", languageHint)
                     .put("polygon", polygon)
-
-                val existing = target[key]
-                if (existing == null || polygonArea(next.optJSONArray("polygon")) > polygonArea(existing.optJSONArray("polygon"))) {
-                    target[key] = next
-                }
             }
         }
-    }
-
-    private fun polygonLeft(points: JSONArray?): Int {
-        if (points == null || points.length() == 0) return Int.MAX_VALUE
-        var value = Int.MAX_VALUE
-        for (index in 0 until points.length()) value = minOf(value, points.optJSONArray(index)?.optInt(0, Int.MAX_VALUE) ?: Int.MAX_VALUE)
-        return value
-    }
-
-    private fun polygonTop(points: JSONArray?): Int {
-        if (points == null || points.length() == 0) return Int.MAX_VALUE
-        var value = Int.MAX_VALUE
-        for (index in 0 until points.length()) value = minOf(value, points.optJSONArray(index)?.optInt(1, Int.MAX_VALUE) ?: Int.MAX_VALUE)
-        return value
-    }
-
-    private fun polygonArea(points: JSONArray?): Long {
-        if (points == null || points.length() < 2) return 0
-        var minX = Int.MAX_VALUE
-        var minY = Int.MAX_VALUE
-        var maxX = Int.MIN_VALUE
-        var maxY = Int.MIN_VALUE
-        for (index in 0 until points.length()) {
-            val point = points.optJSONArray(index) ?: continue
-            val x = point.optInt(0)
-            val y = point.optInt(1)
-            minX = minOf(minX, x)
-            minY = minOf(minY, y)
-            maxX = maxOf(maxX, x)
-            maxY = maxOf(maxY, y)
-        }
-        if (minX == Int.MAX_VALUE || minY == Int.MAX_VALUE) return 0
-        return (maxX - minX).toLong().coerceAtLeast(0) * (maxY - minY).toLong().coerceAtLeast(0)
     }
 }
