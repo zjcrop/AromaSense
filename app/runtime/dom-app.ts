@@ -1,4 +1,5 @@
 import { CloudflareAuthClient } from "../core/auth-client";
+import type { BatchSetupDraft } from "../core/batch-setup-draft";
 import { CuppingSessionController, type ObservationIdFactory } from "../core/cupping-session-controller";
 import { CuppingSetupService } from "../core/cupping-setup-service";
 import { RevisionCheckpointService } from "../core/revision-checkpoint-service";
@@ -19,6 +20,8 @@ import { AccountRenderer } from "../ui/dom/account-renderer";
 import { BatchSetupRenderer } from "../ui/dom/batch-setup-renderer";
 import { BrowserVoicePromptPlayer } from "../ui/dom/browser-voice";
 import { CuppingScreenRenderer } from "../ui/dom/cupping-screen-renderer";
+
+const BATCH_SETUP_DRAFT_KEY = "batch.setup.draft.v1";
 
 export interface AromaSenseDomAppOptions {
   now(): string;
@@ -174,10 +177,13 @@ export class AromaSenseDomApp {
           ? (waiting ? `同步 ${waiting}` : "账户 · 已登录")
           : pending
             ? "账户 · 待验证"
-            : "账户 / 同步"
+            : "账户 / 同步",
+        loadDraft: () => this.preferences.get<BatchSetupDraft>(BATCH_SETUP_DRAFT_KEY),
+        saveDraft: (draft) => this.preferences.set(BATCH_SETUP_DRAFT_KEY, draft, this.options.now()),
+        clearDraft: () => this.preferences.remove(BATCH_SETUP_DRAFT_KEY)
       }
     );
-    setup.render();
+    await setup.render();
   }
 
   async openSession(sessionId: string): Promise<void> {
