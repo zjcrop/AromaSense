@@ -13,8 +13,10 @@ const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
 const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
 const requiredBrowserOcrMarkers = [
-  "PP-OCRv5-browser-0.4.2",
-  "tesseract.js-6.0.1-cn-mixed"
+  "@paddleocr/paddleocr-js@",
+  "textDetUnclipRatio",
+  "tesseract.js-6.0.1-cn-mixed",
+  "otsuThreshold"
 ];
 
 function escapeAttribute(value) {
@@ -96,7 +98,7 @@ async function validateRecognitionArtifacts(out) {
   }
   for (const marker of requiredBrowserOcrMarkers) {
     if (!coreSource.includes(marker)) {
-      throw new Error(`LuckyBean production browser OCR provider missing from artifact: ${marker}`);
+      throw new Error(`LuckyBean production browser OCR implementation missing from artifact: ${marker}`);
     }
   }
   const appSource = await readFile(resolve(out, "app.js"), "utf8");
