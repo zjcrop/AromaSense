@@ -152,7 +152,8 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   const footer = element("footer", "batch-review__footer");
   const previousButton = button("batch-review__secondary", "上一个", () => options.onPrevious?.(readValue(overlay)));
   previousButton.disabled = !options.onPrevious;
-  const confirmButton = button("batch-review__primary", options.finalPending ? "确认并完成" : "确认并下一个", async () => {
+  const isFinalPending = options.finalPending ?? (options.confirmed >= options.total - 1 || options.index === options.total - 1);
+  const confirmButton = button("batch-review__primary", isFinalPending ? "确认并完成" : "确认并下一个", async () => {
     const value = readValue(overlay);
     if (!validConfirmedLabel(value.label)) {
       validation.textContent = value.label
