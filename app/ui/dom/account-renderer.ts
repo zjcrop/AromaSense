@@ -61,21 +61,21 @@ export class AccountRenderer {
     const message = element("div", "account-card__inline-message");
     message.hidden = true;
     const actions = element("div", "account-card__actions");
+    const syncButton = button("account-card__primary", "立即同步", async () => {
+      syncButton.disabled = true;
+      message.hidden = false;
+      message.textContent = "正在核对本机与云端数据…";
+      try {
+        await this.options.onSync?.();
+        message.textContent = "数据同步已完成";
+      } catch (error) {
+        message.textContent = error instanceof Error ? error.message : "数据同步失败，请稍后重试";
+      } finally {
+        syncButton.disabled = false;
+      }
+    });
     actions.append(
-      button("account-card__primary", "立即同步", async (event) => {
-        const target = event.currentTarget as HTMLButtonElement;
-        target.disabled = true;
-        message.hidden = false;
-        message.textContent = "正在核对本机与云端数据…";
-        try {
-          await this.options.onSync?.();
-          message.textContent = "数据同步已完成";
-        } catch (error) {
-          message.textContent = error instanceof Error ? error.message : "数据同步失败，请稍后重试";
-        } finally {
-          target.disabled = false;
-        }
-      }),
+      syncButton,
       button("account-card__secondary", "进入杯测", () => this.options.onAuthenticated(current)),
       button("account-card__secondary", "退出登录", async () => {
         await this.auth?.logout();
