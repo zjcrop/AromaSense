@@ -28,6 +28,13 @@ export interface AromaSenseDomAppOptions {
   cloudBaseUrl?: string;
 }
 
+export interface AppPreloadState {
+  account: "cloud-unconfigured" | "signed-out" | "signed-in";
+  accountMessage: string;
+  syncMessage: string;
+  unfinishedSessions: number;
+}
+
 type RootMode = "setup" | "cupping" | "account" | "empty";
 
 export class AromaSenseDomApp {
@@ -38,6 +45,8 @@ export class AromaSenseDomApp {
   private readonly syncQueue: SyncQueueStore;
   private readonly syncEngine?: SyncEngine;
   private readonly revisions: RevisionCheckpointService;
+  private readonly recognizer = new SampleRecognitionService();
+  private preloadPromise?: Promise<AppPreloadState>;
 
   constructor(
     private readonly root: HTMLElement,
@@ -64,8 +73,39 @@ export class AromaSenseDomApp {
     }
   }
 
+  preload(): Promise<AppPreloadState> {
+    if (this.preloadPromise) return this.preloadPromise;
+    this.preloadPromise = (async () => {
+      await this.syncEngine?.recoverInterrupted();
+      const [session, counts, recent] = await Promise.all([
+        this.authClient?.current(),
+        this.syncQueue.counts(),
+        new RecentSessionReader(this.db).list(50)
+      ]);
+      const waiting = counts.pending + counts.failed + counts.conflict;
+      return {
+        account: !this.options.cloudBaseUrl ? "cloud-unconfigured" : session ? "signed-in" : "signed-out",
+        accountMessage: !this.options.cloudBaseUrl
+          ? "云服务未配置，本地功能可用"
+          : session
+            ? `已读取登录账户 ${session.email}`
+            : "未登录，本地功能可用",
+        syncMessage: waiting ? `${waiting} 项任务等待处理` : "本地同步队列已恢复",
+        unfinishedSessions: recent.filter((item) => item.status === "draft" || item.status === "active").length
+      };
+    })().catch((error) => {
+      this.preloadPromise = undefined;
+      throw error;
+    });
+    return this.preloadPromise;
+  }
+
+  warmRecognition() {
+    return this.recognizer.warmup();
+  }
+
   async start(): Promise<void> {
-    await this.syncEngine?.recoverInterrupted();
+    await this.preload();
     await this.showSetup();
   }
 
@@ -100,7 +140,7 @@ export class AromaSenseDomApp {
     const setup = new BatchSetupRenderer(
       this.root,
       new CuppingSetupService(localRepository),
-      new SampleRecognitionService(),
+      this.recognizer,
       {
         now: this.options.now,
         createSessionId: this.options.createSessionId,
@@ -143,9 +183,7 @@ export class AromaSenseDomApp {
         onExit: async () => { await this.showSetup(); },
         onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); },
         onSync: async () => { await this.syncPending(); },
-        onSessionFinished: async () => {
-          await this.syncPending();
-        }
+        onSessionFinished: async () => { await this.syncPending(); }
       }
     );
     await this.screen.initialize(sessionId);
@@ -168,7 +206,7 @@ export class AromaSenseDomApp {
 
   private setRootMode(mode: RootMode): void {
     this.root.replaceChildren();
-    this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen");
+    this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen");
     if (mode === "setup") this.root.classList.add("batch-setup");
     if (mode === "cupping") this.root.classList.add("aromasense-cupping");
     if (mode === "account") this.root.classList.add("account-screen");
