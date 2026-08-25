@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
-      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
-      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
+      AROMASENSE_FIREBASE_PROJECT_ID: aromasense-139da
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,8 +33,6 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${AROMASENSE_CLOUD_URL:-}" || (echo "Manual Pages deployment requires repository variable AROMASENSE_CLOUD_URL." && exit 1)
-          test -n "${AROMASENSE_FIREBASE_API_KEY:-}" || (echo "Manual Pages deployment requires FIREBASE_WEB_API_KEY." && exit 1)
-          test -n "${AROMASENSE_FIREBASE_PROJECT_ID:-}" || (echo "Manual Pages deployment requires FIREBASE_PROJECT_ID." && exit 1)
           case "$AROMASENSE_CLOUD_URL" in
             https://*) ;;
             *) echo "AROMASENSE_CLOUD_URL must use https://"; exit 1 ;;

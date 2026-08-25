@@ -6,8 +6,8 @@ const root = resolve(import.meta.dirname, "..");
 const androidOut = resolve(root, "mobile/android/app/src/main/assets/www");
 const pagesOut = resolve(root, "site");
 const cloudBaseUrl = process.env.AROMASENSE_CLOUD_URL ?? "";
-const firebaseApiKey = process.env.AROMASENSE_FIREBASE_API_KEY ?? "";
-const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID ?? "";
+const firebaseApiKey = process.env.AROMASENSE_FIREBASE_API_KEY || "AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84";
+const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID || "aromasense-139da";
 
 function escapeAttribute(value) {
   return value

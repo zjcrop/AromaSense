@@ -20,8 +20,8 @@ env:
   AROMASENSE_D1_DATABASE_NAME: ${{ vars.AROMASENSE_D1_DATABASE_NAME }}
   AROMASENSE_PUBLIC_APP_URL: ${{ vars.AROMASENSE_PUBLIC_APP_URL }}
   AROMASENSE_CLOUD_URL_FALLBACK: ${{ vars.AROMASENSE_CLOUD_URL }}
-  FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
-  FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
+  FIREBASE_PROJECT_ID: aromasense-139da
+  FIREBASE_WEB_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
 
 jobs:
   cloud:
@@ -59,14 +59,6 @@ jobs:
           fi
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
             echo "::error title=Cloudflare configuration::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"
-            missing=1
-          fi
-          if [ -z "${FIREBASE_PROJECT_ID:-}" ]; then
-            echo "::error title=Firebase configuration::Missing repository variable FIREBASE_PROJECT_ID"
-            missing=1
-          fi
-          if [ -z "${FIREBASE_WEB_API_KEY:-}" ]; then
-            echo "::error title=Firebase configuration::Missing repository variable FIREBASE_WEB_API_KEY"
             missing=1
           fi
           case "${AROMASENSE_PUBLIC_APP_URL:-}" in
@@ -189,8 +181,8 @@ jobs:
     needs: cloud
     env:
       AROMASENSE_CLOUD_URL: ${{ needs.cloud.outputs.worker_url }}
-      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
-      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
+      AROMASENSE_FIREBASE_PROJECT_ID: aromasense-139da
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -244,8 +236,8 @@ jobs:
     needs: cloud
     env:
       AROMASENSE_CLOUD_URL: ${{ needs.cloud.outputs.worker_url }}
-      AROMASENSE_FIREBASE_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
-      AROMASENSE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      AROMASENSE_FIREBASE_API_KEY: AIzaSyCgeidfyGK4-TnWwBkiO-KWQ0TYNn46G84
+      AROMASENSE_FIREBASE_PROJECT_ID: aromasense-139da
     steps:
       - name: Checkout
         uses: actions/checkout@v7
