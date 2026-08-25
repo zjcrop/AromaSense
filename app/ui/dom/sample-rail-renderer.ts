@@ -19,10 +19,20 @@ function preferredStage(item: SampleRailItemViewState): StageId {
     ?? "preparation";
 }
 
+function currentStage(item: SampleRailItemViewState) {
+  return item.stages.find((stage) => stage.status === "active")
+    ?? item.stages.find((stage) => stage.status === "not_started")
+    ?? [...item.stages].reverse().find((stage) => stage.status === "completed")
+    ?? item.stages[0];
+}
+
 function progressTone(item: SampleRailItemViewState): string {
-  const active = item.stages.find((stage) => stage.status === "active")
-    ?? [...item.stages].reverse().find((stage) => stage.status === "completed");
-  return active?.tone ?? "neutral";
+  return currentStage(item)?.tone ?? "neutral";
+}
+
+function shortLabel(item: SampleRailItemViewState): string {
+  const raw = (item.label ?? `样品 ${item.displayNumber}`).trim();
+  return raw.length > 18 ? `${raw.slice(0, 18)}…` : raw;
 }
 
 export function renderSampleRail(
@@ -38,54 +48,46 @@ export function renderSampleRail(
   for (const item of items) {
     const explicitlyExpanded = options.expandedSampleIds?.has(item.sampleId) ?? false;
     const expanded = !options.compact && (explicitlyExpanded || item.active);
+    const stage = currentStage(item);
     const card = element(
       "article",
       `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${expanded ? " is-expanded" : " is-collapsed"}`
     );
     card.dataset.sampleId = item.sampleId;
-    card.draggable = !options.compact;
 
-    const head = element("div", "sample-rail__head");
     const select = button("sample-rail__select", "", () => callbacks.select(item.sampleId, preferredStage(item)));
-    const number = element("strong", "sample-rail__number", String(item.displayNumber).padStart(2, "0"));
-    const label = element("span", "sample-rail__label", item.label ?? `样品 ${item.displayNumber}`);
-    const count = element("span", "sample-rail__count", `${item.completedStageCount}/${item.totalStageCount}`);
-    select.append(number, label, count);
-    head.append(select);
-
-    if (!options.compact) {
-      const expand = button("sample-rail__expand", expanded ? "收" : "展", () => callbacks.toggleExpanded(item.sampleId));
-      expand.setAttribute("aria-expanded", String(expanded));
-      expand.title = expanded ? "收起样品便签" : "展开样品便签";
-      head.append(expand);
-    }
-
-    const progress = element("div", "sample-rail__progress");
-    for (const stage of item.stages) {
-      const dot = element("span", `sample-rail__progress-dot sample-rail__progress-dot--${stage.tone} is-${stage.status}`);
-      dot.title = `${stage.label}：${stage.status}`;
-      progress.append(dot);
-    }
-
-    card.append(head, progress);
-
+    select.append(element("strong", "sample-rail__number", String(item.displayNumber).padStart(2, "0")));
     if (expanded) {
-      const stages = element("div", "sample-rail__stages");
-      for (const stage of item.stages) {
-        const stageButton = button(
-          `stage-chip stage-chip--${stage.tone} stage-chip--${stage.status}`,
-          stage.label,
-          () => callbacks.select(item.sampleId, stage.stageId)
-        );
-        stageButton.dataset.stageId = stage.stageId;
-        stageButton.title = `${stage.label}：${stage.status}`;
-        stages.append(stageButton);
-      }
-      const handle = element("span", "sample-rail__drag", "⋮⋮");
-      handle.setAttribute("aria-label", `拖动样品 ${item.displayNumber}`);
-      card.append(stages, handle);
+      const text = element("span", "sample-rail__active-copy");
+      text.append(
+        element("span", "sample-rail__label", shortLabel(item)),
+        element("small", `sample-rail__stage sample-rail__stage--${stage?.tone ?? "neutral"}`, stage?.label ?? "准备")
+      );
+      select.append(text);
     }
 
+    const stateDot = element("span", `sample-rail__state-dot sample-rail__state-dot--${stage?.tone ?? "neutral"}`);
+    stateDot.title = stage ? `${stage.label}：${stage.status}` : "尚未开始";
+    select.append(stateDot);
+
+    const actions = element("div", "sample-rail__actions");
+    if (!options.compact) {
+      if (expanded) {
+        const collapse = button("sample-rail__expand", "‹", () => callbacks.toggleExpanded(item.sampleId));
+        collapse.setAttribute("aria-expanded", "true");
+        collapse.title = "收起样品便签";
+        actions.append(collapse);
+      }
+      const drag = button("sample-rail__drag", "●", () => undefined);
+      drag.type = "button";
+      drag.dataset.dragHandle = "sample";
+      drag.setAttribute("aria-label", `拖动样品 ${item.displayNumber}`);
+      drag.title = `长按拖动样品 ${item.displayNumber}`;
+      actions.append(drag);
+    }
+
+    card.append(select);
+    if (actions.childElementCount) card.append(actions);
     root.append(card);
   }
 }
