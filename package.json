@@ -6,7 +6,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "bundle:web": "node scripts/build-web.mjs",
-    "test": "npm run build && node --test dist/tests",
+    "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
