@@ -14,6 +14,7 @@ export interface LuckyBeanRecognitionBook {
 
 export interface LuckyBeanCoreBlock {
   id?: string;
+  blockId?: string;
   imageId?: string;
   imageRole?: string;
   order?: number;
