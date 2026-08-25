@@ -12,6 +12,10 @@ const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
 const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
 const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
+const requiredBrowserOcrMarkers = [
+  "PP-OCRv5-browser-0.4.2",
+  "tesseract.js-6.0.1-cn-mixed"
+];
 
 function escapeAttribute(value) {
   return value
@@ -89,6 +93,11 @@ async function validateRecognitionArtifacts(out) {
   }
   if (!coreSource.includes("preparePackageImage") || !coreSource.includes("recognizeCoffeeBag")) {
     throw new Error("LuckyBean production image/OCR pipeline missing from artifact");
+  }
+  for (const marker of requiredBrowserOcrMarkers) {
+    if (!coreSource.includes(marker)) {
+      throw new Error(`LuckyBean production browser OCR provider missing from artifact: ${marker}`);
+    }
   }
   const appSource = await readFile(resolve(out, "app.js"), "utf8");
   if (/1\.24B-compat|luckyBeanCompat|parseLuckyBeanSemanticText/.test(appSource)) {
