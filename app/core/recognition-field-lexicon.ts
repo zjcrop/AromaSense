@@ -86,7 +86,8 @@ export function detectFieldAnchor(value: unknown): FieldAnchor | undefined {
     if (!(key.startsWith(aliasKey) || aliasKey.startsWith(key))) continue;
     if (Math.abs(key.length - aliasKey.length) <= 1) return { ...match, confidence: 0.86 };
   }
-  return undefined;
+  const leading = splitLeadingFieldPair(value);
+  return leading ? { field: leading.field, alias: leading.alias, confidence: leading.confidence } : undefined;
 }
 
 export interface InlineFieldPair extends FieldAnchor {
@@ -134,7 +135,8 @@ export function splitLeadingFieldPair(value: unknown): LeadingFieldPair | undefi
     if (!match) continue;
     const remainder = cleanRecognitionText(match[2]);
     if (!remainder) continue;
-    if (detectFieldAnchor(remainder)) continue;
+    const remainderKey = anchorKey(remainder);
+    if (ALIAS_INDEX.has(remainderKey)) continue;
     return {
       field: item.field,
       alias: item.alias,
