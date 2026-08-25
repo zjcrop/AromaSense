@@ -79,6 +79,8 @@ export class BatchSetupRenderer {
     });
 
     const recent = this.renderRecentSessions();
+    const emptyHint = element("p", "batch-setup__empty-hint", "尚未添加样品。可拍照、批量选择图片，或手工添加。 ");
+    this.rowsRoot.append(emptyHint);
     const start = button("batch-setup__start", "开始杯测", () => this.submit());
     this.statusRoot.hidden = true;
     this.root.append(
@@ -92,10 +94,6 @@ export class BatchSetupRenderer {
       start
     );
     if (recent) this.root.append(recent);
-
-    this.addRow();
-    this.addRow();
-    this.addRow();
   }
 
   private renderRecentSessions(): HTMLElement | undefined {
@@ -123,6 +121,7 @@ export class BatchSetupRenderer {
     previewUrl?: string,
     recognitionStatus?: string
   ): HTMLElement {
+    this.rowsRoot.querySelector(".batch-setup__empty-hint")?.remove();
     const row = element("article", "batch-setup__row");
     this.rowMetadata.set(row, { ...metadata });
 
@@ -138,7 +137,7 @@ export class BatchSetupRenderer {
     const main = element("div", "batch-setup__row-main");
     const input = element("input", "batch-setup__sample-label");
     input.type = "text";
-    input.placeholder = `样品 ${this.rowsRoot.children.length + 1}`;
+    input.placeholder = `样品 ${this.rowsRoot.querySelectorAll(".batch-setup__row").length + 1}`;
     input.value = label;
     main.append(input);
     if (recognitionStatus) main.append(element("small", "batch-setup__recognition-status", recognitionStatus));
@@ -151,10 +150,16 @@ export class BatchSetupRenderer {
       }
       row.remove();
       this.renumberPlaceholders();
+      this.ensureEmptyHint();
     });
     row.append(main, remove);
     this.rowsRoot.append(row);
     return row;
+  }
+
+  private ensureEmptyHint(): void {
+    if (this.rowsRoot.querySelector(".batch-setup__row") || this.rowsRoot.querySelector(".batch-setup__empty-hint")) return;
+    this.rowsRoot.append(element("p", "batch-setup__empty-hint", "尚未添加样品。可拍照、批量选择图片，或手工添加。"));
   }
 
   private async addPhotoFiles(files: readonly File[]): Promise<void> {
@@ -168,7 +173,7 @@ export class BatchSetupRenderer {
       const previewUrl = URL.createObjectURL(file);
       this.previewUrls.add(previewUrl);
       return this.addRow(
-        file.name.replace(/\.[^.]+$/, ""),
+        "",
         { recognition: { source: "photo", fileName: file.name, status: "processing" } },
         previewUrl,
         "等待识别…"
@@ -176,7 +181,7 @@ export class BatchSetupRenderer {
     });
 
     this.root.toggleAttribute("aria-busy", true);
-    this.showStatus(`正在按顺序识别 ${images.length} 张图片；识别结果可直接修改。`);
+    this.showStatus(`正在按顺序识别 ${images.length} 张图片；识别结果需确认后才建立样品。`);
     try {
       const results = await this.recognizer.recognizeBatch(images, (progress) => {
         this.showStatus(`识别 ${progress.index}/${progress.total}：${progress.fileName}${progress.status === "failed" ? ` · ${progress.message ?? "失败"}` : ""}`,
@@ -187,7 +192,7 @@ export class BatchSetupRenderer {
         const status = row.querySelector<HTMLElement>(".batch-setup__recognition-status");
         const input = row.querySelector<HTMLInputElement>(".batch-setup__sample-label");
         if (result instanceof Error) {
-          if (status) status.textContent = `自动识别失败：${result.message} · 可手工填写`;
+          if (status) status.textContent = `自动识别失败：${result.message} · 请手工填写`;
           const current = this.rowMetadata.get(row) ?? {};
           this.rowMetadata.set(row, {
             ...current,
@@ -196,10 +201,10 @@ export class BatchSetupRenderer {
           return;
         }
         if (input) input.value = result.label;
-        if (status) status.textContent = `${result.engine} · 已识别，可校正`;
+        if (status) status.textContent = `${result.engine} · 已识别，请核对`;
         this.rowMetadata.set(row, result.metadata);
       });
-      this.showStatus(`已处理 ${images.length} 张图片。请检查名称；原始 OCR 与结构化字段会随样品保存。`);
+      this.showStatus(`已处理 ${images.length} 张图片。请核对结构化识别结果后再开始杯测。`);
     } catch (error) {
       this.showStatus(error instanceof Error ? error.message : String(error), true);
     } finally {
@@ -215,15 +220,17 @@ export class BatchSetupRenderer {
 
   private async submit(): Promise<void> {
     const rows = [...this.rowsRoot.querySelectorAll<HTMLElement>(".batch-setup__row")];
-    const samples = rows.map((row) => {
+    const samples = rows.flatMap((row) => {
       const input = row.querySelector<HTMLInputElement>(".batch-setup__sample-label");
-      return {
-        label: input?.value.trim() || undefined,
+      const label = input?.value.trim() ?? "";
+      if (!label) return [];
+      return [{
+        label,
         metadata: { ...(this.rowMetadata.get(row) ?? {}) }
-      };
+      }];
     });
     if (samples.length === 0) {
-      this.showStatus("至少需要一个样品", true);
+      this.showStatus("至少需要一个已确认名称的有效样品", true);
       return;
     }
 
