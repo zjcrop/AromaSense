@@ -1,8 +1,6 @@
-name: Deploy AromaSense Web B0.1.a
+name: Manual AromaSense Web Deploy B0.1.a
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +9,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: aromasense-production
   cancel-in-progress: true
 
 jobs:
@@ -28,11 +26,11 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Validate connected build configuration
+      - name: Validate manual cloud endpoint override
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${AROMASENSE_CLOUD_URL:-}" || (echo "Missing repository variable AROMASENSE_CLOUD_URL; refusing to publish an account UI that cannot reach the Worker." && exit 1)
+          test -n "${AROMASENSE_CLOUD_URL:-}" || (echo "Manual Pages deployment requires repository variable AROMASENSE_CLOUD_URL. Normal production deployment is handled by deploy-cloud.yml and does not require this variable." && exit 1)
           case "$AROMASENSE_CLOUD_URL" in
             https://*) ;;
             *) echo "AROMASENSE_CLOUD_URL must use https://"; exit 1 ;;
@@ -48,14 +46,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          test -d site
           test -f site/index.html
           test -f site/app.js
           test -f site/sql-wasm.wasm
           ! grep -q '__CLOUD_BASE_URL__' site/index.html
           grep -Fq "data-cloud-base-url=\"$AROMASENSE_CLOUD_URL\"" site/index.html
-          echo "--- site contents ---"
-          find site -maxdepth 2 -type f -print | sort
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
