@@ -1,7 +1,10 @@
 package com.zjcrop.aromasense
 
 import android.app.Activity
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
@@ -29,13 +32,27 @@ class AromaSenseRecognitionBridge(
 
     @JavascriptInterface
     fun recognizeSampleImage(payloadJson: String): String {
+        var decodedBitmap: Bitmap? = null
         return try {
             val request = JSONObject(payloadJson)
             val imageId = request.optString("id", "")
             val fileName = request.optString("fileName", "")
             val source = sourceForRequest(imageId, fileName)
-                ?: throw IllegalArgumentException("Android 原图引用不可用，请重新选择照片")
-            val input = InputImage.fromFilePath(activity, source)
+
+            val input: InputImage
+            val sourceBinding: String
+            if (source != null) {
+                // Prefer the Android URI because InputImage.fromFilePath preserves the
+                // original file and its orientation metadata. The Web data URL remains
+                // an exact-image fallback if URI binding is unavailable.
+                input = InputImage.fromFilePath(activity, source)
+                sourceBinding = "android-uri"
+            } else {
+                decodedBitmap = decodeDataUrl(request.optString("dataUrl", ""))
+                    ?: throw IllegalArgumentException("Android 原图引用不可用，且图片数据回退失败，请重新选择照片")
+                input = InputImage.fromBitmap(decodedBitmap!!, 0)
+                sourceBinding = "web-data-url"
+            }
 
             val chineseTask = chineseRecognizer.process(input)
             val latinTask = latinRecognizer.process(input)
@@ -55,6 +72,7 @@ class AromaSenseRecognitionBridge(
             val fullText = lines.joinToString("\n") { it.optString("text") }
             JSONObject()
                 .put("engine", "android-mlkit-bundled-16.0.1")
+                .put("sourceBinding", sourceBinding)
                 .put("fullText", fullText)
                 .put("sourceWidth", input.width)
                 .put("sourceHeight", input.height)
@@ -64,12 +82,23 @@ class AromaSenseRecognitionBridge(
             JSONObject()
                 .put("error", error.message ?: "Android 本地 OCR 失败")
                 .toString()
+        } finally {
+            decodedBitmap?.takeIf { !it.isRecycled }?.recycle()
         }
     }
 
     fun close() {
         chineseRecognizer.close()
         latinRecognizer.close()
+    }
+
+    private fun decodeDataUrl(dataUrl: String): Bitmap? {
+        if (dataUrl.isBlank()) return null
+        return runCatching {
+            val encoded = dataUrl.substringAfter(',', dataUrl)
+            val bytes = Base64.decode(encoded, Base64.DEFAULT)
+            if (bytes.isEmpty()) null else BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
     }
 
     private fun appendLines(target: LinkedHashMap<String, JSONObject>, result: Text?, languageHint: String) {
