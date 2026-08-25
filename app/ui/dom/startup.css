@@ -1,0 +1,20 @@
+.startup-screen { min-height: 100dvh; background: #151515; color: #f4efe4; }
+.startup { width: min(440px, calc(100vw - 32px)); min-height: 100dvh; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; padding: 28px 0 max(30px, env(safe-area-inset-bottom)); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.startup__brand { text-align: center; margin-bottom: 28px; }
+.startup__mark { width: 68px; height: 68px; margin: 0 auto 12px; display: grid; place-items: center; border: 1px solid rgba(185,153,90,.7); border-radius: 22px; color: #b9995a; font-family: serif; font-size: 24px; letter-spacing: .08em; background: #191919; box-shadow: 0 12px 30px rgba(0,0,0,.22); }
+.startup__title { margin: 0; color: #f4efe4; font-size: 28px; letter-spacing: .02em; }
+.startup__subtitle { margin: 7px 0 0; color: #8f897f; font-size: 12px; }
+.startup__status-list { display: grid; gap: 7px; padding: 12px; border: 1px solid rgba(185,153,90,.22); border-radius: 14px; background: #1b1b1b; }
+.startup__status { display: grid; grid-template-columns: 10px 76px minmax(0,1fr); align-items: center; gap: 8px; min-height: 32px; font-size: 11px; }
+.startup__status-indicator { width: 7px; height: 7px; border-radius: 999px; background: #68645e; box-shadow: 0 0 0 3px rgba(255,255,255,.02); }
+.startup__status-label { color: #bcb5aa; font-weight: 650; }
+.startup__status-message { min-width: 0; color: #858078; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.startup__status.is-loading .startup__status-indicator { background: #b9995a; animation: startup-pulse 900ms ease-in-out infinite alternate; }
+.startup__status.is-ready .startup__status-indicator { background: #86a780; }
+.startup__status.is-ready .startup__status-message { color: #aeb4a6; }
+.startup__status.is-degraded .startup__status-indicator { background: #e89a55; }
+.startup__status.is-error .startup__status-indicator { background: #c96f6f; }
+.startup__note { margin: 13px 3px 0; color: #79746d; font-size: 10px; line-height: 1.55; text-align: center; }
+.startup__enter { width: 100%; min-height: 48px; margin-top: 18px; border: 0; border-radius: 13px; background: #b9995a; color: #111; font-weight: 760; font-size: 14px; }
+.startup__enter:disabled { opacity: .42; }
+@keyframes startup-pulse { from { opacity: .45; transform: scale(.82); } to { opacity: 1; transform: scale(1.12); } }
