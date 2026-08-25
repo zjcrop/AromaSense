@@ -1,10 +1,13 @@
-export const LUCKYBEAN_RECOGNITION_COMPAT_VERSION = "1.24B-compat.2";
+export const LUCKYBEAN_RECOGNITION_COMPAT_VERSION = "1.24B-compat.3";
 
 const REMOTE_CODEBOOK_URL = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const REMOTE_LABEL_LEXICON_URL = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
 const CACHE_KEY = "aromasense.luckybean-recognition-book.v1";
 
+type CodebookTable = "countries" | "regions" | "entities" | "varieties" | "processes" | "flavors";
 export type CoffeeCodebookRow = readonly unknown[];
+type LabelAliases = readonly string[] | { aliases?: readonly string[] };
+
 export interface CoffeeRecognitionBook {
   countries?: readonly CoffeeCodebookRow[];
   regions?: readonly CoffeeCodebookRow[];
@@ -12,10 +15,7 @@ export interface CoffeeRecognitionBook {
   varieties?: readonly CoffeeCodebookRow[];
   processes?: readonly CoffeeCodebookRow[];
   flavors?: readonly CoffeeCodebookRow[];
-  labelLexicon?: {
-    version?: string;
-    fields?: Record<string, { aliases?: readonly string[] } | readonly string[]>;
-  };
+  labelLexicon?: { version?: string; fields?: Record<string, LabelAliases> };
   version?: string | number;
 }
 
@@ -36,7 +36,8 @@ const CORE_FALLBACK_BOOK: CoffeeRecognitionBook = {
     ["CO-RW", "卢旺达", "Rwanda"], ["CO-BU", "布隆迪", "Burundi"], ["CO-ID", "印度尼西亚", "Indonesia", "印尼"],
     ["CO-YE", "也门", "Yemen"], ["CO-CN", "中国", "China"]
   ],
-  regions: [], entities: [],
+  regions: [],
+  entities: [],
   varieties: [
     ["VR-GES", "瑰夏", "Geisha / Gesha", "Gesha"], ["VR-TYP", "铁皮卡", "Typica"],
     ["VR-BOU", "波旁", "Bourbon"], ["VR-CAT", "卡杜拉", "Caturra"], ["VR-SL28", "SL28", "SL28"],
@@ -95,35 +96,56 @@ function normalizeCodeSource(value: unknown): string {
     .replace(/[‐‑‒–—―−﹣－]/g, "-").replace(/\s*-\s*/g, "-").replace(/[\t\r]+/g, " ");
 }
 
-function escapeRegex(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function aliasArray(value: LabelAliases | undefined): readonly string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return "aliases" in value && Array.isArray(value.aliases) ? value.aliases : [];
+}
 
 function lexiconTerms(book: CoffeeRecognitionBook | undefined, field: string): string[] {
   const defaults = DEFAULT_LABEL_LEXICON[field] ?? [];
-  const external = book?.labelLexicon?.fields?.[field];
-  const aliases = Array.isArray(external) ? external : external?.aliases ?? [];
+  const aliases = aliasArray(book?.labelLexicon?.fields?.[field]);
   return [...new Set([...defaults, ...aliases].map(clean).filter(Boolean))];
 }
 
 function labeledFieldValues(source: string, book?: CoffeeRecognitionBook): Record<string, string> {
   const order = ["roastDate","productionDate","packDate","bestBefore","expiryDate","roastColor","country","region","entity","variety","process","roast","roaster","harvest","flavor","altitude","weight","lot","grade"];
-  const definitions = order.map((field) => [field, new RegExp(`^(?:${lexiconTerms(book, field).sort((a,b)=>b.length-a.length).map(escapeRegex).join("|")})\\s*(?:[:：=]|-\\s+)?\\s*(.+)$`, "i")] as const);
+  const definitions = order.map((field) => [
+    field,
+    new RegExp(`^(?:${lexiconTerms(book, field).sort((a,b)=>b.length-a.length).map(escapeRegex).join("|")})\\s*(?:[:：=]|-\\s+)?\\s*(.+)$`, "i")
+  ] as const);
   const result: Record<string, string> = {};
   const lines = source.replace(/\r/g, "").split(/\n+/).map(normalizeLabelValue).filter(Boolean);
   for (const line of lines) {
     for (const [field, regex] of definitions) {
       const match = line.match(regex);
-      if (match && !result[field]) { result[field] = normalizeLabelValue(match[1]); break; }
+      if (match && !result[field]) {
+        result[field] = normalizeLabelValue(match[1]);
+        break;
+      }
     }
   }
   return result;
 }
 
 interface TableMatch { code: string; alias: string; row: CoffeeCodebookRow; direct: boolean }
+
+function tableRows(book: CoffeeRecognitionBook, table: CodebookTable): readonly CoffeeCodebookRow[] {
+  return book[table] ?? [];
+}
+
 function directCodeMatch(source: string, rows: readonly CoffeeCodebookRow[] = []): TableMatch | undefined {
   for (const row of rows) {
-    const code = normalizeCodeSource(row[0]); if (!code) continue;
-    const index = source.indexOf(code); if (index < 0) continue;
-    const before = source[index - 1] ?? ""; const after = source[index + code.length] ?? "";
+    const code = normalizeCodeSource(row[0]);
+    if (!code) continue;
+    const index = source.indexOf(code);
+    if (index < 0) continue;
+    const before = source[index - 1] ?? "";
+    const after = source[index + code.length] ?? "";
     if (/[A-Z0-9]/.test(before) || /[A-Z0-9]/.test(after)) continue;
     return { code: String(row[0]), alias: String(row[0]), row, direct: true };
   }
@@ -131,25 +153,36 @@ function directCodeMatch(source: string, rows: readonly CoffeeCodebookRow[] = []
 }
 
 function bestTableMatch(value: string, rows: readonly CoffeeCodebookRow[] = []): TableMatch | undefined {
-  const source = normalizeLabelValue(value); if (!source) return undefined;
-  const directMatches = rows.map((row) => directCodeMatch(normalizeCodeSource(source), [row])).filter((item): item is TableMatch => Boolean(item));
+  const source = normalizeLabelValue(value);
+  if (!source) return undefined;
+  const directMatches = rows
+    .map((row) => directCodeMatch(normalizeCodeSource(source), [row]))
+    .filter((item): item is TableMatch => Boolean(item));
   if (directMatches.length === 1) return directMatches[0];
   if (directMatches.length > 1) return undefined;
+
   const lower = source.toLocaleLowerCase("zh-CN");
   const fragments = lower.split(/[\\/、,，;；|]+/).map((item) => item.trim()).filter(Boolean);
   const exact: TableMatch[] = [];
   for (const row of rows) {
-    const aliases = row.slice(1).filter((item): item is string => typeof item === "string")
-      .flatMap((item) => item.split(/[\\/、,，;；|]/)).map((item) => item.toLocaleLowerCase("zh-CN").trim()).filter(Boolean);
+    const aliases = row.slice(1)
+      .filter((item): item is string => typeof item === "string")
+      .flatMap((item) => item.split(/[\\/、,，;；|]/))
+      .map((item) => item.toLocaleLowerCase("zh-CN").trim())
+      .filter(Boolean);
     const alias = aliases.find((item) => fragments.includes(item));
     if (alias) exact.push({ code: String(row[0]), alias, row, direct: false });
   }
   if (exact.length === 1) return exact[0];
   if (exact.length > 1) return undefined;
+
   let best: TableMatch | undefined;
   for (const row of rows) {
-    const aliases = row.slice(1).filter((item): item is string => typeof item === "string" && !["active","candidate"].includes(item))
-      .flatMap((item) => item.split(/[\\/、,，;；|]/)).map((item) => item.trim()).filter(Boolean);
+    const aliases = row.slice(1)
+      .filter((item): item is string => typeof item === "string" && !["active","candidate"].includes(item))
+      .flatMap((item) => item.split(/[\\/、,，;；|]/))
+      .map((item) => item.trim())
+      .filter(Boolean);
     for (const alias of aliases) {
       const needle = alias.toLocaleLowerCase("zh-CN");
       if ((lower === needle || lower.includes(needle) || needle.includes(lower)) && (!best || needle.length > best.alias.length)) {
@@ -160,7 +193,7 @@ function bestTableMatch(value: string, rows: readonly CoffeeCodebookRow[] = []):
   return best;
 }
 
-function rowDisplay(table: string, row: CoffeeCodebookRow | undefined): string {
+function rowDisplay(table: CodebookTable, row: CoffeeCodebookRow | undefined): string {
   if (!row) return "";
   const index = table === "regions" ? 2 : table === "entities" ? 3 : table === "flavors" && row.length >= 9 ? 4 : 1;
   return clean(row[index] ?? row[1] ?? row[0]);
@@ -178,16 +211,25 @@ const MONTH: Readonly<Record<string, number>> = Object.freeze({ jan:1,january:1,
 function fullYear(value: string): number { const number = Number(value); return number < 100 ? 2000 + number : number; }
 
 export function parseCoffeeDateValue(value: unknown): { value: string; candidates: string[]; confidence: number } {
-  const text = normalizeLabelValue(value).replace(/[,，]/g," ").trim(); let m: RegExpMatchArray | null;
-  m = text.match(/(?:^|\D)(20\d{2})年(\d{1,2})月(\d{1,2})日?(?:\D|$)/); if (m) { const v=validIsoDate(m[1],m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.995}; }
-  m = text.match(/(?:^|\D)(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})(?:\D|$)/); if (m) { const v=validIsoDate(m[1],m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.995}; }
-  m = text.match(/(?:^|\D)(20\d{2})(\d{2})(\d{2})(?:\D|$)/); if (m) { const v=validIsoDate(m[1],m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.99}; }
-  m = text.match(/(?:^|\D)(\d{1,2})\s+([A-Za-z]{3,9})\s+(20\d{2}|\d{2})(?:\D|$)/i); if (m && MONTH[m[2].toLowerCase()]) { const v=validIsoDate(fullYear(m[3]),MONTH[m[2].toLowerCase()],m[1]); if(v)return {value:v,candidates:[v],confidence:.98}; }
-  m = text.match(/(?:^|\D)([A-Za-z]{3,9})\s+(\d{1,2})\s+(20\d{2}|\d{2})(?:\D|$)/i); if (m && MONTH[m[1].toLowerCase()]) { const v=validIsoDate(fullYear(m[3]),MONTH[m[1].toLowerCase()],m[2]); if(v)return {value:v,candidates:[v],confidence:.98}; }
-  m = text.match(/(?:^|\D)(\d{2})(\d{2})(\d{2})(?:\D|$)/); if (m) { const v=validIsoDate(fullYear(m[1]),m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.96}; }
+  const text = normalizeLabelValue(value).replace(/[,，]/g," ").trim();
+  let m: RegExpMatchArray | null;
+  m = text.match(/(?:^|\D)(20\d{2})年(\d{1,2})月(\d{1,2})日?(?:\D|$)/);
+  if (m) { const v=validIsoDate(m[1],m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.995}; }
+  m = text.match(/(?:^|\D)(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})(?:\D|$)/);
+  if (m) { const v=validIsoDate(m[1],m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.995}; }
+  m = text.match(/(?:^|\D)(20\d{2})(\d{2})(\d{2})(?:\D|$)/);
+  if (m) { const v=validIsoDate(m[1],m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.99}; }
+  m = text.match(/(?:^|\D)(\d{1,2})\s+([A-Za-z]{3,9})\s+(20\d{2}|\d{2})(?:\D|$)/i);
+  if (m && MONTH[m[2].toLowerCase()]) { const v=validIsoDate(fullYear(m[3]),MONTH[m[2].toLowerCase()],m[1]); if(v)return {value:v,candidates:[v],confidence:.98}; }
+  m = text.match(/(?:^|\D)([A-Za-z]{3,9})\s+(\d{1,2})\s+(20\d{2}|\d{2})(?:\D|$)/i);
+  if (m && MONTH[m[1].toLowerCase()]) { const v=validIsoDate(fullYear(m[3]),MONTH[m[1].toLowerCase()],m[2]); if(v)return {value:v,candidates:[v],confidence:.98}; }
+  m = text.match(/(?:^|\D)(\d{2})(\d{2})(\d{2})(?:\D|$)/);
+  if (m) { const v=validIsoDate(fullYear(m[1]),m[2],m[3]); if(v)return {value:v,candidates:[v],confidence:.96}; }
   m = text.match(/(?:^|\D)(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|20\d{2})(?:\D|$)/);
   if (m) {
-    const year=fullYear(m[3]), dmy=validIsoDate(year,m[2],m[1]), mdy=validIsoDate(year,m[1],m[2]);
+    const year=fullYear(m[3]);
+    const dmy=validIsoDate(year,m[2],m[1]);
+    const mdy=validIsoDate(year,m[1],m[2]);
     const candidates=[...new Set([dmy,mdy].filter(Boolean))];
     return candidates.length===1 ? {value:candidates[0],candidates,confidence:.91} : {value:"",candidates,confidence:.45};
   }
@@ -199,7 +241,11 @@ function attachLabelLexicon(book: CoffeeRecognitionBook, lexicon: unknown): Coff
   const fields = (lexicon as { fields?: Record<string, unknown> }).fields ?? {};
   const mapped: Record<string, { aliases: string[] }> = {};
   for (const [key, raw] of Object.entries(fields)) {
-    const aliases = Array.isArray(raw) ? raw : (raw && typeof raw === "object" && Array.isArray((raw as { aliases?: unknown[] }).aliases)) ? (raw as { aliases: unknown[] }).aliases : [];
+    let aliases: unknown[] = [];
+    if (Array.isArray(raw)) aliases = raw;
+    else if (raw && typeof raw === "object" && "aliases" in raw && Array.isArray((raw as { aliases?: unknown }).aliases)) {
+      aliases = (raw as { aliases: unknown[] }).aliases;
+    }
     mapped[key === "roastLevel" ? "roast" : key] = { aliases: aliases.map(clean).filter(Boolean) };
   }
   const entityAliases = ["producer","farm","cooperative","station"].flatMap((key) => mapped[key]?.aliases ?? []);
@@ -208,15 +254,28 @@ function attachLabelLexicon(book: CoffeeRecognitionBook, lexicon: unknown): Coff
 }
 
 async function fetchJson(url: string, timeoutMs = 4500): Promise<unknown> {
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { const response = await fetch(url, { cache: "no-store", signal: controller.signal }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }
-  finally { clearTimeout(timer); }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function cachedBook(): CoffeeRecognitionBook | undefined {
-  try { const raw = globalThis.localStorage?.getItem(CACHE_KEY); return raw ? JSON.parse(raw) as CoffeeRecognitionBook : undefined; } catch { return undefined; }
+  try {
+    const raw = globalThis.localStorage?.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) as CoffeeRecognitionBook : undefined;
+  } catch {
+    return undefined;
+  }
 }
-function cacheBook(book: CoffeeRecognitionBook): void { try { globalThis.localStorage?.setItem(CACHE_KEY, JSON.stringify(book)); } catch { /* cache is optional */ } }
+function cacheBook(book: CoffeeRecognitionBook): void {
+  try { globalThis.localStorage?.setItem(CACHE_KEY, JSON.stringify(book)); } catch { /* optional cache */ }
+}
 let bookPromise: Promise<{ book: CoffeeRecognitionBook; source: LuckyBeanSemanticResult["source"] }> | undefined;
 
 export function loadLuckyBeanRecognitionBook(): Promise<{ book: CoffeeRecognitionBook; source: LuckyBeanSemanticResult["source"] }> {
@@ -224,8 +283,12 @@ export function loadLuckyBeanRecognitionBook(): Promise<{ book: CoffeeRecognitio
   bookPromise = (async () => {
     const cached = cachedBook();
     try {
-      const [bookValue, lexicon] = await Promise.all([fetchJson(REMOTE_CODEBOOK_URL), fetchJson(REMOTE_LABEL_LEXICON_URL).catch(() => undefined)]);
-      const book = attachLabelLexicon(bookValue as CoffeeRecognitionBook, lexicon); cacheBook(book);
+      const [bookValue, lexicon] = await Promise.all([
+        fetchJson(REMOTE_CODEBOOK_URL),
+        fetchJson(REMOTE_LABEL_LEXICON_URL).catch(() => undefined)
+      ]);
+      const book = attachLabelLexicon(bookValue as CoffeeRecognitionBook, lexicon);
+      cacheBook(book);
       return { book, source: "remote-codebook" as const };
     } catch {
       if (cached) return { book: cached, source: "cached-codebook" as const };
@@ -241,10 +304,17 @@ function fieldConfidence(labeled: boolean, match?: TableMatch): number {
   return labeled ? .96 : Math.min(.94, .62 + match.alias.length / 20);
 }
 
-export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecognitionBook, source: LuckyBeanSemanticResult["source"] = "core-fallback"): LuckyBeanSemanticResult {
+export function parseLuckyBeanSemanticText(
+  sourceText: string,
+  book: CoffeeRecognitionBook,
+  source: LuckyBeanSemanticResult["source"] = "core-fallback"
+): LuckyBeanSemanticResult {
   const sourceTextClean = String(sourceText ?? "").trim();
   const labeled = labeledFieldValues(sourceTextClean, book);
-  const unlabelled = sourceTextClean.split(/\n+/).map((line)=>line.trim()).filter((line)=>line && !/^[^:：]{1,48}[:：]/.test(line)).join("\n");
+  const unlabelled = sourceTextClean.split(/\n+/)
+    .map((line)=>line.trim())
+    .filter((line)=>line && !/^[^:：]{1,48}[:：]/.test(line))
+    .join("\n");
   const inferenceSource = Object.keys(labeled).length ? unlabelled : sourceTextClean;
   const lower = inferenceSource.toLocaleLowerCase("zh-CN");
   const normalizedCodes = normalizeCodeSource(inferenceSource);
@@ -252,13 +322,13 @@ export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecog
   const confidence: Record<string,number> = {};
   const evidence: Record<string,string> = {};
   const used = new Set<string>();
-  const definitions: readonly [keyof CoffeeRecognitionBook,string,string][] = [
+  const definitions: readonly [CodebookTable,string,string][] = [
     ["countries","country","country"], ["regions","region","region"], ["entities","farm","entity"],
     ["varieties","variety","variety"], ["processes","process","process"]
   ];
 
   for (const [table, outField, labelKey] of definitions) {
-    const rows = book[table] ?? [];
+    const rows = tableRows(book, table);
     const labeledValue = labeled[labelKey] ?? "";
     let match: TableMatch | undefined;
     if (labeledValue) {
@@ -267,11 +337,16 @@ export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecog
       match = directCodeMatch(normalizedCodes, rows);
       if (!match) {
         for (const row of rows) {
-          const aliases = row.slice(1).filter((item):item is string=>typeof item==="string" && !["active","candidate"].includes(item))
-            .flatMap((item)=>item.split(/[\\/、,，;；|]/)).map((item)=>item.trim()).filter((item)=>item.length>=2);
+          const aliases = row.slice(1)
+            .filter((item): item is string => typeof item === "string" && !["active","candidate"].includes(item))
+            .flatMap((item)=>item.split(/[\\/、,，;；|]/))
+            .map((item)=>item.trim())
+            .filter((item)=>item.length>=2);
           for (const alias of aliases) {
             const needle=alias.toLocaleLowerCase("zh-CN");
-            if (lower.includes(needle) && (!match || needle.length>match.alias.length)) match={code:String(row[0]),alias,row,direct:false};
+            if (lower.includes(needle) && (!match || needle.length>match.alias.length)) {
+              match={code:String(row[0]),alias,row,direct:false};
+            }
           }
         }
       }
@@ -279,7 +354,7 @@ export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecog
     const aliasKey = normalizeLabelValue(match?.alias).toLocaleLowerCase("zh-CN");
     if (aliasKey && used.has(aliasKey)) match=undefined;
     if (match) {
-      fields[outField]=rowDisplay(String(table),match.row);
+      fields[outField]=rowDisplay(table,match.row);
       confidence[outField]=fieldConfidence(Boolean(labeledValue),match);
       evidence[outField]=labeledValue || match.alias;
       if(aliasKey) used.add(aliasKey);
@@ -318,10 +393,11 @@ export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecog
   const altitude=labeled.altitude
     ? altitudeSource.match(/(\d{3,4})(?:\s*[-~至到]\s*(\d{3,4}))?\s*(?:m|米|masl)?/i)
     : altitudeSource.match(/(\d{3,4})(?:\s*[-~至到]\s*(\d{3,4}))?\s*(?:m(?:asl)?\b|米)/i);
-  if(altitude){fields.altitude=altitude[2]?`${altitude[1]}–${altitude[2]} m`:`${altitude[1]} m`;confidence.altitude=labeled.altitude?.length ? .97 : .84;evidence.altitude=labeled.altitude||altitude[0];}
+  if(altitude){fields.altitude=altitude[2]?`${altitude[1]}–${altitude[2]} m`:`${altitude[1]} m`;confidence.altitude=labeled.altitude ? .97 : .84;evidence.altitude=labeled.altitude||altitude[0];}
 
   if(labeled.roastColor){
-    const values=[...labeled.roastColor.matchAll(/(?:agtron\s*)?(\d{2,3}(?:\.\d+)?)/ig)].map((m)=>Number(m[1])).filter((v)=>v>=20&&v<=120);
+    const values=[...labeled.roastColor.matchAll(/(?:agtron\s*)?(\d{2,3}(?:\.\d+)?)/ig)]
+      .map((m)=>Number(m[1])).filter((v)=>v>=20&&v<=120);
     if(values.length){fields.roastColor=`Agtron ${values[0]}`;confidence.roastColor=values.length===1 ? .98 : .76;evidence.roastColor=labeled.roastColor;}
   }
 
@@ -329,7 +405,7 @@ export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecog
   const weight=labeled.weight
     ? weightSource.match(/(\d{1,5}(?:\.\d+)?)\s*(?:g|克|grams?)?/i)
     : weightSource.match(/(\d{1,5}(?:\.\d+)?)\s*(?:g(?:rams?)?\b|克)/i);
-  if(weight){fields.weight=`${weight[1]} g`;confidence.weight=labeled.weight?.length ? .95 : .79;evidence.weight=labeled.weight||weight[0];}
+  if(weight){fields.weight=`${weight[1]} g`;confidence.weight=labeled.weight ? .95 : .79;evidence.weight=labeled.weight||weight[0];}
 
   if(labeled.roaster){fields.roaster=labeled.roaster;confidence.roaster=.97;evidence.roaster=labeled.roaster;}
   if(labeled.lot){fields.lot=labeled.lot;confidence.lot=.96;evidence.lot=labeled.lot;}
@@ -339,11 +415,15 @@ export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecog
   if(flavorSource){
     const flavorLower=flavorSource.toLocaleLowerCase("zh-CN");
     const names:string[]=[];
-    for(const row of book.flavors??[]){
-      const aliases=(row.length>=9?[row[4],row[5],row[6],row[7]]:[row[1],row[2],row[3]])
-        .filter((v):v is string=>typeof v==="string").flatMap((v)=>v.split(/[/、,，;；|]/)).map((v)=>v.trim()).filter(Boolean);
-      const hit=aliases.sort((a,b)=>b.length-a.length).find((alias)=>alias.length>=2&&flavorLower.includes(alias.toLocaleLowerCase("zh-CN")));
-      if(hit)names.push(rowDisplay("flavors",row));
+    for(const row of tableRows(book,"flavors")){
+      const sourceFields = row.length>=9 ? [row[4],row[5],row[6],row[7]] : [row[1],row[2],row[3]];
+      const aliases=sourceFields
+        .filter((v):v is string=>typeof v==="string")
+        .flatMap((v)=>v.split(/[/、,，;；|]/))
+        .map((v)=>v.trim()).filter(Boolean);
+      const hit=aliases.sort((a,b)=>b.length-a.length)
+        .find((alias)=>alias.length>=2&&flavorLower.includes(alias.toLocaleLowerCase("zh-CN")));
+      if(hit) names.push(rowDisplay("flavors",row));
     }
     fields.flavorNotes=[...new Set(names)].join("、")||flavorSource;
     confidence.flavorNotes=names.length ? .91 : .72;
