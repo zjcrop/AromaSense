@@ -5,7 +5,7 @@ import { RevisionCheckpointService } from "../core/revision-checkpoint-service";
 import { SampleRecognitionService } from "../core/sample-recognition-service";
 import { CloudflareSyncRepository } from "../core/sync-repository";
 import { SyncEngine, type SyncRunResult } from "../core/sync-engine";
-import { LocalAuthSessionStore } from "../storage/auth-session-store";
+import { LocalAuthSessionStore, LocalPendingRegistrationStore } from "../storage/auth-session-store";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { LocalCuppingRepository } from "../storage/local-cupping-repository";
 import { RecentSessionReader } from "../storage/recent-session-reader";
@@ -29,7 +29,7 @@ export interface AromaSenseDomAppOptions {
 }
 
 export interface AppPreloadState {
-  account: "cloud-unconfigured" | "signed-out" | "signed-in";
+  account: "cloud-unconfigured" | "signed-out" | "pending-verification" | "signed-in";
   accountMessage: string;
   syncMessage: string;
   unfinishedSessions: number;
@@ -41,6 +41,7 @@ export class AromaSenseDomApp {
   private screen?: CuppingScreenRenderer;
   private readonly preferences: UserPreferencesRepository;
   private readonly authStore: LocalAuthSessionStore;
+  private readonly pendingRegistrationStore: LocalPendingRegistrationStore;
   private readonly authClient?: CloudflareAuthClient;
   private readonly syncQueue: SyncQueueStore;
   private readonly syncEngine?: SyncEngine;
@@ -55,6 +56,7 @@ export class AromaSenseDomApp {
   ) {
     this.preferences = new UserPreferencesRepository(db);
     this.authStore = new LocalAuthSessionStore(this.preferences, options.now);
+    this.pendingRegistrationStore = new LocalPendingRegistrationStore(this.preferences, options.now);
     this.syncQueue = new SyncQueueStore(db);
     const repository = new LocalCuppingRepository(db);
     this.revisions = new RevisionCheckpointService(
@@ -65,7 +67,7 @@ export class AromaSenseDomApp {
     );
 
     if (options.cloudBaseUrl) {
-      this.authClient = new CloudflareAuthClient(options.cloudBaseUrl, this.authStore);
+      this.authClient = new CloudflareAuthClient(options.cloudBaseUrl, this.authStore, this.pendingRegistrationStore);
       const remote = new CloudflareSyncRepository(options.cloudBaseUrl, {
         token: async () => (await this.authClient?.current())?.token
       });
@@ -77,19 +79,29 @@ export class AromaSenseDomApp {
     if (this.preloadPromise) return this.preloadPromise;
     this.preloadPromise = (async () => {
       await this.syncEngine?.recoverInterrupted();
-      const [session, counts, recent] = await Promise.all([
+      const [session, pending, counts, recent] = await Promise.all([
         this.authClient?.current(),
+        this.authClient?.pendingRegistration(),
         this.syncQueue.counts(),
         new RecentSessionReader(this.db).list(50)
       ]);
       const waiting = counts.pending + counts.failed + counts.conflict;
+      const account = !this.options.cloudBaseUrl
+        ? "cloud-unconfigured" as const
+        : session
+          ? "signed-in" as const
+          : pending
+            ? "pending-verification" as const
+            : "signed-out" as const;
       return {
-        account: !this.options.cloudBaseUrl ? "cloud-unconfigured" : session ? "signed-in" : "signed-out",
+        account,
         accountMessage: !this.options.cloudBaseUrl
           ? "云服务未配置，本地功能可用"
           : session
             ? `已读取登录账户 ${session.email}`
-            : "未登录，本地功能可用",
+            : pending
+              ? `等待邮箱激活：${pending.email}`
+              : "未登录，本地功能可用",
         syncMessage: waiting ? `${waiting} 项任务等待处理` : "本地同步队列已恢复",
         unfinishedSessions: recent.filter((item) => item.status === "draft" || item.status === "active").length
       };
@@ -135,6 +147,7 @@ export class AromaSenseDomApp {
     const localRepository = new LocalCuppingRepository(this.db);
     const recentSessions = await new RecentSessionReader(this.db).list(10);
     const current = await this.authClient?.current();
+    const pending = await this.authClient?.pendingRegistration();
     const counts = await this.syncQueue.counts();
     const waiting = counts.pending + counts.failed + counts.conflict;
     const setup = new BatchSetupRenderer(
@@ -149,7 +162,11 @@ export class AromaSenseDomApp {
         onResume: (sessionId) => this.openSession(sessionId),
         onOpenAccount: () => this.showAccount(),
         recentSessions,
-        syncLabel: current ? (waiting ? `同步 ${waiting}` : "账户 · 已登录") : "账户 / 同步"
+        syncLabel: current
+          ? (waiting ? `同步 ${waiting}` : "账户 · 已登录")
+          : pending
+            ? "账户 · 待激活"
+            : "账户 / 同步"
       }
     );
     setup.render();
@@ -162,12 +179,7 @@ export class AromaSenseDomApp {
 
     const repository = new LocalCuppingRepository(this.db);
     const editor = new CuppingSessionController(repository, this.options.observationIdFactory);
-    const controller = new CuppingScreenController(
-      repository,
-      new StageProgressReader(this.db),
-      editor,
-      this.revisions
-    );
+    const controller = new CuppingScreenController(repository, new StageProgressReader(this.db), editor, this.revisions);
     const flavorService = new FlavorGroupPreferenceService(this.preferences);
     const counts = await this.syncQueue.counts();
     const waiting = counts.pending + counts.failed + counts.conflict;
