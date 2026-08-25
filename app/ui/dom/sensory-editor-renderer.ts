@@ -84,15 +84,17 @@ function renderTagPicker(
     const collapsed = preferences.collapsedGroupIds.includes(groupId);
     const section = element("section", "flavor-group");
     section.dataset.groupId = groupId;
-    section.draggable = true;
 
     const header = element("div", "flavor-group__header");
     const title = button("flavor-group__title", group.label, () =>
       callbacks.setFlavorGroupCollapsed(groupId, !collapsed)
     );
     title.setAttribute("aria-expanded", String(!collapsed));
-    const handle = element("span", "flavor-group__drag", "⋮⋮");
+    const handle = button("flavor-group__drag", "●", () => undefined);
+    handle.type = "button";
+    handle.dataset.dragHandle = "group";
     handle.setAttribute("aria-label", `拖动${group.label}分组`);
+    handle.title = `长按拖动${group.label}分组`;
     header.append(title, handle);
     section.append(header);
 
@@ -105,16 +107,22 @@ function renderTagPicker(
       for (const descriptorId of orderedIds) {
         const descriptor = byId.get(descriptorId);
         if (!descriptor) continue;
+        const item = element("span", "flavor-tag-item");
+        item.dataset.descriptorId = descriptor.id;
         const tag = button("flavor-tag", descriptor.label, () => {
           if (selected.has(descriptor.id)) selected.delete(descriptor.id);
           else selected.add(descriptor.id);
           void callbacks.saveField("flavor_tags", [...selected]);
           setPressed(tag, selected.has(descriptor.id));
         });
-        tag.dataset.descriptorId = descriptor.id;
-        tag.draggable = true;
         setPressed(tag, selected.has(descriptor.id));
-        tags.append(tag);
+        const drag = button("flavor-tag__drag", "●", () => undefined);
+        drag.type = "button";
+        drag.dataset.dragHandle = "descriptor";
+        drag.setAttribute("aria-label", `拖动${descriptor.label}`);
+        drag.title = `长按拖动${descriptor.label}`;
+        item.append(tag, drag);
+        tags.append(item);
       }
       section.append(tags);
     }
