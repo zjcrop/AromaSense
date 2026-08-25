@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 
 class AromaSenseRecognitionBridge(
     private val activity: Activity,
-    private val sourceForImageId: (String) -> Uri?
+    private val sourceForRequest: (String, String) -> Uri?
 ) {
     private val chineseRecognizer: TextRecognizer = TextRecognition.getClient(
         ChineseTextRecognizerOptions.Builder().build()
@@ -32,7 +32,8 @@ class AromaSenseRecognitionBridge(
         return try {
             val request = JSONObject(payloadJson)
             val imageId = request.optString("id", "")
-            val source = sourceForImageId(imageId)
+            val fileName = request.optString("fileName", "")
+            val source = sourceForRequest(imageId, fileName)
                 ?: throw IllegalArgumentException("Android 原图引用不可用，请重新选择照片")
             val input = InputImage.fromFilePath(activity, source)
 
@@ -41,18 +42,23 @@ class AromaSenseRecognitionBridge(
             Tasks.await(Tasks.whenAllComplete(chineseTask, latinTask), 30, TimeUnit.SECONDS)
 
             val unique = LinkedHashMap<String, JSONObject>()
-            if (chineseTask.isSuccessful) appendLines(unique, chineseTask.result)
-            if (latinTask.isSuccessful) appendLines(unique, latinTask.result)
+            if (chineseTask.isSuccessful) appendLines(unique, chineseTask.result, "zh")
+            if (latinTask.isSuccessful) appendLines(unique, latinTask.result, "latin")
             if (unique.isEmpty()) {
                 val failure = chineseTask.exception ?: latinTask.exception
                 throw IllegalStateException(failure?.message ?: "未识别到清晰文字", failure)
             }
 
-            val fullText = unique.values.joinToString("\n") { it.optString("text") }
+            val lines = unique.values.toList()
+                .sortedWith(compareBy<JSONObject> { polygonTop(it.optJSONArray("polygon")) }
+                    .thenBy { polygonLeft(it.optJSONArray("polygon")) })
+            val fullText = lines.joinToString("\n") { it.optString("text") }
             JSONObject()
                 .put("engine", "android-mlkit-bundled-16.0.1")
                 .put("fullText", fullText)
-                .put("blocks", JSONArray(unique.values))
+                .put("sourceWidth", input.width)
+                .put("sourceHeight", input.height)
+                .put("lines", JSONArray(lines))
                 .toString()
         } catch (error: Exception) {
             JSONObject()
@@ -66,15 +72,15 @@ class AromaSenseRecognitionBridge(
         latinRecognizer.close()
     }
 
-    private fun appendLines(target: LinkedHashMap<String, JSONObject>, result: Text?) {
+    private fun appendLines(target: LinkedHashMap<String, JSONObject>, result: Text?, languageHint: String) {
         if (result == null) return
-        for (block in result.textBlocks) {
-            for (line in block.lines) {
+        for ((blockIndex, block) in result.textBlocks.withIndex()) {
+            for ((lineIndex, line) in block.lines.withIndex()) {
                 val value = line.text.orEmpty().replace(Regex("\\s+"), " ").trim()
                 if (value.isEmpty()) continue
                 val key = value.lowercase(Locale.ROOT)
                     .replace(Regex("[\\s，,。.;；:：/_\\-·•]+"), "")
-                if (key.isEmpty() || target.containsKey(key)) continue
+                if (key.isEmpty()) continue
 
                 val polygon = JSONArray()
                 val corners = line.cornerPoints
@@ -89,11 +95,52 @@ class AromaSenseRecognitionBridge(
                     }
                 }
 
-                target[key] = JSONObject()
+                val next = JSONObject()
+                    .put("id", "$languageHint-$blockIndex-$lineIndex")
+                    .put("blockId", "$languageHint-block-$blockIndex")
                     .put("text", value)
                     .put("confidence", 0.86)
+                    .put("language", languageHint)
                     .put("polygon", polygon)
+
+                val existing = target[key]
+                if (existing == null || polygonArea(next.optJSONArray("polygon")) > polygonArea(existing.optJSONArray("polygon"))) {
+                    target[key] = next
+                }
             }
         }
+    }
+
+    private fun polygonLeft(points: JSONArray?): Int {
+        if (points == null || points.length() == 0) return Int.MAX_VALUE
+        var value = Int.MAX_VALUE
+        for (index in 0 until points.length()) value = minOf(value, points.optJSONArray(index)?.optInt(0, Int.MAX_VALUE) ?: Int.MAX_VALUE)
+        return value
+    }
+
+    private fun polygonTop(points: JSONArray?): Int {
+        if (points == null || points.length() == 0) return Int.MAX_VALUE
+        var value = Int.MAX_VALUE
+        for (index in 0 until points.length()) value = minOf(value, points.optJSONArray(index)?.optInt(1, Int.MAX_VALUE) ?: Int.MAX_VALUE)
+        return value
+    }
+
+    private fun polygonArea(points: JSONArray?): Long {
+        if (points == null || points.length() < 2) return 0
+        var minX = Int.MAX_VALUE
+        var minY = Int.MAX_VALUE
+        var maxX = Int.MIN_VALUE
+        var maxY = Int.MIN_VALUE
+        for (index in 0 until points.length()) {
+            val point = points.optJSONArray(index) ?: continue
+            val x = point.optInt(0)
+            val y = point.optInt(1)
+            minX = minOf(minX, x)
+            minY = minOf(minY, y)
+            maxX = maxOf(maxX, x)
+            maxY = maxOf(maxY, y)
+        }
+        if (minX == Int.MAX_VALUE || minY == Int.MAX_VALUE) return 0
+        return (maxX - minX).toLong().coerceAtLeast(0) * (maxY - minY).toLong().coerceAtLeast(0)
     }
 }
