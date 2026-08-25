@@ -16,7 +16,7 @@ concurrency:
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
   AROMASENSE_D1_DATABASE_NAME: ${{ vars.AROMASENSE_D1_DATABASE_NAME }}
   AROMASENSE_PUBLIC_APP_URL: ${{ vars.AROMASENSE_PUBLIC_APP_URL }}
   AROMASENSE_CLOUD_URL_FALLBACK: ${{ vars.AROMASENSE_CLOUD_URL }}
@@ -48,17 +48,24 @@ jobs:
           echo "AROMASENSE_D1_DATABASE_NAME=${AROMASENSE_D1_DATABASE_NAME:-aromasense-db}" >> "$GITHUB_ENV"
           echo "AROMASENSE_PUBLIC_APP_URL=${AROMASENSE_PUBLIC_APP_URL:-https://zjcrop.github.io/AromaSense/}" >> "$GITHUB_ENV"
 
+      - name: Reject API token stored as repository variable
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' && vars.CLOUDFLARE_API_TOKEN != '' }}
+        shell: bash
+        run: |
+          echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN was found in Repository variables. Delete it there and create it under Settings > Secrets and variables > Actions > Repository secrets."
+          exit 1
+
       - name: Validate external prerequisites
         shell: bash
         run: |
           set -euo pipefail
           missing=0
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error title=Cloudflare configuration::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"
+            echo "::error title=Cloudflare configuration::CLOUDFLARE_API_TOKEN is not visible as a Repository secret to this workflow. Do not put it in Variables or an Environment-only secret."
             missing=1
           fi
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            echo "::error title=Cloudflare configuration::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"
+            echo "::error title=Cloudflare configuration::Missing CLOUDFLARE_ACCOUNT_ID. It may be either a Repository secret or Repository variable."
             missing=1
           fi
           case "${AROMASENSE_PUBLIC_APP_URL:-}" in
