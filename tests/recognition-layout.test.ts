@@ -72,3 +72,41 @@ test("recognizes a table header and emits body rows only", () => {
   assert.equal(result.segments.length, 2);
   assert.doesNotMatch(result.segments[0]?.text ?? "", /^产地/m);
 });
+
+test("does not split a dense single coffee-bag label into one sample per text row", () => {
+  const document = buildOCRLayoutDocument({
+    imageId: "single-dense-label",
+    sourceWidth: 1000,
+    sourceHeight: 1200,
+    lines: [
+      line("ETHIOPIA GUJI HAMBELA", 80, 100, 850, 150),
+      line("BENTI NENKA WASHING STATION", 80, 180, 900, 230),
+      line("HEIRLOOM NATURAL PROCESS", 80, 260, 830, 310),
+      line("JASMINE BLUEBERRY PEACH", 80, 340, 820, 390)
+    ]
+  });
+  const result = segmentSamples(document);
+  assert.equal(result.layoutType, "single");
+  assert.equal(result.segments.length, 1);
+  assert.match(result.segments[0]?.text ?? "", /BENTI NENKA/);
+  assert.match(result.segments[0]?.text ?? "", /BLUEBERRY/);
+});
+
+test("does not split a two-column label/value coffee card into separate samples", () => {
+  const document = buildOCRLayoutDocument({
+    imageId: "single-two-column-label",
+    sourceWidth: 1000,
+    sourceHeight: 1000,
+    lines: [
+      line("COUNTRY", 80, 100, 260, 145), line("Ethiopia", 500, 100, 760, 145),
+      line("REGION", 80, 180, 260, 225), line("Guji", 500, 180, 690, 225),
+      line("VARIETY", 80, 260, 280, 305), line("Gesha", 500, 260, 700, 305),
+      line("PROCESS", 80, 340, 280, 385), line("Natural", 500, 340, 720, 385)
+    ]
+  });
+  const result = segmentSamples(document);
+  assert.equal(result.layoutType, "single");
+  assert.equal(result.segments.length, 1);
+  assert.match(result.segments[0]?.text ?? "", /COUNTRY/);
+  assert.match(result.segments[0]?.text ?? "", /Natural/);
+});
