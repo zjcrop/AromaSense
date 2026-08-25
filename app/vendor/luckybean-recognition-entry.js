@@ -1,3 +1,10 @@
+// Load LuckyBean's actual production browser OCR providers in the same order used
+// by LuckyBean. The quality controller wraps LuckyBeanWebOCR, and the PP-OCRv5
+// provider remains the preferred browser provider in recognition-bridge.js.
+import 'luckybean-static-app/src/recognition-web-ocr.js';
+import 'luckybean-static-app/src/recognition-quality-controller.js';
+import 'luckybean-static-app/src/recognition-paddle-ocr.js';
+
 import {
   RECOGNITION_DOCUMENT_SCHEMA,
   RECOGNITION_PIPELINE_VERSION,
