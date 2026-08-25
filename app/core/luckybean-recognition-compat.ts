@@ -1,4 +1,4 @@
-export const LUCKYBEAN_RECOGNITION_COMPAT_VERSION = "1.24B-compat.1";
+export const LUCKYBEAN_RECOGNITION_COMPAT_VERSION = "1.24B-compat.2";
 
 const REMOTE_CODEBOOK_URL = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const REMOTE_LABEL_LEXICON_URL = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
@@ -235,53 +235,119 @@ export function loadLuckyBeanRecognitionBook(): Promise<{ book: CoffeeRecognitio
   return bookPromise;
 }
 
-function fieldConfidence(labeled: boolean, match?: TableMatch): number { return match?.direct ? .995 : labeled ? .96 : match ? Math.min(.94,.62+match.alias.length/20) : 0; }
+function fieldConfidence(labeled: boolean, match?: TableMatch): number {
+  if (!match) return 0;
+  if (match.direct) return .995;
+  return labeled ? .96 : Math.min(.94, .62 + match.alias.length / 20);
+}
 
 export function parseLuckyBeanSemanticText(sourceText: string, book: CoffeeRecognitionBook, source: LuckyBeanSemanticResult["source"] = "core-fallback"): LuckyBeanSemanticResult {
-  const sourceTextClean = String(sourceText ?? "").trim(); const labeled = labeledFieldValues(sourceTextClean, book);
+  const sourceTextClean = String(sourceText ?? "").trim();
+  const labeled = labeledFieldValues(sourceTextClean, book);
   const unlabelled = sourceTextClean.split(/\n+/).map((line)=>line.trim()).filter((line)=>line && !/^[^:：]{1,48}[:：]/.test(line)).join("\n");
   const inferenceSource = Object.keys(labeled).length ? unlabelled : sourceTextClean;
-  const lower = inferenceSource.toLocaleLowerCase("zh-CN"), normalizedCodes = normalizeCodeSource(inferenceSource);
-  const fields: Record<string,string> = {}, confidence: Record<string,number> = {}, evidence: Record<string,string> = {}; const used = new Set<string>();
-  const definitions: readonly [keyof CoffeeRecognitionBook,string,string,string][] = [
-    ["countries","country","country","country"], ["regions","region","region","region"], ["entities","farm","entity","farm"],
-    ["varieties","variety","variety","variety"], ["processes","process","process","process"]
+  const lower = inferenceSource.toLocaleLowerCase("zh-CN");
+  const normalizedCodes = normalizeCodeSource(inferenceSource);
+  const fields: Record<string,string> = {};
+  const confidence: Record<string,number> = {};
+  const evidence: Record<string,string> = {};
+  const used = new Set<string>();
+  const definitions: readonly [keyof CoffeeRecognitionBook,string,string][] = [
+    ["countries","country","country"], ["regions","region","region"], ["entities","farm","entity"],
+    ["varieties","variety","variety"], ["processes","process","process"]
   ];
+
   for (const [table, outField, labelKey] of definitions) {
-    const rows = book[table] ?? []; const labeledValue = labeled[labelKey] ?? ""; let match: TableMatch | undefined;
-    if (labeledValue) match = bestTableMatch(labeledValue, rows);
-    else {
+    const rows = book[table] ?? [];
+    const labeledValue = labeled[labelKey] ?? "";
+    let match: TableMatch | undefined;
+    if (labeledValue) {
+      match = bestTableMatch(labeledValue, rows);
+    } else {
       match = directCodeMatch(normalizedCodes, rows);
       if (!match) {
         for (const row of rows) {
           const aliases = row.slice(1).filter((item):item is string=>typeof item==="string" && !["active","candidate"].includes(item))
             .flatMap((item)=>item.split(/[\\/、,，;；|]/)).map((item)=>item.trim()).filter((item)=>item.length>=2);
-          for (const alias of aliases) { const needle=alias.toLocaleLowerCase("zh-CN"); if (lower.includes(needle) && (!match || needle.length>match.alias.length)) match={code:String(row[0]),alias,row,direct:false}; }
+          for (const alias of aliases) {
+            const needle=alias.toLocaleLowerCase("zh-CN");
+            if (lower.includes(needle) && (!match || needle.length>match.alias.length)) match={code:String(row[0]),alias,row,direct:false};
+          }
         }
       }
     }
-    const aliasKey = normalizeLabelValue(match?.alias).toLocaleLowerCase("zh-CN"); if (aliasKey && used.has(aliasKey)) match=undefined;
-    if (match) { fields[outField]=rowDisplay(String(table),match.row); confidence[outField]=fieldConfidence(Boolean(labeledValue),match); evidence[outField]=labeledValue || match.alias; if(aliasKey)used.add(aliasKey); }
-    else if (labeledValue) { fields[outField]=labeledValue; confidence[outField]=.72; evidence[outField]=labeledValue; }
+    const aliasKey = normalizeLabelValue(match?.alias).toLocaleLowerCase("zh-CN");
+    if (aliasKey && used.has(aliasKey)) match=undefined;
+    if (match) {
+      fields[outField]=rowDisplay(String(table),match.row);
+      confidence[outField]=fieldConfidence(Boolean(labeledValue),match);
+      evidence[outField]=labeledValue || match.alias;
+      if(aliasKey) used.add(aliasKey);
+    } else if (labeledValue) {
+      fields[outField]=labeledValue;
+      confidence[outField]=.72;
+      evidence[outField]=labeledValue;
+    }
   }
 
-  const roastSource=labeled.roast||inferenceSource; const roastMap: readonly [RegExp,string,string][]=[
-    [/极浅|超浅|lightest/i,"极浅烘","RL-L0"], [/浅中|medium\s*light/i,"浅中烘","RL-L2"], [/浅烘|浅度|light/i,"浅烘","RL-L1"],
-    [/中深|medium\s*dark/i,"中深烘","RL-L4"], [/中烘|中度|medium/i,"中烘","RL-L3"], [/极深|法式|very\s*dark/i,"极深烘","RL-L6"], [/深烘|深度|dark/i,"深烘","RL-L5"]
+  const roastSource=labeled.roast||inferenceSource;
+  const roastMap: readonly [RegExp,string][]=[
+    [/极浅|超浅|lightest/i,"极浅烘"], [/浅中|medium\s*light/i,"浅中烘"], [/浅烘|浅度|light/i,"浅烘"],
+    [/中深|medium\s*dark/i,"中深烘"], [/中烘|中度|medium/i,"中烘"], [/极深|法式|very\s*dark/i,"极深烘"], [/深烘|深度|dark/i,"深烘"]
   ];
-  for (const [regex,label] of roastMap) if (regex.test(roastSource)) { fields.roast=label; confidence.roast=labeled.roast?.length?.95:.88; evidence.roast=roastSource.match(regex)?.[0]??label; break; }
+  for (const [regex,label] of roastMap) {
+    if (!regex.test(roastSource)) continue;
+    fields.roast=label;
+    confidence.roast=labeled.roast ? .95 : .88;
+    evidence.roast=roastSource.match(regex)?.[0]??label;
+    break;
+  }
 
   const dateFields=["roastDate","productionDate","packDate","bestBefore","expiryDate"] as const;
-  for (const field of dateFields) if (labeled[field]) { const parsed=parseCoffeeDateValue(labeled[field]); if(parsed.value){fields[field]=parsed.value;confidence[field]=parsed.confidence;evidence[field]=labeled[field];} }
-  if (labeled.harvest) { const m=labeled.harvest.match(/(?:^|\D)(20\d{2}|\d{2})(?:\s*[-–—\/]\s*(20\d{2}|\d{2}))?/); if(m){const a=fullYear(m[1]),b=m[2]?fullYear(m[2]):undefined;fields.harvest=b?`${a}/${b}`:String(a);confidence.harvest=.97;evidence.harvest=labeled.harvest;} }
-  const altitudeSource=labeled.altitude||inferenceSource; const altitude=labeled.altitude?altitudeSource.match(/(\d{3,4})(?:\s*[-~至到]\s*(\d{3,4}))?\s*(?:m|米|masl)?/i):altitudeSource.match(/(\d{3,4})(?:\s*[-~至到]\s*(\d{3,4}))?\s*(?:m(?:asl)?\b|米)/i);
-  if(altitude){fields.altitude=altitude[2]?`${altitude[1]}–${altitude[2]} m`:`${altitude[1]} m`;confidence.altitude=labeled.altitude?.length?.97:.84;evidence.altitude=labeled.altitude||altitude[0];}
-  if(labeled.roastColor){const values=[...labeled.roastColor.matchAll(/(?:agtron\s*)?(\d{2,3}(?:\.\d+)?)/ig)].map((m)=>Number(m[1])).filter((v)=>v>=20&&v<=120);if(values.length){fields.roastColor=`Agtron ${values[0]}`;confidence.roastColor=values.length===1?.98:.76;evidence.roastColor=labeled.roastColor;}}
-  const weightSource=labeled.weight||inferenceSource; const weight=labeled.weight?weightSource.match(/(\d{1,5}(?:\.\d+)?)\s*(?:g|克|grams?)?/i):weightSource.match(/(\d{1,5}(?:\.\d+)?)\s*(?:g(?:rams?)?\b|克)/i);
-  if(weight){fields.weight=`${weight[1]} g`;confidence.weight=labeled.weight?.length?.95:.79;evidence.weight=labeled.weight||weight[0];}
-  if(labeled.roaster){fields.roaster=labeled.roaster;confidence.roaster=.97;evidence.roaster=labeled.roaster;}
-  if(labeled.lot){fields.lot=labeled.lot;confidence.lot=.96;evidence.lot=labeled.lot;} if(labeled.grade){fields.grade=labeled.grade;confidence.grade=.94;evidence.grade=labeled.grade;}
+  for (const field of dateFields) {
+    if (!labeled[field]) continue;
+    const parsed=parseCoffeeDateValue(labeled[field]);
+    if(parsed.value){fields[field]=parsed.value;confidence[field]=parsed.confidence;evidence[field]=labeled[field];}
+  }
+  if (labeled.harvest) {
+    const m=labeled.harvest.match(/(?:^|\D)(20\d{2}|\d{2})(?:\s*[-–—\/]\s*(20\d{2}|\d{2}))?/);
+    if(m){const a=fullYear(m[1]),b=m[2]?fullYear(m[2]):undefined;fields.harvest=b?`${a}/${b}`:String(a);confidence.harvest=.97;evidence.harvest=labeled.harvest;}
+  }
 
-  const flavorSource=labeled.flavor||""; if(flavorSource){const flavorLower=flavorSource.toLocaleLowerCase("zh-CN"), names:string[]=[];for(const row of book.flavors??[]){const aliases=(row.length>=9?[row[4],row[5],row[6],row[7]]:[row[1],row[2],row[3]]).filter((v):v is string=>typeof v==="string").flatMap((v)=>v.split(/[/、,，;；|]/)).map((v)=>v.trim()).filter(Boolean);const hit=aliases.sort((a,b)=>b.length-a.length).find((alias)=>alias.length>=2&&flavorLower.includes(alias.toLocaleLowerCase("zh-CN")));if(hit)names.push(rowDisplay("flavors",row));}fields.flavorNotes=[...new Set(names)].join("、")||flavorSource;confidence.flavorNotes=names.length?.91:.72;evidence.flavorNotes=flavorSource;}
+  const altitudeSource=labeled.altitude||inferenceSource;
+  const altitude=labeled.altitude
+    ? altitudeSource.match(/(\d{3,4})(?:\s*[-~至到]\s*(\d{3,4}))?\s*(?:m|米|masl)?/i)
+    : altitudeSource.match(/(\d{3,4})(?:\s*[-~至到]\s*(\d{3,4}))?\s*(?:m(?:asl)?\b|米)/i);
+  if(altitude){fields.altitude=altitude[2]?`${altitude[1]}–${altitude[2]} m`:`${altitude[1]} m`;confidence.altitude=labeled.altitude?.length ? .97 : .84;evidence.altitude=labeled.altitude||altitude[0];}
+
+  if(labeled.roastColor){
+    const values=[...labeled.roastColor.matchAll(/(?:agtron\s*)?(\d{2,3}(?:\.\d+)?)/ig)].map((m)=>Number(m[1])).filter((v)=>v>=20&&v<=120);
+    if(values.length){fields.roastColor=`Agtron ${values[0]}`;confidence.roastColor=values.length===1 ? .98 : .76;evidence.roastColor=labeled.roastColor;}
+  }
+
+  const weightSource=labeled.weight||inferenceSource;
+  const weight=labeled.weight
+    ? weightSource.match(/(\d{1,5}(?:\.\d+)?)\s*(?:g|克|grams?)?/i)
+    : weightSource.match(/(\d{1,5}(?:\.\d+)?)\s*(?:g(?:rams?)?\b|克)/i);
+  if(weight){fields.weight=`${weight[1]} g`;confidence.weight=labeled.weight?.length ? .95 : .79;evidence.weight=labeled.weight||weight[0];}
+
+  if(labeled.roaster){fields.roaster=labeled.roaster;confidence.roaster=.97;evidence.roaster=labeled.roaster;}
+  if(labeled.lot){fields.lot=labeled.lot;confidence.lot=.96;evidence.lot=labeled.lot;}
+  if(labeled.grade){fields.grade=labeled.grade;confidence.grade=.94;evidence.grade=labeled.grade;}
+
+  const flavorSource=labeled.flavor||"";
+  if(flavorSource){
+    const flavorLower=flavorSource.toLocaleLowerCase("zh-CN");
+    const names:string[]=[];
+    for(const row of book.flavors??[]){
+      const aliases=(row.length>=9?[row[4],row[5],row[6],row[7]]:[row[1],row[2],row[3]])
+        .filter((v):v is string=>typeof v==="string").flatMap((v)=>v.split(/[/、,，;；|]/)).map((v)=>v.trim()).filter(Boolean);
+      const hit=aliases.sort((a,b)=>b.length-a.length).find((alias)=>alias.length>=2&&flavorLower.includes(alias.toLocaleLowerCase("zh-CN")));
+      if(hit)names.push(rowDisplay("flavors",row));
+    }
+    fields.flavorNotes=[...new Set(names)].join("、")||flavorSource;
+    confidence.flavorNotes=names.length ? .91 : .72;
+    evidence.flavorNotes=flavorSource;
+  }
   return { fields, confidence, evidence, source, codebookVersion: String(book.version ?? "") };
 }
