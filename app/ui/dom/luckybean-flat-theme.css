@@ -1,0 +1,274 @@
+:root {
+  --as-lb-gold: #d6ad63;
+  --as-lb-text: #f5f5f3;
+  --as-lb-muted: #96938c;
+}
+
+/*
+ * AromaSense visual policy derived from LuckyBean's compact, text-led controls.
+ * Choice/state/action surfaces are intentionally borderless and transparent.
+ * Editable text/date fields keep a single bottom rule so they remain visibly editable.
+ */
+
+button,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Batch setup: text actions, no button cards. */
+.batch-setup__account,
+.batch-setup__capture,
+.batch-setup__remove,
+.batch-setup__review,
+.batch-setup__add,
+.batch-setup__start,
+.batch-setup__recent-item {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.batch-setup__account,
+.batch-setup__capture,
+.batch-setup__review,
+.batch-setup__add,
+.batch-setup__start {
+  color: var(--as-lb-gold) !important;
+  font-weight: 700;
+}
+.batch-setup__remove { color: #85817a !important; }
+.batch-setup__start { font-size: 15px; letter-spacing: .04em; }
+.batch-setup__capture-actions { border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: 8px; }
+.batch-setup__recent-item { padding-left: 0 !important; padding-right: 0 !important; }
+
+.batch-setup__row {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  border-bottom: 1px solid rgba(255,255,255,.055) !important;
+}
+.batch-setup__row.requires-review,
+.batch-setup__row.is-pending-confirmation,
+.batch-setup__row.is-confirmed {
+  border-color: rgba(255,255,255,.055) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.batch-setup__row.is-pending-confirmation .batch-setup__sample-label { color: #efb57f; }
+.batch-setup__row.is-confirmed .batch-setup__sample-label { color: var(--as-lb-text); font-weight: 650; }
+.batch-setup__preview-button,
+.batch-setup__manual-mark {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.batch-setup__manual-mark { color: var(--as-lb-gold); }
+.batch-setup__field-summary { gap: 4px 10px !important; }
+.batch-setup__field-chip {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  color: #9f9a91 !important;
+}
+
+/* Batch confirmation: LuckyBean-like flat sections and text actions. */
+.batch-review__panel { box-shadow: none !important; }
+.batch-review__close,
+.batch-review__secondary,
+.batch-review__primary {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.batch-review__close,
+.batch-review__secondary { color: #a7a198 !important; }
+.batch-review__primary { color: var(--as-lb-gold) !important; font-weight: 800; }
+.batch-review__section {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+.batch-review__section + .batch-review__section {
+  border-top: 1px solid rgba(255,255,255,.055) !important;
+  padding-top: 15px !important;
+}
+.batch-review__section-title { padding: 0 !important; color: var(--as-lb-gold) !important; }
+.batch-review__field.is-review {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+.batch-review__control {
+  border: 0 !important;
+  border-bottom: 1px solid rgba(214,173,99,.28) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+.batch-review__control:focus {
+  border-bottom-color: var(--as-lb-gold) !important;
+  box-shadow: none !important;
+}
+.batch-review__field.is-review .batch-review__control { border-bottom-color: rgba(232,154,85,.55) !important; }
+.batch-review__raw {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  border-top: 1px solid rgba(255,255,255,.055) !important;
+}
+.batch-review__validation { border-radius: 0 !important; background: transparent !important; color: #e6a0a0 !important; padding-left: 0 !important; }
+.batch-review__footer { grid-template-columns: 1fr 1fr !important; }
+
+/* Rail: samples and rail tools become typography, not cards. */
+.cupping-rail-tools__toggle,
+.cupping-rail-tools__action,
+.sample-rail__expand,
+.sample-rail__drag {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.sample-rail__item {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid rgba(255,255,255,.05) !important;
+}
+.sample-rail__item.is-active {
+  border-color: rgba(255,255,255,.05) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.sample-rail__item.is-active .sample-rail__number,
+.sample-rail__item.is-active .sample-rail__label { color: var(--as-lb-gold) !important; font-weight: 800; }
+.sample-rail__state-dot { box-shadow: none !important; }
+
+/* Stage/status choices: text only. */
+.stage-chip,
+.cupping-stage-step {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.cupping-stage-step::before { display: none !important; }
+.stage-chip--completed,
+.cupping-stage-step.is-completed { background: transparent !important; }
+.cupping-stage-step.is-current,
+.stage-chip--active { font-weight: 800 !important; opacity: 1 !important; }
+
+/* Sensory choice controls: selected state is conveyed by type, not a pill. */
+.sensory-toggle {
+  min-width: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 7px 4px !important;
+  color: #8f8b84 !important;
+}
+.sensory-toggle[aria-pressed="true"] {
+  background: transparent !important;
+  color: var(--as-lb-gold) !important;
+  font-weight: 800 !important;
+}
+.sensory-range__value {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--as-lb-gold) !important;
+  font-weight: 700;
+}
+
+/* Flavor groups and tags: no outlined chips or filled selected pills. */
+.flavor-group {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+  border-bottom: 1px solid rgba(255,255,255,.05) !important;
+}
+.flavor-group__title { padding-left: 0 !important; }
+.flavor-group__drag,
+.flavor-tag-item,
+.flavor-tag,
+.flavor-tag__drag {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.flavor-tag-item { overflow: visible !important; }
+.flavor-tag {
+  padding: 5px 6px !important;
+  color: #aaa49a !important;
+}
+.flavor-tag[aria-pressed="true"],
+.flavor-tag-item:has(.flavor-tag[aria-pressed="true"]) .flavor-tag {
+  background: transparent !important;
+  color: var(--as-lb-gold) !important;
+  font-weight: 800 !important;
+  text-decoration: none;
+}
+.flavor-tag__drag { color: #817d76 !important; }
+
+/* Header metadata is inline copy rather than mini-cards. */
+.cupping-main__sample-details { gap: 3px 12px !important; }
+.cupping-main__sample-detail {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+/* Footer navigation is text-led as in LuckyBean. */
+.cupping-nav {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #a6a098 !important;
+}
+.cupping-nav--next,
+.cupping-nav--complete,
+.cupping-nav--finish {
+  background: transparent !important;
+  color: var(--as-lb-gold) !important;
+  font-weight: 800 !important;
+}
+.cupping-nav--exit { background: transparent !important; color: #d59b68 !important; }
+
+/* Keep editable free-text fields visibly editable, but flatten their surface. */
+.sensory-text,
+.batch-setup__title,
+.batch-setup__sample-label {
+  border: 0 !important;
+  border-bottom: 1px solid rgba(214,173,99,.25) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 1px solid rgba(214,173,99,.72);
+  outline-offset: 3px;
+}
+
+@media (max-width: 620px) {
+  .batch-setup__capture-actions { gap: 4px !important; }
+  .batch-review__footer { grid-template-columns: .72fr 1.28fr !important; }
+  .flavor-group__tags { gap: 4px 8px !important; padding-left: 0 !important; padding-right: 0 !important; }
+}
