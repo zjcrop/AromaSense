@@ -13,7 +13,7 @@ export function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-export function button(className: string, text: string, onClick: () => void | Promise<void>): HTMLButtonElement {
+export function button(className: string, text: string, onClick: () => unknown): HTMLButtonElement {
   const node = element("button", className, text);
   node.type = "button";
   node.addEventListener("click", () => void onClick());

@@ -53,9 +53,13 @@ function boundedConfidence(value: unknown, fallback = 0.75): number {
   return Number.isFinite(number) ? clamp01(number) : fallback;
 }
 
+function isCoordinateTuple(value: readonly [number, number] | OCRPoint): value is readonly [number, number] {
+  return Array.isArray(value);
+}
+
 function point(value: readonly [number, number] | OCRPoint): OCRPoint | undefined {
-  const x = Array.isArray(value) ? Number(value[0]) : Number(value.x);
-  const y = Array.isArray(value) ? Number(value[1]) : Number(value.y);
+  const x = isCoordinateTuple(value) ? Number(value[0]) : Number(value.x);
+  const y = isCoordinateTuple(value) ? Number(value[1]) : Number(value.y);
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined;
 }
 

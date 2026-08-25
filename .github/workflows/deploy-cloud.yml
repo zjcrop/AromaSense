@@ -17,6 +17,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       AROMASENSE_D1_DATABASE_ID: ${{ vars.AROMASENSE_D1_DATABASE_ID }}
       AROMASENSE_D1_DATABASE_NAME: ${{ vars.AROMASENSE_D1_DATABASE_NAME }}
+      AROMASENSE_EMAIL_FROM: ${{ vars.AROMASENSE_EMAIL_FROM }}
+      AROMASENSE_PUBLIC_APP_URL: ${{ vars.AROMASENSE_PUBLIC_APP_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,10 +30,17 @@ jobs:
 
       - name: Validate deployment configuration
         run: |
+          set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || (echo "Missing CLOUDFLARE_API_TOKEN" && exit 1)
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "Missing CLOUDFLARE_ACCOUNT_ID" && exit 1)
           test -n "$AROMASENSE_D1_DATABASE_ID" || (echo "Missing AROMASENSE_D1_DATABASE_ID" && exit 1)
           test -n "$AROMASENSE_D1_DATABASE_NAME" || (echo "Missing AROMASENSE_D1_DATABASE_NAME" && exit 1)
+          test -n "$AROMASENSE_EMAIL_FROM" || (echo "Missing AROMASENSE_EMAIL_FROM; registration requires a verified Cloudflare Email Service sender." && exit 1)
+          test -n "$AROMASENSE_PUBLIC_APP_URL" || (echo "Missing AROMASENSE_PUBLIC_APP_URL" && exit 1)
+          case "$AROMASENSE_PUBLIC_APP_URL" in
+            https://*) ;;
+            *) echo "AROMASENSE_PUBLIC_APP_URL must use https://"; exit 1 ;;
+          esac
 
       - name: Install Worker dependencies
         run: npm install --no-audit --no-fund
@@ -55,7 +64,16 @@ jobs:
                 "database_id": "$AROMASENSE_D1_DATABASE_ID",
                 "migrations_dir": "migrations"
               }
-            ]
+            ],
+            "send_email": [
+              {
+                "name": "EMAIL"
+              }
+            ],
+            "vars": {
+              "EMAIL_FROM": "$AROMASENSE_EMAIL_FROM",
+              "PUBLIC_APP_URL": "$AROMASENSE_PUBLIC_APP_URL"
+            }
           }
           EOF
 
@@ -64,6 +82,22 @@ jobs:
 
       - name: Deploy Worker
         run: npx wrangler deploy --config wrangler.deploy.jsonc
+
+      - name: Verify deployed health contract
+        env:
+          AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
+        run: |
+          set -euo pipefail
+          test -n "${AROMASENSE_CLOUD_URL:-}" || (echo "Missing AROMASENSE_CLOUD_URL; cannot verify deployed Worker." && exit 1)
+          node - <<'NODE'
+          const base = process.env.AROMASENSE_CLOUD_URL.replace(/\/$/, "");
+          const response = await fetch(`${base}/health`);
+          const body = await response.json();
+          console.log(body);
+          if (!response.ok || body.ok !== true) throw new Error("Worker health check failed");
+          if (body.database !== "configured") throw new Error("D1 binding is not configured");
+          if (body.email !== "configured") throw new Error("Email binding/sender is not configured");
+          NODE
 
       - name: Remove generated config
         if: always()
