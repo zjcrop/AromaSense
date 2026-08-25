@@ -23,19 +23,35 @@ interface DragState {
   lastClientY: number;
 }
 
-function directItems(container: HTMLElement, selector: string): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>(selector)]
-    .filter((item) => item.parentElement === container && !item.classList.contains("drag-reorder__source-detached"));
+function directItems(container: HTMLElement, options: Pick<DragReorderOptions, "itemSelector" | "itemIdAttribute">): HTMLElement[] {
+  return [...container.children]
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .filter((item) =>
+      !item.classList.contains("drag-reorder__source-detached") &&
+      (item.matches(options.itemSelector) || item.hasAttribute(options.itemIdAttribute))
+    );
+}
+
+function resolveSource(container: HTMLElement, target: HTMLElement | null, options: DragReorderOptions): HTMLElement | undefined {
+  let node: HTMLElement | null = target;
+  while (node && node !== container) {
+    if (node.parentElement === container &&
+        (node.matches(options.itemSelector) || node.hasAttribute(options.itemIdAttribute))) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return undefined;
 }
 
 function orderedIds(container: HTMLElement, options: DragReorderOptions): string[] {
-  return directItems(container, options.itemSelector)
+  return directItems(container, options)
     .map((item) => item.getAttribute(options.itemIdAttribute))
     .filter((id): id is string => Boolean(id));
 }
 
-function rectMap(container: HTMLElement, selector: string): Map<HTMLElement, DOMRect> {
-  return new Map(directItems(container, selector).map((item) => [item, item.getBoundingClientRect()] as const));
+function rectMap(container: HTMLElement, options: DragReorderOptions): Map<HTMLElement, DOMRect> {
+  return new Map(directItems(container, options).map((item) => [item, item.getBoundingClientRect()] as const));
 }
 
 function animateFlip(before: Map<HTMLElement, DOMRect>, after: Map<HTMLElement, DOMRect>, duration: number): void {
@@ -84,9 +100,9 @@ function moveGhost(state: DragState, clientX: number, clientY: number): void {
   state.ghost.style.top = `${clientY - state.pointerOffsetY}px`;
 }
 
-function nearestTarget(container: HTMLElement, selector: string, x: number, y: number): { item: HTMLElement; rect: DOMRect } | undefined {
+function nearestTarget(container: HTMLElement, options: DragReorderOptions, x: number, y: number): { item: HTMLElement; rect: DOMRect } | undefined {
   let best: { item: HTMLElement; rect: DOMRect; distance: number } | undefined;
-  for (const item of directItems(container, selector)) {
+  for (const item of directItems(container, options)) {
     const rect = item.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -99,14 +115,14 @@ function nearestTarget(container: HTMLElement, selector: string, x: number, y: n
 function movePlaceholder(
   container: HTMLElement,
   placeholder: HTMLElement,
-  selector: string,
+  options: DragReorderOptions,
   x: number,
   y: number,
   animationMs: number
 ): void {
-  const target = nearestTarget(container, selector, x, y);
+  const target = nearestTarget(container, options, x, y);
   if (!target) return;
-  const beforeRects = rectMap(container, selector);
+  const beforeRects = rectMap(container, options);
   const sameRow = Math.abs(y - (target.rect.top + target.rect.height / 2)) < target.rect.height * 0.62;
   const beforeTarget = sameRow
     ? x < target.rect.left + target.rect.width / 2
@@ -114,7 +130,7 @@ function movePlaceholder(
   const anchor = beforeTarget ? target.item : target.item.nextSibling;
   if (anchor === placeholder || anchor === placeholder.nextSibling) return;
   container.insertBefore(placeholder, anchor);
-  const afterRects = rectMap(container, selector);
+  const afterRects = rectMap(container, options);
   animateFlip(beforeRects, afterRects, animationMs);
 }
 
@@ -135,6 +151,13 @@ function scrollByPointer(container: HTMLElement, x: number, y: number, edge: num
   } else if (dy !== 0) {
     window.scrollBy({ top: dy, behavior: "auto" });
   }
+}
+
+function handleMatches(source: HTMLElement, eventTarget: HTMLElement | null, options: DragReorderOptions): boolean {
+  const selector = options.handleSelector ?? (source.querySelector("[data-drag-handle]") ? "[data-drag-handle]" : undefined);
+  if (!selector) return true;
+  const handle = eventTarget?.closest<HTMLElement>(selector);
+  return Boolean(handle && source.contains(handle));
 }
 
 export function attachDragReorder(container: HTMLElement, options: DragReorderOptions): () => void {
@@ -158,7 +181,7 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
   const runAutoScroll = () => {
     if (!state?.active) return;
     scrollByPointer(container, state.lastClientX, state.lastClientY, autoScrollEdgePx);
-    movePlaceholder(container, state.placeholder, options.itemSelector, state.lastClientX, state.lastClientY, animationMs);
+    movePlaceholder(container, state.placeholder, options, state.lastClientX, state.lastClientY, animationMs);
     autoScrollFrame = requestAnimationFrame(runAutoScroll);
   };
 
@@ -242,9 +265,8 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
   const onPointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
     const eventTarget = event.target as HTMLElement | null;
-    const source = eventTarget?.closest<HTMLElement>(options.itemSelector);
-    if (!source || source.parentElement !== container) return;
-    if (options.handleSelector && !eventTarget?.closest(options.handleSelector)) return;
+    const source = resolveSource(container, eventTarget, options);
+    if (!source || !handleMatches(source, eventTarget, options)) return;
 
     clearPending();
     candidatePointerId = event.pointerId;
@@ -267,7 +289,7 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
     if (state?.pointerId === event.pointerId) {
       event.preventDefault();
       moveGhost(state, event.clientX, event.clientY);
-      movePlaceholder(container, state.placeholder, options.itemSelector, event.clientX, event.clientY, animationMs);
+      movePlaceholder(container, state.placeholder, options, event.clientX, event.clientY, animationMs);
       return;
     }
     if (candidatePointerId !== event.pointerId || !pointerCandidate) return;
@@ -285,8 +307,8 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
   };
 
   const onClickCapture = (event: MouseEvent) => {
-    const item = (event.target as HTMLElement | null)?.closest<HTMLElement>(options.itemSelector);
-    if (item?.dataset.dragSuppressClick === "1") {
+    const source = resolveSource(container, event.target as HTMLElement | null, options);
+    if (source?.dataset.dragSuppressClick === "1") {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -302,8 +324,11 @@ export function attachDragReorder(container: HTMLElement, options: DragReorderOp
     clearPending();
     stopAutoScroll();
     if (state) {
-      const synthetic = new PointerEvent("pointercancel", { pointerId: state.pointerId });
-      finish(synthetic, true);
+      const drag = state;
+      state = undefined;
+      restoreSource(drag, true);
+      container.classList.remove("is-reordering");
+      document.body.classList.remove("drag-reorder--active");
     }
     container.removeEventListener("pointerdown", onPointerDown);
     container.removeEventListener("pointermove", onPointerMove);
