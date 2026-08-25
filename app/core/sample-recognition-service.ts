@@ -4,6 +4,8 @@ import {
   luckyBeanCoreVersion,
   requireLuckyBeanRecognitionCore,
   type LuckyBeanAnalysisField,
+  type LuckyBeanCoreBlock,
+  type LuckyBeanPreparedImage,
   type LuckyBeanRecognitionAnalysis
 } from "./luckybean-upstream-adapter";
 import { segmentSamples, type SampleLayoutType, type SampleLayoutSegment } from "./sample-layout-segmenter";
@@ -52,23 +54,8 @@ interface NativeRecognitionResult {
   lines?: readonly NativeOCRLine[];
   sourceWidth?: number;
   sourceHeight?: number;
+  imageQuality?: Record<string, unknown>;
   error?: string;
-}
-
-interface NativeRecognitionBridge {
-  recognizeSampleImage?(payloadJson: string): NativeRecognitionResult | string | Promise<NativeRecognitionResult | string>;
-}
-
-interface TextDetection {
-  rawValue?: string;
-  text?: string;
-  confidence?: number;
-  boundingBox?: DOMRectReadOnly | { x: number; y: number; width: number; height: number };
-  cornerPoints?: readonly { x: number; y: number }[];
-}
-
-interface TextDetectorLike {
-  detect(image: ImageBitmap): Promise<readonly TextDetection[]>;
 }
 
 interface TesseractWorkerLike {
@@ -89,16 +76,8 @@ const TESSERACT_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VER
 let tesseractLoader: Promise<TesseractLike> | undefined;
 let workerPromise: Promise<TesseractWorkerLike> | undefined;
 
-function runtimeWindow(): Window & typeof globalThis & {
-  AromaSenseRecognitionBridge?: NativeRecognitionBridge;
-  TextDetector?: new () => TextDetectorLike;
-  Tesseract?: TesseractLike;
-} {
-  return window as Window & typeof globalThis & {
-    AromaSenseRecognitionBridge?: NativeRecognitionBridge;
-    TextDetector?: new () => TextDetectorLike;
-    Tesseract?: TesseractLike;
-  };
+function runtimeWindow(): Window & typeof globalThis & { Tesseract?: TesseractLike } {
+  return window as Window & typeof globalThis & { Tesseract?: TesseractLike };
 }
 
 function cleanText(value: unknown): string {
@@ -108,78 +87,6 @@ function cleanText(value: unknown): string {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("图片编码失败"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function parseNativeResult(value: NativeRecognitionResult | string): NativeRecognitionResult {
-  if (typeof value !== "string") return value;
-  try {
-    return JSON.parse(value) as NativeRecognitionResult;
-  } catch {
-    return { fullText: value, engine: "android-native-ocr" };
-  }
-}
-
-async function recognizeNative(file: File, id: string): Promise<NativeRecognitionResult | undefined> {
-  const bridge = runtimeWindow().AromaSenseRecognitionBridge;
-  if (typeof bridge?.recognizeSampleImage !== "function") return undefined;
-  const payload = JSON.stringify({
-    id,
-    fileName: file.name,
-    mimeType: file.type || "image/jpeg",
-    dataUrl: await blobToDataUrl(file),
-    locale: "zh-CN"
-  });
-  const result = parseNativeResult(await bridge.recognizeSampleImage(payload));
-  if (result.error) throw new Error(result.error);
-  return result;
-}
-
-async function recognizeTextDetector(file: File): Promise<NativeRecognitionResult | undefined> {
-  const Detector = runtimeWindow().TextDetector;
-  if (typeof Detector !== "function" || typeof createImageBitmap !== "function") return undefined;
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  try {
-    const detections = await new Detector().detect(bitmap);
-    const lines: NativeOCRLine[] = detections.flatMap((item, index) => {
-      const text = cleanText(item.rawValue ?? item.text);
-      if (!text) return [];
-      const box = item.boundingBox;
-      const polygon = item.cornerPoints?.length
-        ? item.cornerPoints
-        : box
-          ? [
-              { x: box.x, y: box.y },
-              { x: box.x + box.width, y: box.y },
-              { x: box.x + box.width, y: box.y + box.height },
-              { x: box.x, y: box.y + box.height }
-            ]
-          : undefined;
-      return [{ id: `browser-line-${index + 1}`, text, confidence: item.confidence, polygon }];
-    });
-    if (!lines.length) return undefined;
-    const confidenceValues = lines.map((item) => Number(item.confidence)).filter(Number.isFinite);
-    return {
-      fullText: lines.map((item) => item.text).join("\n"),
-      lines,
-      sourceWidth: bitmap.width,
-      sourceHeight: bitmap.height,
-      engine: "browser-text-detector",
-      confidence: confidenceValues.length
-        ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
-        : undefined
-    };
-  } finally {
-    bitmap.close();
-  }
 }
 
 function ensureTesseract(): Promise<TesseractLike> {
@@ -218,7 +125,7 @@ async function ensureTesseractWorker(
   return workerPromise;
 }
 
-async function recognizeTesseract(file: File): Promise<NativeRecognitionResult> {
+async function recognizeTesseract(file: Blob): Promise<NativeRecognitionResult> {
   const worker = await ensureTesseractWorker();
   await worker.setParameters?.({ tessedit_pageseg_mode: "11", preserve_interword_spaces: "1", user_defined_dpi: "300" });
   const result = await worker.recognize(file);
@@ -227,6 +134,82 @@ async function recognizeTesseract(file: File): Promise<NativeRecognitionResult> 
     engine: `tesseract.js-${TESSERACT_VERSION}-chi_sim+eng`,
     confidence: Number.isFinite(Number(result.data?.confidence)) ? Number(result.data?.confidence) / 100 : undefined
   };
+}
+
+function blockToLine(block: LuckyBeanCoreBlock, index: number): NativeOCRLine {
+  return {
+    id: String(block.id ?? `luckybean-line-${index + 1}`),
+    blockId: String(block.blockId ?? `luckybean-block-${index + 1}`),
+    text: cleanText(block.text ?? block.rawValue ?? block.value),
+    confidence: Number(block.confidence ?? block.score ?? 0.75),
+    polygon: block.polygon,
+    box: block.boundingBox
+  };
+}
+
+function averageConfidence(lines: readonly NativeOCRLine[]): number | undefined {
+  const values = lines.map((line) => Number(line.confidence)).filter(Number.isFinite);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
+}
+
+async function recognizeWithLuckyBean(file: File, id: string): Promise<NativeRecognitionResult | undefined> {
+  const core = requireLuckyBeanRecognitionCore();
+  const prepared: LuckyBeanPreparedImage = await core.preparePackageImage(file);
+  const role = "front";
+  try {
+    const result = await core.recognizeCoffeeBag([{
+      id,
+      role,
+      roleLabel: "样品图片",
+      blob: prepared.blob,
+      nativeSource: Boolean(prepared.nativeSource),
+      fileName: file.name
+    }], { locale: "zh-CN" });
+    const lines = [...(result.blocks ?? [])]
+      .map(blockToLine)
+      .filter((line) => cleanText(line.text));
+    const fullText = cleanText(result.fullText || lines.map((line) => line.text).join("\n"));
+    if (!fullText && !lines.length) return undefined;
+    return {
+      fullText,
+      lines,
+      engine: String(result.engine ?? "LuckyBean-OCR"),
+      confidence: averageConfidence(lines),
+      sourceWidth: Number(prepared.processedWidth || prepared.width) || undefined,
+      sourceHeight: Number(prepared.processedHeight || prepared.height) || undefined,
+      imageQuality: {
+        score: prepared.score,
+        status: prepared.status,
+        warnings: prepared.warnings ?? [],
+        originalWidth: prepared.width,
+        originalHeight: prepared.height,
+        processedWidth: prepared.processedWidth,
+        processedHeight: prepared.processedHeight,
+        nativeSource: Boolean(prepared.nativeSource)
+      }
+    };
+  } catch (error) {
+    const capabilities = core.getRecognitionCapabilities?.();
+    const hasNative = Boolean(capabilities?.native);
+    if (hasNative) throw error;
+    const fallback = await recognizeTesseract(prepared.blob);
+    return {
+      ...fallback,
+      sourceWidth: Number(prepared.processedWidth || prepared.width) || undefined,
+      sourceHeight: Number(prepared.processedHeight || prepared.height) || undefined,
+      imageQuality: {
+        score: prepared.score,
+        status: prepared.status,
+        warnings: prepared.warnings ?? [],
+        originalWidth: prepared.width,
+        originalHeight: prepared.height,
+        processedWidth: prepared.processedWidth,
+        processedHeight: prepared.processedHeight,
+        nativeSource: Boolean(prepared.nativeSource),
+        fallbackReason: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
 }
 
 function ocrLines(result: NativeRecognitionResult): OCRLineInput[] {
@@ -286,7 +269,7 @@ function analysisFields(analysis: LuckyBeanRecognitionAnalysis): Record<string, 
 }
 
 function analysisReview(analysis: LuckyBeanRecognitionAnalysis): Array<Record<string, unknown>> {
-  return (analysis.fields ?? []).filter((item) => item.status === "review").map((item) => ({
+  return (analysis.fields ?? []).filter((item) => item.status === "review").map((item: LuckyBeanAnalysisField) => ({
     field: targetField(item.field),
     value: cleanText(item.standardValue ?? item.rawValue),
     confidence: Number(item.confidence ?? 0),
@@ -350,32 +333,29 @@ function analyzeWithLuckyBean(
 export class SampleRecognitionService {
   async warmup(): Promise<{ engine: string; ready: boolean; message: string }> {
     try {
-      requireLuckyBeanRecognitionCore();
+      const core = requireLuckyBeanRecognitionCore();
       loadBundledLuckyBeanRecognitionBook();
-    } catch (error) {
-      return { engine: "unavailable", ready: false, message: error instanceof Error ? error.message : String(error) };
-    }
-    const version = luckyBeanCoreVersion();
-    if (typeof runtimeWindow().AromaSenseRecognitionBridge?.recognizeSampleImage === "function") {
-      return {
-        engine: "android-mlkit+luckybean-production",
-        ready: true,
-        message: `Android 本地图像识别 + LuckyBean 正式识别核心 ${version} 已就绪`
-      };
-    }
-    if (typeof runtimeWindow().TextDetector === "function") {
-      return {
-        engine: "browser-text-detector+luckybean-production",
-        ready: true,
-        message: `浏览器图像识别 + LuckyBean 正式识别核心 ${version} 已就绪`
-      };
-    }
-    try {
+      const capabilities = core.getRecognitionCapabilities?.();
+      const version = luckyBeanCoreVersion();
+      if (capabilities?.native) {
+        return {
+          engine: "android-mlkit+luckybean-production",
+          ready: true,
+          message: `LuckyBean 图像预处理 + Android OCR + 正式识别核心 ${version} 已就绪`
+        };
+      }
+      if (capabilities?.webPaddle || capabilities?.textDetector) {
+        return {
+          engine: "browser+luckybean-production",
+          ready: true,
+          message: `LuckyBean 图像预处理 + 网页 OCR + 正式识别核心 ${version} 已就绪`
+        };
+      }
       await ensureTesseractWorker();
       return {
         engine: `tesseract.js-${TESSERACT_VERSION}+luckybean-production`,
         ready: true,
-        message: `网页图像识别 + LuckyBean 正式识别核心 ${version} 已就绪`
+        message: `LuckyBean 图像预处理 + Tesseract 后备 + 正式识别核心 ${version} 已就绪`
       };
     } catch (error) {
       return { engine: "unavailable", ready: false, message: error instanceof Error ? error.message : String(error) };
@@ -384,11 +364,9 @@ export class SampleRecognitionService {
 
   async recognizePage(file: File, index = 0): Promise<RecognizedPage> {
     const id = `sample-image-${Date.now().toString(36)}-${index}`;
-    let result = await recognizeNative(file, id);
-    if (!result) result = await recognizeTextDetector(file);
-    if (!result || !cleanText(result.fullText ?? result.text)) result = await recognizeTesseract(file);
-    const rawText = cleanText(result.fullText ?? result.text);
-    if (!rawText) throw new Error("没有识别到可用文字，请补拍或手工填写样品名称");
+    const result = await recognizeWithLuckyBean(file, id);
+    const rawText = cleanText(result?.fullText ?? result?.text);
+    if (!result || !rawText) throw new Error("没有识别到可用文字，请补拍或手工填写样品名称");
 
     const document = buildOCRLayoutDocument({
       imageId: id,
@@ -416,11 +394,12 @@ export class SampleRecognitionService {
         metadata: {
           ...fields,
           recognition: {
-            schemaVersion: "aromasense-recognition/3.0",
+            schemaVersion: "aromasense-recognition/3.1",
             source: "photo",
             fileName: file.name,
             mimeType: file.type,
             engine,
+            imageQuality: result.imageQuality,
             pageLayout: layout.layoutType,
             segmentationConfidence: segment.confidence,
             segmentationRequiresReview: layout.requiresReview,
@@ -482,8 +461,8 @@ export class SampleRecognitionService {
           fileName: file.name,
           status: "completed",
           message: recognized.samples.length > 1
-            ? `识别到 ${recognized.samples.length} 个样品区块 · LuckyBean 正式识别核心完成`
-            : "LuckyBean 正式识别核心完成"
+            ? `识别到 ${recognized.samples.length} 个样品区块 · LuckyBean 正式全链完成`
+            : "LuckyBean 正式全链完成"
         });
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error(String(error));
