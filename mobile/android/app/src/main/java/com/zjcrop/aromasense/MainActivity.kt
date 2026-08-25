@@ -7,7 +7,6 @@ import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
-import android.provider.OpenableColumns
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -28,7 +27,6 @@ class MainActivity : Activity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingCameraUri: Uri? = null
     private val sourceByImageId = LinkedHashMap<String, Uri>()
-    private val sourcesByFileName = LinkedHashMap<String, ArrayDeque<Uri>>()
     private val sourceQueue = ArrayDeque<Uri>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,8 +34,8 @@ class MainActivity : Activity() {
 
         database = openOrCreateDatabase("aromasense.sqlite", MODE_PRIVATE, null)
         database.execSQL("PRAGMA foreign_keys = ON")
-        recognitionBridge = AromaSenseRecognitionBridge(this) { imageId, fileName ->
-            resolveOriginalSource(imageId, fileName)
+        recognitionBridge = AromaSenseRecognitionBridge(this) { imageId, _ ->
+            resolveOriginalSource(imageId)
         }
 
         webView = WebView(this)
@@ -168,36 +166,23 @@ class MainActivity : Activity() {
         }
     }
 
+    @Synchronized
     private fun rememberOriginalSources(uris: List<Uri>) {
+        // The WebView FileList and Android ClipData are consumed in the same sequence.
+        // Do not mix filename lookup with a second fallback queue: a single filename
+        // mismatch used to leave already-consumed URIs in the queue and could bind a
+        // later OCR request to the wrong image in multi-select mode.
         sourceQueue.clear()
-        sourcesByFileName.clear()
-        for (uri in uris) {
-            sourceQueue.addLast(uri)
-            val fileName = displayName(uri)
-            if (fileName.isNotBlank()) sourcesByFileName.getOrPut(fileName) { ArrayDeque() }.addLast(uri)
-        }
+        sourceByImageId.clear()
+        for (uri in uris) sourceQueue.addLast(uri)
     }
 
     @Synchronized
-    private fun resolveOriginalSource(imageId: String, fileName: String): Uri? {
+    private fun resolveOriginalSource(imageId: String): Uri? {
         if (imageId.isNotBlank()) sourceByImageId[imageId]?.let { return it }
-        var source: Uri? = null
-        if (fileName.isNotBlank()) {
-            val byName = sourcesByFileName[fileName]
-            if (byName != null && byName.isNotEmpty()) source = byName.removeFirst()
-        }
-        if (source == null && sourceQueue.isNotEmpty()) source = sourceQueue.removeFirst()
+        val source = if (sourceQueue.isNotEmpty()) sourceQueue.removeFirst() else null
         if (source != null && imageId.isNotBlank()) sourceByImageId[imageId] = source
         return source
-    }
-
-    private fun displayName(uri: Uri): String {
-        if (uri.scheme != "content") return uri.lastPathSegment.orEmpty()
-        return runCatching {
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else ""
-            }.orEmpty()
-        }.getOrDefault(uri.lastPathSegment.orEmpty())
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
