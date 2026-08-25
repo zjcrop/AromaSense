@@ -1,120 +1,168 @@
-# Cloudflare Deployment Baseline
+# Cloudflare Deployment and Acceptance
 
-## Goal
+## Purpose
 
-Validate the infrastructure in two independent stages:
+AromaSense cloud infrastructure is **not** part of the live cupping write path. The client remains Local-first; Cloudflare provides account verification, immutable revision synchronization, backup and restore.
 
-1. deploy the Worker and verify `/health` without any database dependency;
-2. create/bind D1, apply migration, then verify database write/read.
+A cloud release is accepted only when all three dependencies are real and observable:
 
-This separation prevents a D1 configuration error from being mistaken for a Worker deployment error.
+1. Cloudflare Worker `aromasense-api`;
+2. Cloudflare D1 database with current migrations;
+3. Cloudflare Email Service with a verified sender used for account activation.
 
-## Stage A — first Worker deployment
+A Worker that responds to `/health` but lacks D1 or Email Service is not an accepted account backend.
 
-In Cloudflare Dashboard:
+## Required GitHub Actions configuration
 
-1. Open **Workers & Pages**.
-2. Create/import from GitHub repository `zjcrop/AromaSense`.
-3. Configure the Worker project root as `cloud/worker` if the dashboard requests a root directory.
-4. Build/install command: `npm install` (or the dashboard default for Node projects).
-5. Deploy command: `npm run deploy` / `npx wrangler deploy` as supported by the selected Git integration flow.
-6. Worker name must remain `aromasense-api` to match `wrangler.jsonc`.
+### Secrets
 
-After deployment, request:
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
 
-```text
-GET https://<worker-host>/health
+The API token must be scoped only to the resources required for Worker/D1 deployment. Do not commit API tokens, account credentials or mail credentials to repository files.
+
+### Repository variables
+
+- `AROMASENSE_D1_DATABASE_ID` — real D1 UUID
+- `AROMASENSE_D1_DATABASE_NAME` — normally `aromasense-db`
+- `AROMASENSE_EMAIL_FROM` — sender address on the verified Cloudflare email domain
+- `AROMASENSE_PUBLIC_APP_URL` — e.g. `https://zjcrop.github.io/AromaSense/`
+- `AROMASENSE_CLOUD_URL` — deployed HTTPS Worker origin, without an API path
+
+`AROMASENSE_CLOUD_URL` is consumed by both the Pages build and Android build. The Pages workflow intentionally fails when it is empty, so a disconnected account UI cannot silently replace the accepted web build.
+
+## Worker bindings
+
+The deployment workflow generates the production Wrangler configuration. Its effective bindings must be equivalent to:
+
+```jsonc
+{
+  "name": "aromasense-api",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aromasense-db",
+      "database_id": "<REAL-D1-UUID>",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "vars": {
+    "EMAIL_FROM": "verified-sender@example.com",
+    "PUBLIC_APP_URL": "https://zjcrop.github.io/AromaSense/"
+  }
+}
 ```
 
-Expected behavior before D1 is configured:
+Do not insert placeholder database UUIDs or unverified sender addresses into production configuration.
+
+## D1 migrations
+
+Current Worker migrations are located in `cloud/worker/migrations`:
+
+1. `0002_sync_core.sql` — immutable synchronized revisions;
+2. `0003_auth_and_ownership.sql` — users, auth tokens and revision ownership;
+3. `0004_email_verification.sql` — verification state and single-use verification tokens.
+
+The deploy workflow applies migrations remotely before deploying the Worker:
+
+```bash
+npx wrangler d1 migrations apply "$AROMASENSE_D1_DATABASE_NAME" --remote --config wrangler.deploy.jsonc
+```
+
+Do not mark the database complete merely because the SQL files exist in Git. Remote migration execution must be observed.
+
+## Health acceptance
+
+After deployment:
+
+```http
+GET /health
+```
+
+The accepted response must include the following states:
 
 ```json
 {
   "ok": true,
   "service": "aromasense-api",
-  "version": "0.1.0",
-  "database": "not-configured"
+  "version": "B0.1.a",
+  "protocol": "aromasense-sync/1.0",
+  "database": "configured",
+  "email": "configured"
 }
 ```
 
-The timestamp field is also returned and is intentionally dynamic.
+The timestamp is dynamic.
 
-## Stage B — create D1
+The deployment workflow fails if either `database` or `email` is not `configured`.
 
-From an authenticated Wrangler environment in `cloud/worker`:
+## Account acceptance sequence
 
-```bash
-npx wrangler d1 create aromasense-db --location=apac --binding=DB --update-config
-```
+A real production registration test must exercise the complete chain, not only the POST response:
 
-Cloudflare returns/records the D1 database UUID and updates the Wrangler configuration with the D1 binding. Review the diff before committing it.
+1. `POST /api/v1/auth/register` with a new test email and password of at least 10 characters;
+2. expect HTTP `202`, `status=verification_required`;
+3. confirm the verification email is actually delivered;
+4. open its single-use `/api/v1/auth/verify?token=...` link;
+5. confirm the Worker records `email_verified_at`;
+6. `POST /api/v1/auth/login` with the same credentials;
+7. confirm the returned token is accepted by `GET /api/v1/auth/me`;
+8. `POST /api/v1/auth/logout` and confirm local session cleanup.
 
-The resulting binding must be equivalent to:
-
-```jsonc
-"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "aromasense-db",
-    "database_id": "<REAL-D1-UUID>",
-    "migrations_dir": "../../migrations"
-  }
-]
-```
-
-Do not invent or commit a fake production UUID.
-
-## Stage C — apply migration
-
-From `cloud/worker`:
-
-```bash
-npx wrangler d1 migrations apply aromasense-db --remote
-```
-
-The initial migration creates only `infrastructure_test`. It is intentionally separate from future cupping-domain tables.
-
-## Stage D — validate D1 write/read
-
-Write:
-
-```http
-POST /api/v1/test/records
-Content-Type: application/json
-
-{"value":"aromasense-d1-ok"}
-```
-
-Expected HTTP status: `201`.
-
-Read:
-
-```http
-GET /api/v1/test/records
-```
-
-The newly inserted test record should appear in the returned records array.
-
-## Failure expectations
-
-Before D1 is configured, database test routes must return:
+If `EMAIL` or `EMAIL_FROM` is absent, registration intentionally returns:
 
 - HTTP `503`
-- error code `DB_NOT_CONFIGURED`
+- `EMAIL_SERVICE_NOT_CONFIGURED`
 
-`GET /health` must continue to return HTTP `200`.
+This behavior is preferable to creating accounts that can never be activated.
 
-## Security
+## Synchronization acceptance sequence
 
-Do not place Cloudflare API tokens, account secrets, JWT signing keys, or user credentials in repository files or Wrangler plaintext vars intended for secrets. Use Cloudflare Secrets / appropriately scoped deployment credentials.
+With an authenticated test account:
 
-## Next milestone after validation
+1. create a local checkpoint revision;
+2. upload it with `POST /api/v1/revisions`;
+3. repeat the same revision and verify idempotent acknowledgement;
+4. attempt the same `revisionId` with a different content hash and verify conflict rejection;
+5. retrieve the original revision with `GET /api/v1/revisions/:revisionId`;
+6. confirm another account cannot read the revision;
+7. complete a final revision;
+8. restore the Session on a second device/browser profile and compare the reconstructed payload/hash.
 
-Only after the above checks pass should the repository add:
+Only after this round trip is observed may cross-device cloud synchronization be marked complete.
 
-- production session/sample/revision schema;
-- authentication;
-- revision hash validation;
-- idempotency rules;
-- client SyncAdapter contract;
-- R2 attachment support, if actually needed.
+## Pages acceptance
+
+The Pages workflow injects the repository variable `AROMASENSE_CLOUD_URL` into `web/index.template.html` during bundling. It verifies that:
+
+- the URL is non-empty;
+- the URL uses HTTPS;
+- `__CLOUD_BASE_URL__` no longer exists in the artifact;
+- the final HTML contains exactly the configured Worker origin.
+
+A successful historical Pages deployment is not enough. The accepted browser build must be produced from the intended current `main` SHA with this connected configuration.
+
+## Android acceptance
+
+CI builds the same web bundle into the Android application and runs `assembleDebug`. A successful APK build proves compile/package compatibility, not runtime cloud or OCR behavior.
+
+Physical-device acceptance still requires:
+
+- account registration and verification over the real Worker;
+- camera/gallery original-image OCR;
+- process-kill and Session resume;
+- touch/long-press/scroll conflict checks;
+- network loss and reconnection while a real revision queue exists.
+
+## Security constraints
+
+- Never commit Cloudflare API tokens, user credentials or other deployment secrets.
+- Keep revision ownership server-side; never trust a client-provided owner ID.
+- Keep verification tokens single-use and time limited.
+- Do not weaken local SQLite foreign keys to make tests pass; test fixtures must satisfy production invariants.
+- Cloud account availability must never be a prerequisite for recording a cupping Session locally.

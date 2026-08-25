@@ -1,8 +1,8 @@
 # AromaSense Implementation Status
 
-Updated: 2026-08-24
+Updated: 2026-08-25
 
-> This file records **observed product capability**, not merely the existence of a model, interface, or renderer. A feature is not treated as accepted until its complete user path has been exercised.
+> This file records **observed product capability**, not merely the existence of a model, interface, or renderer. Automated acceptance and physical/runtime acceptance are distinguished explicitly. A feature that depends on external infrastructure is not treated as complete until that infrastructure has been exercised.
 
 ## Phase 0 — Project baseline
 - [x] Repository and development rules
@@ -10,7 +10,7 @@ Updated: 2026-08-24
 - [x] Third-party license governance
 - [x] Sync protocol `aromasense-sync/1.0`
 - [x] Stage identifier contract `sensory-stage/1.0`
-- [x] Repository changed to public for GitHub Pages / open access testing
+- [x] Repository is currently public for GitHub Pages / open access testing
 
 ## Phase 1 — Domain core
 - [x] Single active `sample + stage` editing context model
@@ -27,11 +27,13 @@ Updated: 2026-08-24
 - [x] SHA-256 revision hashing
 - [x] transactional local cupping repository over SQLite driver contract
 - [x] Node 24 built-in SQLite runtime/reference adapter
+- [x] Node SQLite rows normalized to plain objects for adapter parity
 - [x] serialized field-write / context-switch controller
-- [x] transaction rollback test coverage added
-- [x] close/reopen recovery test coverage added
+- [x] transaction rollback test coverage
+- [x] close/reopen recovery test coverage
 - [x] browser SQLite adapter using sql.js + IndexedDB persistence
-- [ ] latest CI execution observed and passing after product-shell changes
+- [x] migration-forward compatibility automated test
+- [x] full CI and Android debug build observed passing on `9a254ad9dd496aabecb769fe6238c25f366ee8ba`
 - [ ] real process-kill recovery acceptance test on Android
 
 ## Phase 3 — Account and cloud synchronization
@@ -40,14 +42,22 @@ Updated: 2026-08-24
 - [x] idempotent revision POST contract
 - [x] revision conflict detection
 - [x] revision GET endpoint
-- [x] register/login/logout client and Worker-side auth code exists
-- [x] local auth-session storage exists
-- [x] account/sync product entry remains visible even when cloud URL is not configured
-- [ ] D1 binding verified in real Cloudflare environment
-- [ ] migrations executed remotely
-- [ ] production `AROMASENSE_CLOUD_URL` configured in web/Android build
-- [ ] real register/login/logout acceptance test
-- [ ] real write/read/idempotency/conflict acceptance test
+- [x] register/login/logout client and Worker-side auth code
+- [x] email verification / resend / verify-link code
+- [x] pending-registration local persistence
+- [x] local auth-session storage
+- [x] account/sync product entry remains visible when cloud URL is absent
+- [x] local sync-queue counts shown in account panel
+- [x] registration client contract tests: pending verification, missing email service, verified login
+- [x] Pages workflow refuses to publish a connected-account build when `AROMASENSE_CLOUD_URL` is absent
+- [x] Cloud deploy workflow validates D1, Email Service sender and public URLs before deployment
+- [ ] Cloudflare D1 binding verified in the real environment
+- [ ] D1 migrations executed remotely and verified
+- [ ] Cloudflare Email Service sender/domain verified and `EMAIL` binding active
+- [ ] production `AROMASENSE_CLOUD_URL` configured in GitHub repository variables
+- [ ] production `AROMASENSE_EMAIL_FROM` and `AROMASENSE_PUBLIC_APP_URL` configured
+- [ ] real register → email receipt → verify → login acceptance test
+- [ ] real authenticated revision write/read/idempotency/conflict acceptance test
 - [ ] cross-device restore acceptance test
 
 ## Phase 4 — Cupping product UI
@@ -56,11 +66,17 @@ Updated: 2026-08-24
 - [x] manual multi-sample setup and automatic numbering
 - [x] camera input and multi-image gallery input wired into setup UI
 - [x] serial batch recognition service with native/TextDetector/Tesseract fallback chain
+- [x] OCR layout model with line polygons and image geometry
+- [x] multi-sample OCR layout segmentation tests
+- [x] semantic field-decision tests for roast date, altitude, country leakage and conflicting values
 - [x] OCR original text and parsed sample metadata stored in `samples.metadata_json`
 - [x] recognition result remains editable before Session creation
-- [ ] batch photo recognition runtime acceptance on GitHub Pages
-- [ ] Android native OCR bridge ported from LuckyBean and validated
+- [x] Android native ML Kit Chinese/Latin OCR bridge ported and build-validated
+- [ ] batch photo recognition runtime acceptance on current GitHub Pages build
+- [ ] Android native OCR real-device acceptance with camera and gallery originals
 - [ ] synonym/field-resolution coverage brought to LuckyBean production parity
+- [ ] OCR segmentation manual merge / split / region-adjust interaction
+- [ ] segmented ROI second-pass OCR refinement
 
 ### Left sample sticky-note rail
 - [x] sample rail state model
@@ -82,11 +98,12 @@ Updated: 2026-08-24
 - [x] preparation/aroma/high/mid/low/final workflow
 - [x] browser voice prompt adapter
 - [x] final radar summary
-- [x] bottom action bar changed to `退出 / 上一步 / 下一步`
+- [x] bottom action bar `退出 / 上一步 / 下一步`
 - [x] Next completes the current stage before moving forward
 - [x] Exit flushes pending writes instead of deleting the Session
 - [x] setup screen lists unfinished local Sessions for resume
-- [ ] exit/resume runtime acceptance after browser refresh and process restart
+- [ ] exit/resume runtime acceptance after browser refresh
+- [ ] Android process-kill resume acceptance
 - [ ] small-screen scrolling acceptance
 
 ### Product shell
@@ -97,22 +114,24 @@ Updated: 2026-08-24
 - [ ] full navigation shell acceptance on phone/tablet/desktop
 
 ## Phase 5 — Release validation
-- [ ] offline-only full session
-- [ ] browser refresh recovery
-- [ ] Android process-kill recovery
-- [ ] network reconnection synchronization
-- [ ] duplicate upload handling
-- [ ] conflicting revision protection
-- [ ] multi-sample stress test (50–100 samples)
-- [ ] schema migration compatibility
+- [x] offline-only full session — automated SQLite integration test
+- [ ] browser refresh recovery — real browser acceptance
+- [ ] Android process-kill recovery — real device acceptance
+- [x] network reconnection synchronization — automated integration test
+- [x] duplicate/idempotent upload handling — automated test
+- [x] conflicting revision protection — automated test
+- [x] interrupted upload recovery — automated test
+- [x] multi-sample stress test — 100 samples, slice-scoped observation loading
+- [x] schema migration compatibility — automated close/reopen/forward migration test
 - [ ] camera/gallery recognition stress and cancellation handling
+- [ ] real Cloudflare authenticated round-trip
 
-## Current gate
+## Current release gate
 
-The earlier statement that Phase 4 was “assembled end-to-end” was too broad. The repository had the recording core, persistence and several renderers, but the user-facing product shell and several development-manual flows were missing or hidden. That status claim has been withdrawn.
+The Local-first core is no longer the primary blocker. On 2026-08-25 the TypeScript strict-mode failures, Node 24 test discovery issue, Node SQLite row-shape mismatch and invalid sync-test fixtures were corrected. CI run #171 completed successfully, including TypeScript/tests, WebView bundle, Worker typecheck and Android `assembleDebug`.
 
-The current `main` now contains the first structural correction: batch camera/gallery recognition intake, editable OCR-derived sample metadata, unfinished-session resume, safe exit, collapsible sticky-note sample rail, and always-visible account/sync entry. These are **implemented code paths but not yet accepted runtime features**. They must remain below release gate until the new CI/Pages build and actual browser/device interaction are observed.
+The registration failure found during manual testing is now isolated to production infrastructure. The Worker intentionally rejects registration when Email Service is not configured, and the Pages workflow now intentionally rejects a deployment when `AROMASENSE_CLOUD_URL` is missing. This prevents a visually complete but non-functional account UI from being published as an accepted build.
 
-LuckyBean is used as the reference implementation for capture/recognition, account/sync UX and wizard navigation patterns, but AromaSense keeps its own Session/Sample local-first storage and does not import LuckyBean inventory/business logic wholesale.
+The next hard gate is therefore external-cloud acceptance: configure the real Worker URL, D1 database, verified Email Service sender, apply migrations, then exercise `register → email → verify → login → revision upload/read → restore`. Until that chain passes, account/cloud synchronization remains incomplete.
 
-Do not mark cloud synchronization complete until a real Worker URL, D1 binding, migrations and authenticated round-trip tests are observed.
+LuckyBean remains a reference implementation for recognition vocabulary, account/sync UX and wizard navigation patterns. AromaSense retains its own Session/Sample Local-first storage model and does not import LuckyBean inventory/business logic wholesale.
