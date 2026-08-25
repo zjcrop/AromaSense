@@ -48,6 +48,24 @@ function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "aromasense-sync-"));
   const db = NodeSQLiteDriver.open(join(dir, "sync.sqlite"));
   db.exec(schema);
+  // The production schema intentionally requires every revision to belong to a
+  // real local Session. Seed the minimal aggregate required by these SyncEngine
+  // tests instead of weakening the foreign-key invariant in SyncQueueStore.
+  db.exec(`
+    INSERT INTO sessions (
+      session_id, title, status, taxonomy_version, created_at, updated_at
+    ) VALUES (
+      's1', 'sync test', 'active', 'sensory-dictionary/1.0',
+      '2026-08-24T21:00:00+08:00', '2026-08-24T21:00:00+08:00'
+    );
+    INSERT INTO samples (
+      sample_id, session_id, display_number, sort_order, label,
+      metadata_json, created_at, updated_at
+    ) VALUES (
+      'p1', 's1', 1, 0, 'sample 1', '{}',
+      '2026-08-24T21:00:00+08:00', '2026-08-24T21:00:00+08:00'
+    );
+  `);
   return { dir, db, queue: new SyncQueueStore(db) };
 }
 
