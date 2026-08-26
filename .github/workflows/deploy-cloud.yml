@@ -1,4 +1,4 @@
-name: Deploy AromaSense Cloud + Connected Web B0.1.a
+name: Deploy AromaSense Cloud + Connected Web 0.1C
 
 on:
   push:
@@ -157,8 +157,8 @@ jobs:
               const response = await fetch(`${base}/health`, { cache: 'no-store' });
               const body = await response.json();
               console.log(`health attempt ${attempt}`, body);
-              if (response.ok && body.ok === true && body.database === 'configured' && body.authentication === 'firebase-configured') process.exit(0);
-              last = new Error(`health contract incomplete: database=${body.database}, authentication=${body.authentication}`);
+              if (response.ok && body.ok === true && body.version === '0.1C' && body.database === 'configured' && body.authentication === 'firebase-configured') process.exit(0);
+              last = new Error(`health contract incomplete: version=${body.version}, database=${body.database}, authentication=${body.authentication}`);
             } catch (error) {
               last = error;
             }
@@ -213,10 +213,12 @@ jobs:
           test -f site/index.html
           test -f site/app.js
           test -f site/sql-wasm.wasm
+          test -f site/release-0.1c.css
           ! grep -q '__CLOUD_BASE_URL__\|__FIREBASE_API_KEY__\|__FIREBASE_PROJECT_ID__' site/index.html
           grep -Fq "data-cloud-base-url=\"$AROMASENSE_CLOUD_URL\"" site/index.html
           grep -Fq "data-firebase-api-key=\"$AROMASENSE_FIREBASE_API_KEY\"" site/index.html
           grep -Fq "data-firebase-project-id=\"$AROMASENSE_FIREBASE_PROJECT_ID\"" site/index.html
+          grep -Fq 'application-version" content="0.1C"' site/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -256,12 +258,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Assemble connected B0.1.a debug APK
+      - name: Assemble connected 0.1C debug APK
         run: gradle -p mobile/android :app:assembleDebug
       - name: Upload connected debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: AromaSense-B0.1.a-connected-debug
+          name: AromaSense-0.1C-connected-debug
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
