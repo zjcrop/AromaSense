@@ -15,8 +15,10 @@ const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
 const requiredBrowserOcrMarkers = [
   "@paddleocr/paddleocr-js@",
   "textDetUnclipRatio",
-  "tesseract.js-6.0.1-cn-mixed",
-  "otsuThreshold"
+  "ENGINE_INIT_TIMEOUT_MS",
+  "PREDICT_TIMEOUT_MS",
+  "luckybean-ppocr-v5",
+  "workerOnly"
 ];
 
 function escapeAttribute(value) {
@@ -98,12 +100,15 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
   }
   for (const marker of requiredBrowserOcrMarkers) {
     if (!coreSource.includes(marker)) {
-      throw new Error(`LuckyBean production browser OCR implementation missing from artifact: ${marker}`);
+      throw new Error(`LuckyBean production Worker-only OCR implementation missing from artifact: ${marker}`);
     }
   }
+  if (coreSource.includes("tesseract.js-6.0.1-cn-mixed") || coreSource.includes("otsuThreshold")) {
+    throw new Error("Deprecated main-thread LuckyBean OCR implementation leaked into production recognition artifact");
+  }
   if (android) {
-    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage"]) {
-      if (!coreSource.includes(marker)) throw new Error(`LuckyBean Android async OCR bridge missing from artifact: ${marker}`);
+    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage", "native-direct", "nativeSource:!0"]) {
+      if (!coreSource.includes(marker)) throw new Error(`LuckyBean Android direct-URI OCR path missing from artifact: ${marker}`);
     }
   } else if (coreSource.includes("globalThis.__LUCKYBEAN_ANDROID__ = true")) {
     throw new Error("Android-only LuckyBean native bridge leaked into Pages artifact");
@@ -153,7 +158,8 @@ async function buildTarget(out, { android = false } = {}) {
     "startup.css",
     "luckybean-flat-theme.css",
     "release-0.1c.css",
-    "import-0.1c.css"
+    "import-0.1c.css",
+    "mobile-ocr-emergency.css"
   ]) {
     await cp(resolve(root, `app/ui/dom/${file}`), resolve(out, file));
   }
