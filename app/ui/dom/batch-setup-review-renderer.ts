@@ -21,6 +21,7 @@ import { button, clearElement, element } from "./dom-helpers";
 import { compactImagePreview } from "./image-preview-data";
 import { openImportBundleDialog } from "./import-bundle-dialog";
 import { openManualTextImportDialog } from "./manual-text-import-dialog";
+import { openQrScannerDialog } from "./qr-scanner-dialog";
 
 export interface RecentSessionItem {
   sessionId: string;
@@ -240,6 +241,14 @@ export class BatchSetupRenderer {
     return input;
   }
 
+  private scanQr(fallbackInput: HTMLInputElement): void {
+    void openQrScannerDialog({
+      root: this.root,
+      onFallbackImage: () => fallbackInput.click(),
+      onResult: async (value) => this.importFromLink(value, "qr")
+    });
+  }
+
   private openBatchRecognitionMenu(gallery: HTMLInputElement, spreadsheet: HTMLInputElement, qr: HTMLInputElement): void {
     const mode = window.prompt("批量识别：1 批量照片；2 表格/文档；3 链接；4 二维码。", "1")?.trim();
     if (mode === "1") gallery.click();
@@ -247,13 +256,15 @@ export class BatchSetupRenderer {
     else if (mode === "3") {
       const link = window.prompt("粘贴 AromaSense 分享链接");
       if (link?.trim()) void this.importFromLink(link.trim());
-    } else if (mode === "4") qr.click();
+    } else if (mode === "4") this.scanQr(qr);
   }
 
   private openImportMenu(): void {
     const mode = window.prompt("导入：1 链接；2 二维码；3 表格文件。", "1")?.trim();
-    if (mode === "2") this.root.querySelector<HTMLInputElement>('input[data-import-qr="true"]')?.click();
-    else if (mode === "3") this.root.querySelector<HTMLInputElement>('input[data-import-spreadsheet="true"]')?.click();
+    if (mode === "2") {
+      const qr = this.root.querySelector<HTMLInputElement>('input[data-import-qr="true"]');
+      if (qr) this.scanQr(qr);
+    } else if (mode === "3") this.root.querySelector<HTMLInputElement>('input[data-import-spreadsheet="true"]')?.click();
     else if (mode === "1") {
       const link = window.prompt("粘贴 AromaSense 分享链接");
       if (link?.trim()) void this.importFromLink(link.trim());
@@ -553,25 +564,29 @@ export class BatchSetupRenderer {
 
     this.root.toggleAttribute("aria-busy", true);
     try {
-      for (const group of queue.completed) {
-        await this.service.create({
+      let sampleOffset = 0;
+      const inputs = queue.completed.map((group) => {
+        const offset = sampleOffset;
+        sampleOffset += group.samples.length;
+        return {
           sessionId: this.options.createSessionId(),
           title: group.title,
           metadata: group.metadata,
           samples: group.samples,
           now: this.options.now(),
-          sampleIdFactory: (index) => this.options.createSampleId(index)
-        });
-      }
+          sampleIdFactory: (index: number) => this.options.createSampleId(offset + index)
+        };
+      });
+      await this.service.createMany(inputs);
       const count = queue.completed.length;
       this.importQueue = undefined;
       await this.options.clearDraft?.();
       clearElement(this.rowsRoot);
       if (this.startButton) this.startButton.textContent = "开始杯测";
-      this.showStatus(`已完成 ${count} 组杯测批量导入，均保存为未开始记录。`);
+      this.showStatus(`已完成 ${count} 组杯测批量导入，全部以单一事务保存为未开始记录。`);
       await this.options.onOpenRecords?.();
     } catch (error) {
-      this.showStatus(`批量建立杯测失败：${error instanceof Error ? error.message : String(error)}`, true);
+      this.showStatus(`批量建立杯测失败，整批数据已回滚：${error instanceof Error ? error.message : String(error)}`, true);
     } finally { this.root.toggleAttribute("aria-busy", false); }
   }
 
