@@ -143,7 +143,8 @@ async function buildTarget(out) {
     "account.css",
     "startup.css",
     "luckybean-flat-theme.css",
-    "release-0.1c.css"
+    "release-0.1c.css",
+    "import-0.1c.css"
   ]) {
     await cp(resolve(root, `app/ui/dom/${file}`), resolve(out, file));
   }
