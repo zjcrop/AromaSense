@@ -16,6 +16,17 @@ const PLACEHOLDERS: Readonly<Record<string, string>> = {
   杯测会名称: "杯测会名称"
 };
 
+function installInlineFieldStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-inline-session-fields]")) return;
+  const style = document.createElement("style");
+  style.dataset.aromasenseInlineSessionFields = "true";
+  style.textContent = `
+    .batch-setup__session-meta-input::placeholder{color:#918d86;opacity:1}
+    .batch-setup__target-button::before{content:'杯测目标 · ';color:#918d86;font-weight:400}
+  `;
+  document.head.append(style);
+}
+
 export class BatchSetupRenderer {
   private readonly base: BaseBatchSetupRenderer;
 
@@ -25,6 +36,7 @@ export class BatchSetupRenderer {
     recognizer: SampleRecognitionService,
     options: BatchSetupRendererOptions
   ) {
+    installInlineFieldStyles();
     this.base = new BaseBatchSetupRenderer(root, service, recognizer, options);
   }
 
@@ -65,10 +77,9 @@ export class BatchSetupRenderer {
     const menu = targetField?.querySelector<HTMLElement>(".batch-setup__target-menu");
     if (!targetField || !trigger || !menu) return;
 
-    const syncTriggerCopy = (): void => {
+    const syncAccessibility = (): void => {
       const selected = menu.querySelector<HTMLButtonElement>('[aria-selected="true"]');
-      const value = selected?.textContent?.trim() || trigger.textContent?.replace(/^杯测目标\s*·\s*/u, "").trim() || "公开杯测";
-      trigger.textContent = `杯测目标 · ${value}`;
+      const value = selected?.textContent?.trim() || trigger.textContent?.trim() || "公开杯测";
       trigger.setAttribute("aria-label", `杯测目标，当前${value}`);
     };
 
@@ -78,9 +89,9 @@ export class BatchSetupRenderer {
     menu.addEventListener("click", (event) => event.stopPropagation());
 
     for (const option of menu.querySelectorAll<HTMLButtonElement>(".batch-setup__target-option")) {
-      option.addEventListener("click", () => queueMicrotask(syncTriggerCopy));
+      option.addEventListener("click", () => queueMicrotask(syncAccessibility));
     }
 
-    syncTriggerCopy();
+    syncAccessibility();
   }
 }
