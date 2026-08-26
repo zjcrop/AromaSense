@@ -1,12 +1,15 @@
 package com.zjcrop.aromasense
 
+import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -19,6 +22,7 @@ import java.util.LinkedHashMap
 class MainActivity : Activity() {
     companion object {
         private const val FILE_CHOOSER_REQUEST = 4107
+        private const val WEB_CAMERA_PERMISSION_REQUEST = 4108
     }
 
     private lateinit var webView: WebView
@@ -26,6 +30,7 @@ class MainActivity : Activity() {
     private lateinit var recognitionBridge: AromaSenseRecognitionBridge
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingCameraUri: Uri? = null
+    private var pendingWebCameraRequest: PermissionRequest? = null
     private val sourceByImageId = LinkedHashMap<String, Uri>()
     private val sourceQueue = ArrayDeque<Uri>()
 
@@ -47,6 +52,7 @@ class MainActivity : Activity() {
             allowUniversalAccessFromFileURLs = true
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT
+            mediaPlaybackRequiresUserGesture = true
         }
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         WebView.setWebContentsDebuggingEnabled(debuggable)
@@ -80,6 +86,24 @@ class MainActivity : Activity() {
                     false
                 }
             }
+
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                val needsVideo = request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+                if (!needsVideo) {
+                    request.deny()
+                    return
+                }
+                runOnUiThread {
+                    if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+                    } else {
+                        pendingWebCameraRequest?.deny()
+                        pendingWebCameraRequest = request
+                        requestPermissions(arrayOf(Manifest.permission.CAMERA), WEB_CAMERA_PERMISSION_REQUEST)
+                    }
+                }
+            }
         }
         setContentView(webView)
 
@@ -87,6 +111,21 @@ class MainActivity : Activity() {
             webView.loadUrl("file:///android_asset/www/index.html")
         } else {
             webView.restoreState(savedInstanceState)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (requestCode != WEB_CAMERA_PERMISSION_REQUEST) {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+            return
+        }
+        val request = pendingWebCameraRequest
+        pendingWebCameraRequest = null
+        if (request == null) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+        } else {
+            request.deny()
         }
     }
 
@@ -168,10 +207,6 @@ class MainActivity : Activity() {
 
     @Synchronized
     private fun rememberOriginalSources(uris: List<Uri>) {
-        // The WebView FileList and Android ClipData are consumed in the same sequence.
-        // Do not mix filename lookup with a second fallback queue: a single filename
-        // mismatch used to leave already-consumed URIs in the queue and could bind a
-        // later OCR request to the wrong image in multi-select mode.
         sourceQueue.clear()
         sourceByImageId.clear()
         for (uri in uris) sourceQueue.addLast(uri)
@@ -198,6 +233,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         filePathCallback?.onReceiveValue(null)
         filePathCallback = null
+        pendingWebCameraRequest?.deny()
+        pendingWebCameraRequest = null
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("AromaSenseSQLite")
             webView.removeJavascriptInterface("AromaSenseRecognitionBridge")
