@@ -84,9 +84,10 @@ export class BatchSetupRenderer {
     };
 
     // Stop the base renderer's document-level one-shot close listener from
-    // seeing the same activation that opens the menu.
+    // seeing the same activation that opens the menu. Option clicks are
+    // intentionally allowed to bubble so that one-shot listener can clean
+    // itself up after a selection.
     trigger.addEventListener("click", (event) => event.stopPropagation(), { capture: true });
-    menu.addEventListener("click", (event) => event.stopPropagation());
 
     for (const option of menu.querySelectorAll<HTMLButtonElement>(".batch-setup__target-option")) {
       option.addEventListener("click", () => queueMicrotask(syncAccessibility));
