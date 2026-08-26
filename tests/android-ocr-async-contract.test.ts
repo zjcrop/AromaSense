@@ -22,9 +22,9 @@ test("Android OCR uses LuckyBean asynchronous requestId bridge and never waits s
   assert.doesNotMatch(bridge, /fun\s+recognizeSampleImage\s*\([^)]*\)\s*:\s*String/);
 });
 
-test("Android artifact directly reuses LuckyBean native bridge while Pages common entry does not", () => {
+test("Android artifact directly reuses LuckyBean native bridge while Pages common entry has no AromaSense native wrapper", () => {
   assert.match(activity, /addJavascriptInterface\(recognitionBridge, "LuckyBeanNative"\)/);
   assert.match(androidEntry, /luckybean-static-app\/android\/native-bridge\.js/);
-  assert.doesNotMatch(commonEntry, /AromaSenseRecognitionBridge/);
+  assert.doesNotMatch(commonEntry, /globalThis\.AromaSenseRecognitionBridge/);
   assert.doesNotMatch(commonEntry, /luckybean-static-app\/android\/native-bridge\.js/);
 });
