@@ -8,8 +8,8 @@ test("manual tokenizer preserves dates altitude ranges and variety combinations"
   assert.deepEqual(splitManualCoffeeRow(row), ["样品A", "Ethiopia", "SL28/SL34", "2026-08-26", "1850-2100m", "Washed"]);
 });
 
-test("manual text uses one non-empty row per coffee", () => {
-  assert.deepEqual(manualTextRows("A；Ethiopia\n\nB；Kenya\n C；Panama "), ["A；Ethiopia", "B；Kenya", "C；Panama"]);
+test("manual text uses one non-empty normalized row per coffee", () => {
+  assert.deepEqual(manualTextRows("A；Ethiopia\n\nB；Kenya\n C；Panama "), ["A;Ethiopia", "B;Kenya", "C;Panama"]);
 });
 
 test("legacy single-session share becomes one import bundle session", () => {
