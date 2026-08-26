@@ -88,7 +88,7 @@ async function buildRecognitionBootstrap() {
 
 const recognitionBootstrap = await buildRecognitionBootstrap();
 
-async function validateRecognitionArtifacts(out) {
+async function validateRecognitionArtifacts(out, { android = false } = {}) {
   const coreSource = await readFile(resolve(out, "luckybean-recognition-core.js"), "utf8");
   if (!coreSource.includes(requiredPipelineVersion)) {
     throw new Error(`LuckyBean production recognition pipeline missing from artifact: ${requiredPipelineVersion}`);
@@ -101,18 +101,27 @@ async function validateRecognitionArtifacts(out) {
       throw new Error(`LuckyBean production browser OCR implementation missing from artifact: ${marker}`);
     }
   }
+  if (android) {
+    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage", "Android 本地 OCR 超时"]) {
+      if (!coreSource.includes(marker)) throw new Error(`LuckyBean Android async OCR bridge missing from artifact: ${marker}`);
+    }
+  } else if (coreSource.includes("globalThis.__LUCKYBEAN_ANDROID__ = true")) {
+    throw new Error("Android-only LuckyBean native bridge leaked into Pages artifact");
+  }
   const appSource = await readFile(resolve(out, "app.js"), "utf8");
   if (/1\.24B-compat|luckyBeanCompat|parseLuckyBeanSemanticText/.test(appSource)) {
     throw new Error("Deprecated AromaSense LuckyBean compatibility parser leaked into production artifact");
   }
 }
 
-async function buildTarget(out) {
+async function buildTarget(out, { android = false } = {}) {
   await rm(out, { recursive: true, force: true });
   await mkdir(out, { recursive: true });
 
   await build({
-    entryPoints: [resolve(root, "app/vendor/luckybean-recognition-entry.js")],
+    entryPoints: [resolve(root, android
+      ? "app/vendor/luckybean-recognition-android-entry.js"
+      : "app/vendor/luckybean-recognition-entry.js")],
     outfile: resolve(out, "luckybean-recognition-core.js"),
     bundle: true,
     platform: "browser",
@@ -134,7 +143,7 @@ async function buildTarget(out) {
     legalComments: "none"
   });
 
-  await validateRecognitionArtifacts(out);
+  await validateRecognitionArtifacts(out, { android });
 
   for (const file of [
     "aromasense-cupping.css",
@@ -161,5 +170,5 @@ async function buildTarget(out) {
   await writeFile(resolve(out, ".nojekyll"), "", "utf8");
 }
 
-await buildTarget(androidOut);
-await buildTarget(pagesOut);
+await buildTarget(androidOut, { android: true });
+await buildTarget(pagesOut, { android: false });
