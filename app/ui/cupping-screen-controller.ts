@@ -6,7 +6,6 @@ import { activateSession, completeSession, type SessionStatus } from "../core/se
 import type { LocalCuppingRepository } from "../storage/local-cupping-repository";
 import type { StageProgressReader } from "../storage/stage-progress-reader";
 import { buildSampleRailViewState, nextStage, previousStage, type SampleRailItemViewState } from "./cupping-view-model";
-import { voicePromptForStage, type VoicePromptEvent } from "./voice-prompt-events";
 
 export interface CuppingScreenState {
   sessionId: string;
@@ -14,7 +13,6 @@ export interface CuppingScreenState {
   samples: readonly SampleRecord[];
   rail: readonly SampleRailItemViewState[];
   active?: ActiveEditingState;
-  voicePrompt?: VoicePromptEvent;
   finalRevisionId?: string;
 }
 
@@ -28,20 +26,13 @@ export class CuppingScreenController {
     private readonly revisions?: RevisionCheckpointService
   ) {}
 
-  current(): CuppingScreenState | undefined {
-    return this.state;
-  }
+  current(): CuppingScreenState | undefined { return this.state; }
 
   async initialize(sessionId: string): Promise<CuppingScreenState> {
     const session = await this.repository.getSession(sessionId);
     const samples = await this.repository.listSamples(sessionId);
     const progress = await this.progressReader.listForSession(sessionId);
-    this.state = {
-      sessionId,
-      sessionStatus: session.status,
-      samples,
-      rail: buildSampleRailViewState(samples, progress)
-    };
+    this.state = { sessionId, sessionStatus: session.status, samples, rail: buildSampleRailViewState(samples, progress) };
     return this.state;
   }
 
@@ -49,22 +40,15 @@ export class CuppingScreenController {
     let state = this.requireState();
     const sample = state.samples.find((item) => item.sampleId === sampleId);
     if (!sample) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
-    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") {
-      throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
-    }
-
+    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
     if (state.sessionStatus === "draft") {
       const activated = activateSession(await this.repository.getSession(state.sessionId), now);
       await this.repository.saveSession(activated);
       this.state = { ...state, sessionStatus: activated.status };
       state = this.state;
     }
-
-    const active = await this.editor.open(
-      { sessionId: state.sessionId, sampleId, stageId },
-      now
-    );
-    return this.refreshState(active, voicePromptForStage(stageId));
+    const active = await this.editor.open({ sessionId: state.sessionId, sampleId, stageId }, now);
+    return this.refreshState(active);
   }
 
   async saveField(fieldKey: string, value: unknown, now: string): Promise<CuppingScreenState> {
@@ -76,30 +60,19 @@ export class CuppingScreenController {
 
   async completeStage(now: string): Promise<CuppingScreenState> {
     const active = await this.editor.completeActiveStage(now);
-    await this.revisions?.checkpointStage(
-      active.context.sessionId,
-      active.context.sampleId,
-      active.context.stageId,
-      now
-    );
+    await this.revisions?.checkpointStage(active.context.sessionId, active.context.sampleId, active.context.stageId, now);
     return this.refreshState(active);
   }
 
   async reorderSampleIds(orderedSampleIds: readonly string[], now: string): Promise<CuppingScreenState> {
     const state = this.requireState();
-    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") {
-      throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
-    }
+    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
     await this.editor.flush();
     const reordered = reorderSamples(state.samples, orderedSampleIds, now);
     await this.repository.replaceSampleOrder(state.sessionId, reordered);
     const progress = await this.progressReader.listForSession(state.sessionId);
     const activeSampleId = this.editor.current()?.context.sampleId;
-    this.state = {
-      ...state,
-      samples: reordered,
-      rail: buildSampleRailViewState(reordered, progress, activeSampleId)
-    };
+    this.state = { ...state, samples: reordered, rail: buildSampleRailViewState(reordered, progress, activeSampleId) };
     return this.state;
   }
 
@@ -126,9 +99,7 @@ export class CuppingScreenController {
 
   canFinishSession(): boolean {
     const state = this.requireState();
-    return state.samples.length > 0 && state.rail.every((item) =>
-      item.stages.find((stage) => stage.stageId === "final")?.status === "completed"
-    );
+    return state.samples.length > 0 && state.rail.every((item) => item.stages.find((stage) => stage.stageId === "final")?.status === "completed");
   }
 
   async finishSession(now: string): Promise<CuppingScreenState> {
@@ -139,11 +110,7 @@ export class CuppingScreenController {
     const completed = completeSession(session, now);
     await this.repository.saveSession(completed);
     const finalRevisionId = await this.revisions?.finalSession(state.sessionId, now);
-    this.state = {
-      ...state,
-      sessionStatus: completed.status,
-      finalRevisionId
-    };
+    this.state = { ...state, sessionStatus: completed.status, finalRevisionId };
     return this.state;
   }
 
@@ -158,18 +125,10 @@ export class CuppingScreenController {
     return active;
   }
 
-  private async refreshState(
-    active: ActiveEditingState,
-    voicePrompt?: VoicePromptEvent
-  ): Promise<CuppingScreenState> {
+  private async refreshState(active: ActiveEditingState): Promise<CuppingScreenState> {
     const state = this.requireState();
     const progress = await this.progressReader.listForSession(state.sessionId);
-    this.state = {
-      ...state,
-      rail: buildSampleRailViewState(state.samples, progress, active.context.sampleId),
-      active,
-      voicePrompt
-    };
+    this.state = { ...state, rail: buildSampleRailViewState(state.samples, progress, active.context.sampleId), active };
     return this.state;
   }
 }
