@@ -11,15 +11,18 @@ const template = readFileSync("web/index.template.html", "utf8");
 test("AromaSense pins LuckyBean emergency Worker-only OCR release", () => {
   assert.match(packageJson, /4d5df7e1d66c9e23195da4cd54338b8f3d333428/);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
+  assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
 });
 
-test("Android OCR bypasses WebView preprocessing and Base64 image transport", () => {
+test("recognition path never decodes or re-encodes full images on the UI thread", () => {
   assert.match(commonEntry, /__LUCKYBEAN_ANDROID__/);
-  assert.match(commonEntry, /nativeSource:\s*true/);
-  assert.match(commonEntry, /status:\s*['"]native-direct['"]/);
-  assert.match(preview, /isAndroidNativeRuntime\(\)/);
+  assert.match(commonEntry, /nativeSource:\s*android/);
+  assert.match(commonEntry, /native-direct/);
+  assert.match(commonEntry, /worker-direct/);
+  assert.doesNotMatch(commonEntry, /createImageBitmap|createElement\(['"]canvas['"]\)|FileReader|readAsDataURL|toDataURL|getImageData/);
   assert.match(preview, /return Promise\.resolve\(["']{2}\)/);
+  assert.doesNotMatch(preview, /createImageBitmap|canvas|toDataURL|getImageData|FileReader/);
 });
 
 test("mobile capture, batch recognition and manual input remain on one row", () => {
