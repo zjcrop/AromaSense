@@ -21,7 +21,7 @@ import { CuppingScreenController } from "../ui/cupping-screen-controller";
 import { FlavorGroupPreferenceService } from "../ui/flavor-group-preferences";
 import { AccountRenderer } from "../ui/dom/account-renderer";
 import { BatchSetupRenderer } from "../ui/dom/batch-setup-renderer";
-import { CuppingScreenRenderer } from "../ui/dom/cupping-screen-renderer";
+import { CuppingScreenRenderer } from "../ui/dom/stable-cupping-screen-renderer";
 import { RecordReplayRenderer } from "../ui/dom/record-replay-renderer";
 import { SessionRecordsRenderer } from "../ui/dom/session-records-renderer";
 
