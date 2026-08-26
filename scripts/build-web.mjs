@@ -18,7 +18,8 @@ const requiredBrowserOcrMarkers = [
   "ENGINE_INIT_TIMEOUT_MS",
   "PREDICT_TIMEOUT_MS",
   "luckybean-ppocr-v5",
-  "workerOnly"
+  "workerOnly",
+  "worker-direct"
 ];
 
 function escapeAttribute(value) {
@@ -103,11 +104,15 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
       throw new Error(`LuckyBean production Worker-only OCR implementation missing from artifact: ${marker}`);
     }
   }
-  if (coreSource.includes("tesseract.js-6.0.1-cn-mixed") || coreSource.includes("otsuThreshold")) {
-    throw new Error("Deprecated main-thread LuckyBean OCR implementation leaked into production recognition artifact");
+  if (
+    coreSource.includes("tesseract.js-6.0.1-cn-mixed") ||
+    coreSource.includes("otsuThreshold") ||
+    coreSource.includes("recognition-quality-controller")
+  ) {
+    throw new Error("Deprecated main-thread image/OCR implementation leaked into production recognition artifact");
   }
   if (android) {
-    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage", "native-direct", "nativeSource: true"]) {
+    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage", "native-direct", "nativeSource: android"]) {
       if (!coreSource.includes(marker)) throw new Error(`LuckyBean Android direct-URI OCR path missing from artifact: ${marker}`);
     }
   } else if (coreSource.includes("globalThis.__LUCKYBEAN_ANDROID__ = true")) {
