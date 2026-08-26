@@ -1,14 +1,23 @@
 import type { RadarAxisValue } from "../sample-summary-model";
 import { clearElement, element } from "./dom-helpers";
 
-export function renderRadarSummary(root: HTMLElement, axes: readonly RadarAxisValue[]): void {
+export interface RadarRenderOptions {
+  title?: string;
+  ariaLabel?: string;
+}
+
+export function renderRadarSummary(
+  root: HTMLElement,
+  axes: readonly RadarAxisValue[],
+  options: RadarRenderOptions = {}
+): void {
   clearElement(root);
   const wrap = element("section", "radar-summary");
-  const title = element("h2", "radar-summary__title", "感官趋势");
+  const title = element("h2", "radar-summary__title", options.title ?? "感官趋势");
   const canvas = element("canvas", "radar-summary__canvas");
   canvas.width = 520;
   canvas.height = 420;
-  canvas.setAttribute("aria-label", "酸质、甜感、苦味、口感与余韵雷达图");
+  canvas.setAttribute("aria-label", options.ariaLabel ?? `${options.title ?? "感官趋势"}雷达图`);
   wrap.append(title, canvas);
   root.append(wrap);
 
