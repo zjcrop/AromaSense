@@ -1,4 +1,12 @@
 import type { StageId } from "../../../shared/protocol/aromasense-v1";
+import {
+  blindModeDescription,
+  blindModeLabel,
+  isBlindSessionRevealed,
+  visibleSampleLabel,
+  visibleSampleMetadata
+} from "../../core/blind-session";
+import { normalizeBlindMode } from "../../core/session-metadata";
 import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import type { FlavorGroupPreferenceService, FlavorGroupPreferences } from "../flavor-group-preferences";
@@ -18,7 +26,7 @@ export interface CuppingScreenRendererOptions {
 
 const SAMPLE_DETAIL_FIELDS: readonly [string, string][] = [
   ["country", "国家"], ["region", "产区"], ["farm", "庄园/处理站"], ["variety", "品种"],
-  ["process", "处理法"], ["roastDate", "烘焙日期"], ["altitude", "海拔"], ["flavorNotes", "风味"]
+  ["process", "处理法"], ["roast", "烘焙度"], ["roastDate", "烘焙日期"], ["altitude", "海拔"], ["flavorNotes", "风味"]
 ];
 
 function readableMetadataValue(value: unknown): string | undefined {
@@ -173,6 +181,21 @@ export class CuppingScreenRenderer {
     }
   }
 
+  private renderBlindStatus(state: CuppingScreenState): HTMLElement | undefined {
+    const mode = normalizeBlindMode(state.sessionMetadata.blindMode);
+    if (mode === "open") return undefined;
+    const revealed = isBlindSessionRevealed(state.sessionMetadata, state.sessionStatus);
+    const banner = element("div", `cupping-main__blind-status is-${mode}${revealed ? " is-revealed" : ""}`);
+    banner.append(element("strong", "cupping-main__blind-mode", blindModeLabel(mode)));
+    if (revealed) {
+      const revealedAt = state.sessionMetadata.revealedAt?.trim();
+      banner.append(element("span", "cupping-main__blind-copy", revealedAt ? `已统一揭盲 · ${revealedAt}` : "已统一揭盲"));
+    } else {
+      banner.append(element("span", "cupping-main__blind-copy", blindModeDescription(mode)));
+    }
+    return banner;
+  }
+
   private attachTagStackDrag(): void {
     const stack = this.editorRoot.querySelector<HTMLElement>(".selected-tag-stack");
     if (!stack || !stack.querySelector(".selected-tag-stack__item")) return;
@@ -200,10 +223,11 @@ export class CuppingScreenRenderer {
 
     clearElement(this.headerRoot); clearElement(this.editorRoot); clearElement(this.footerRoot);
     this.renderStageStrip(state, state.active?.context.sampleId, state.active?.context.stageId);
+    const blindStatus = this.renderBlindStatus(state); if (blindStatus) this.headerRoot.append(blindStatus);
 
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") {
       const done = element("section", "cupping-empty");
-      done.append(element("h2", "cupping-empty__title", "本次杯测已完成"), element("p", "cupping-empty__text", "记录已锁定为只读，可在杯测记录中复盘。"));
+      done.append(element("h2", "cupping-empty__title", "本次杯测已完成"), element("p", "cupping-empty__text", "记录已锁定为只读，可在杯测记录中复盘。盲测样品已按本次记录统一揭盲。"));
       this.editorRoot.append(done);
       this.footerRoot.append(button("cupping-nav cupping-nav--exit", "杯测记录", () => this.options.onOpenRecords?.()));
       return;
@@ -218,11 +242,17 @@ export class CuppingScreenRenderer {
     }
 
     const active = state.active;
-    const sampleTitle = active.slice.sample.label ?? `样品 ${active.slice.sample.displayNumber}`;
+    const sampleTitle = visibleSampleLabel(
+      active.slice.sample.label,
+      active.slice.sample.displayNumber,
+      state.sessionMetadata,
+      state.sessionStatus
+    );
+    const visibleMetadata = visibleSampleMetadata(active.slice.sample.metadata, state.sessionMetadata, state.sessionStatus);
     const stage = state.rail.find((item) => item.sampleId === active.context.sampleId)?.stages.find((item) => item.stageId === active.context.stageId);
     const titleBlock = element("div", "cupping-main__titles");
     titleBlock.append(element("h1", "cupping-main__sample-title", sampleTitle), element("p", `cupping-main__stage cupping-main__stage--${stage?.tone ?? "neutral"}`, stage?.label ?? active.context.stageId));
-    const details = renderSampleDetails(active.slice.sample.metadata); if (details) titleBlock.append(details);
+    const details = renderSampleDetails(visibleMetadata); if (details) titleBlock.append(details);
     this.headerRoot.append(element("div", "cupping-main__sample-number", String(active.slice.sample.displayNumber).padStart(2, "0")), titleBlock);
 
     const preferences = this.flavorPreferences ?? await this.flavorService.load();

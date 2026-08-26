@@ -1,4 +1,5 @@
 import { TAXONOMY_VERSION } from "../../shared/protocol/aromasense-v1";
+import { revealBlindSessionMetadata } from "./blind-session";
 import { defaultSessionMetadata, normalizeSessionMetadata, type CuppingSessionMetadata } from "./session-metadata";
 
 export type SessionStatus = "draft" | "active" | "completed" | "archived";
@@ -34,10 +35,11 @@ function backwardCompatibleMetadata(input: CreateSessionInput): CuppingSessionMe
 
 export function createSession(input: CreateSessionInput): CuppingSession {
   if (!input.sessionId.trim()) throw new Error("SESSION_ID_REQUIRED");
+  const metadata = backwardCompatibleMetadata(input);
   return {
     sessionId: input.sessionId,
     title: normalizeTitle(input.title),
-    metadata: backwardCompatibleMetadata(input),
+    metadata: { ...metadata, revealedAt: undefined },
     status: "draft",
     taxonomyVersion: input.taxonomyVersion ?? TAXONOMY_VERSION,
     createdAt: input.now,
@@ -68,7 +70,13 @@ export function activateSession(session: CuppingSession, now: string): CuppingSe
 export function completeSession(session: CuppingSession, now: string): CuppingSession {
   if (session.status === "completed") return session;
   if (session.status !== "active") throw new Error(`INVALID_SESSION_TRANSITION:${session.status}->completed`);
-  return { ...session, status: "completed", completedAt: now, updatedAt: now };
+  return {
+    ...session,
+    metadata: revealBlindSessionMetadata(session.metadata, now),
+    status: "completed",
+    completedAt: now,
+    updatedAt: now
+  };
 }
 
 export function archiveSession(session: CuppingSession, now: string): CuppingSession {

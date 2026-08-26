@@ -1,5 +1,5 @@
 import { normalizeImportBundle, type ImportSessionDraft } from "./import-bundle";
-import { normalizeSessionMetadata, type CuppingSessionMetadata } from "./session-metadata";
+import { normalizeBlindMode, normalizeSessionMetadata, type CuppingSessionMetadata } from "./session-metadata";
 
 export const BATCH_SETUP_DRAFT_VERSION = 2 as const;
 
@@ -47,6 +47,11 @@ function normalizedSessionMetadata(value: unknown): Partial<CuppingSessionMetada
   for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
     const field = source[key];
     if (typeof field === "string" && field.trim()) result[key] = field.trim();
+  }
+  if (typeof source.blindMode === "string") result.blindMode = normalizeBlindMode(source.blindMode);
+  if (Array.isArray(source.semiBlindVisibleFields)) {
+    const fields = [...new Set(source.semiBlindVisibleFields.map((item) => String(item ?? "").trim()).filter(Boolean))];
+    if (fields.length) result.semiBlindVisibleFields = fields;
   }
   return result;
 }

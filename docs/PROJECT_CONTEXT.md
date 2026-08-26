@@ -18,6 +18,20 @@ A session may contain multiple coffee samples. Samples are imported/created, aut
 
 Each sample progresses through structured sensory stages such as preparation/aroma and temperature-dependent tasting stages. The exact stage taxonomy remains versioned and must not be hard-coded into database table names.
 
+## Blind cupping modes
+
+Blindness is a Session-level visibility rule, not a separate storage model. The underlying sample label and metadata remain stored locally so that one immutable observation history can be revealed and reviewed later without copying or rewriting sample records.
+
+Three modes are supported when establishing a cupping Session:
+
+- `open`: show the sample label and all recorded sample metadata during cupping;
+- `semi_blind`: hide the sample label/direct identity during active cupping and expose only a limited metadata whitelist. The default whitelist is country, region, process and roast level;
+- `full_blind`: show only an anonymous `Sample NN` code and expose no sample metadata during active cupping.
+
+For semi/full blind Sessions, reveal occurs at the whole-Session completion boundary rather than per sample. `revealedAt` is written into Session metadata when the active Session becomes completed; completed/archived records then render the original label and metadata. Starting a new Session from imported or historical metadata clears any stale reveal timestamp.
+
+The blind-mode fields live in the existing `sessions.metadata_json` document. This does not add a physical table or schema column and therefore does not require a new SQLite migration. Legacy Session metadata without a blind-mode field normalizes to `open`.
+
 ## Interaction principles
 
 - One reusable editing UI for all samples.
@@ -26,6 +40,7 @@ Each sample progresses through structured sensory stages such as preparation/aro
 - Completed/recorded stages have clear visual progress states.
 - Voice prompts may signal preparation, high-temperature, mid-temperature, low-temperature, and completion stages.
 - Flavor labels can be grouped/collapsed and may support user ordering where defined by product requirements.
+- Blind visibility must be enforced by shared view/domain helpers rather than isolated CSS hiding, so web and Android use the same rule.
 
 ## Persistence architecture
 

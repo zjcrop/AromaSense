@@ -1,6 +1,9 @@
 import { STAGE_IDS, type StageId } from "../../shared/protocol/aromasense-v1";
+import { visibleSampleLabel } from "../core/blind-session";
 import type { StageStatus } from "../core/cupping-state-machine";
 import type { SampleRecord } from "../core/sample-batch-service";
+import type { SessionStatus } from "../core/session-lifecycle";
+import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { SampleStageProgress } from "../storage/stage-progress-reader";
 
 export type StageTone = "orange" | "pink" | "blue" | "white" | "neutral";
@@ -23,6 +26,11 @@ export interface SampleRailItemViewState {
   stages: readonly StageViewState[];
 }
 
+export interface SampleVisibilityContext {
+  metadata: CuppingSessionMetadata;
+  status: SessionStatus;
+}
+
 const STAGE_META: Record<StageId, { label: string; tone: StageTone }> = {
   preparation: { label: "准备", tone: "orange" },
   aroma: { label: "香气", tone: "orange" },
@@ -39,7 +47,8 @@ function progressKey(sampleId: string, stageId: StageId): string {
 export function buildSampleRailViewState(
   samples: readonly SampleRecord[],
   progress: readonly SampleStageProgress[],
-  activeSampleId?: string
+  activeSampleId?: string,
+  visibility?: SampleVisibilityContext
 ): readonly SampleRailItemViewState[] {
   const progressByKey = new Map(
     progress.map((item) => [progressKey(item.sampleId, item.stageId), item.status] as const)
@@ -60,7 +69,9 @@ export function buildSampleRailViewState(
       return {
         sampleId: sample.sampleId,
         displayNumber: sample.displayNumber,
-        label: sample.label,
+        label: visibility
+          ? visibleSampleLabel(sample.label, sample.displayNumber, visibility.metadata, visibility.status)
+          : sample.label,
         active: sample.sampleId === activeSampleId,
         completedStageCount,
         startedStageCount,

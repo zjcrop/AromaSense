@@ -1,3 +1,8 @@
+export type BlindMode = "open" | "semi_blind" | "full_blind";
+
+export const BLIND_MODES: readonly BlindMode[] = ["open", "semi_blind", "full_blind"] as const;
+export const DEFAULT_SEMI_BLIND_VISIBLE_FIELDS = ["country", "region", "process", "roast"] as const;
+
 export interface CuppingSessionMetadata {
   date: string;
   time: string;
@@ -5,11 +10,24 @@ export interface CuppingSessionMetadata {
   participants?: string;
   target?: string;
   eventName?: string;
+  blindMode?: BlindMode;
+  semiBlindVisibleFields?: readonly string[];
+  revealedAt?: string;
 }
 
 function normalizeOptional(value: unknown): string | undefined {
   const normalized = String(value ?? "").trim();
   return normalized || undefined;
+}
+
+function normalizeFieldList(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const fields = [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))];
+  return fields.length ? fields : undefined;
+}
+
+export function normalizeBlindMode(value: unknown): BlindMode {
+  return BLIND_MODES.includes(value as BlindMode) ? value as BlindMode : "open";
 }
 
 export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>): CuppingSessionMetadata {
@@ -25,7 +43,10 @@ export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>)
     organizer,
     participants: normalizeOptional(value.participants),
     target: normalizeOptional(value.target),
-    eventName: normalizeOptional(value.eventName)
+    eventName: normalizeOptional(value.eventName),
+    blindMode: normalizeBlindMode(value.blindMode),
+    semiBlindVisibleFields: normalizeFieldList(value.semiBlindVisibleFields),
+    revealedAt: normalizeOptional(value.revealedAt)
   };
 }
 
@@ -35,7 +56,8 @@ export function defaultSessionMetadata(now: string): CuppingSessionMetadata {
   return {
     date: localDate.slice(0, 10),
     time: localDate.slice(11, 16),
-    organizer: ""
+    organizer: "",
+    blindMode: "open"
   };
 }
 

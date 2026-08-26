@@ -1,6 +1,6 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import type { CuppingSession } from "../core/session-lifecycle";
-import type { CuppingSessionMetadata } from "../core/session-metadata";
+import { normalizeSessionMetadata, type CuppingSessionMetadata } from "../core/session-metadata";
 import type { SampleRecord } from "../core/sample-batch-service";
 import type { StageStatus } from "../core/cupping-state-machine";
 
@@ -64,22 +64,13 @@ function parseJsonObject(json: string): Record<string, unknown> {
 function legacyMetadata(createdAt: string): CuppingSessionMetadata {
   const date = new Date(createdAt);
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString();
-  return { date: local.slice(0, 10), time: local.slice(11, 16), organizer: "历史记录" };
+  return { date: local.slice(0, 10), time: local.slice(11, 16), organizer: "历史记录", blindMode: "open" };
 }
 
 function sessionMetadata(row: SessionRow): CuppingSessionMetadata {
   try {
     const parsed = parseJsonObject(row.metadata_json || "{}");
-    const date = String(parsed.date ?? "").trim();
-    const time = String(parsed.time ?? "").trim();
-    const organizer = String(parsed.organizer ?? "").trim();
-    if (!date || !time || !organizer) return legacyMetadata(row.created_at);
-    return {
-      date, time, organizer,
-      participants: typeof parsed.participants === "string" && parsed.participants.trim() ? parsed.participants.trim() : undefined,
-      target: typeof parsed.target === "string" && parsed.target.trim() ? parsed.target.trim() : undefined,
-      eventName: typeof parsed.eventName === "string" && parsed.eventName.trim() ? parsed.eventName.trim() : undefined
-    };
+    return normalizeSessionMetadata(parsed as Partial<CuppingSessionMetadata>);
   } catch { return legacyMetadata(row.created_at); }
 }
 

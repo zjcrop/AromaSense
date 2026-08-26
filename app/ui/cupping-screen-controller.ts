@@ -3,6 +3,7 @@ import { CuppingSessionController, type ActiveEditingState } from "../core/cuppi
 import type { RevisionCheckpointService } from "../core/revision-checkpoint-service";
 import { reorderSamples, type SampleRecord } from "../core/sample-batch-service";
 import { activateSession, completeSession, type SessionStatus } from "../core/session-lifecycle";
+import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { LocalCuppingRepository } from "../storage/local-cupping-repository";
 import type { StageProgressReader } from "../storage/stage-progress-reader";
 import { buildSampleRailViewState, nextStage, previousStage, type SampleRailItemViewState } from "./cupping-view-model";
@@ -10,6 +11,7 @@ import { buildSampleRailViewState, nextStage, previousStage, type SampleRailItem
 export interface CuppingScreenState {
   sessionId: string;
   sessionStatus: SessionStatus;
+  sessionMetadata: CuppingSessionMetadata;
   samples: readonly SampleRecord[];
   rail: readonly SampleRailItemViewState[];
   active?: ActiveEditingState;
@@ -32,7 +34,13 @@ export class CuppingScreenController {
     const session = await this.repository.getSession(sessionId);
     const samples = await this.repository.listSamples(sessionId);
     const progress = await this.progressReader.listForSession(sessionId);
-    this.state = { sessionId, sessionStatus: session.status, samples, rail: buildSampleRailViewState(samples, progress) };
+    this.state = {
+      sessionId,
+      sessionStatus: session.status,
+      sessionMetadata: session.metadata,
+      samples,
+      rail: buildSampleRailViewState(samples, progress, undefined, { metadata: session.metadata, status: session.status })
+    };
     return this.state;
   }
 
@@ -44,7 +52,7 @@ export class CuppingScreenController {
     if (state.sessionStatus === "draft") {
       const activated = activateSession(await this.repository.getSession(state.sessionId), now);
       await this.repository.saveSession(activated);
-      this.state = { ...state, sessionStatus: activated.status };
+      this.state = { ...state, sessionStatus: activated.status, sessionMetadata: activated.metadata };
       state = this.state;
     }
     const active = await this.editor.open({ sessionId: state.sessionId, sampleId, stageId }, now);
@@ -72,7 +80,14 @@ export class CuppingScreenController {
     await this.repository.replaceSampleOrder(state.sessionId, reordered);
     const progress = await this.progressReader.listForSession(state.sessionId);
     const activeSampleId = this.editor.current()?.context.sampleId;
-    this.state = { ...state, samples: reordered, rail: buildSampleRailViewState(reordered, progress, activeSampleId) };
+    this.state = {
+      ...state,
+      samples: reordered,
+      rail: buildSampleRailViewState(reordered, progress, activeSampleId, {
+        metadata: state.sessionMetadata,
+        status: state.sessionStatus
+      })
+    };
     return this.state;
   }
 
@@ -110,7 +125,18 @@ export class CuppingScreenController {
     const completed = completeSession(session, now);
     await this.repository.saveSession(completed);
     const finalRevisionId = await this.revisions?.finalSession(state.sessionId, now);
-    this.state = { ...state, sessionStatus: completed.status, finalRevisionId };
+    const progress = await this.progressReader.listForSession(state.sessionId);
+    this.state = {
+      ...state,
+      sessionStatus: completed.status,
+      sessionMetadata: completed.metadata,
+      rail: buildSampleRailViewState(state.samples, progress, undefined, {
+        metadata: completed.metadata,
+        status: completed.status
+      }),
+      active: undefined,
+      finalRevisionId
+    };
     return this.state;
   }
 
@@ -128,7 +154,14 @@ export class CuppingScreenController {
   private async refreshState(active: ActiveEditingState): Promise<CuppingScreenState> {
     const state = this.requireState();
     const progress = await this.progressReader.listForSession(state.sessionId);
-    this.state = { ...state, rail: buildSampleRailViewState(state.samples, progress, active.context.sampleId), active };
+    this.state = {
+      ...state,
+      rail: buildSampleRailViewState(state.samples, progress, active.context.sampleId, {
+        metadata: state.sessionMetadata,
+        status: state.sessionStatus
+      }),
+      active
+    };
     return this.state;
   }
 }

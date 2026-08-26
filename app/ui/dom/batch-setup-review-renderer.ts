@@ -6,12 +6,15 @@ import {
   type BatchSetupDraft,
   type BatchSetupDraftItem
 } from "../../core/batch-setup-draft";
+import { blindModeDescription, blindModeLabel } from "../../core/blind-session";
 import type { CuppingSetupService } from "../../core/cupping-setup-service";
 import { normalizeImportBundle, type ImportBundle, type ImportSessionDraft } from "../../core/import-bundle";
 import { recognizeManualText } from "../../core/manual-text-recognizer";
 import {
   defaultSessionMetadata,
+  normalizeBlindMode,
   normalizeSessionMetadata,
+  type BlindMode,
   type CuppingSessionMetadata
 } from "../../core/session-metadata";
 import type { RecognizedPage, RecognizedSample, SampleRecognitionService } from "../../core/sample-recognition-service";
@@ -95,6 +98,8 @@ export class BatchSetupRenderer {
   private readonly statusRoot = element("div", "batch-setup__status");
   private readonly titleInput = element("input", "batch-setup__title");
   private readonly sessionInputs = new Map<keyof CuppingSessionMetadata, HTMLInputElement>();
+  private readonly blindModeSelect = element("select", "batch-setup__session-meta-input");
+  private readonly blindModeHelp = element("small", "batch-setup__session-meta-help");
   private readonly metadata = new WeakMap<HTMLElement, Record<string, unknown>>();
   private readonly state = new WeakMap<HTMLElement, RowState>();
   private review?: BatchReviewDialogHandle;
@@ -112,6 +117,17 @@ export class BatchSetupRenderer {
     this.titleInput.type = "text";
     this.titleInput.placeholder = "杯测会名称（可选）";
     this.titleInput.addEventListener("change", () => void this.saveDraft());
+    for (const mode of ["open", "semi_blind", "full_blind"] as const) {
+      const option = element("option", "", blindModeLabel(mode));
+      option.value = mode;
+      this.blindModeSelect.append(option);
+    }
+    this.blindModeSelect.value = "open";
+    this.updateBlindModeHelp();
+    this.blindModeSelect.addEventListener("change", () => {
+      this.updateBlindModeHelp();
+      void this.saveDraft();
+    });
   }
 
   async render(): Promise<void> {
@@ -176,8 +192,16 @@ export class BatchSetupRenderer {
       field.append(caption, input);
       grid.append(field);
     }
+    const blindField = element("label", "batch-setup__session-meta-field batch-setup__session-meta-field--blind");
+    blindField.append(element("span", "batch-setup__session-meta-label", "盲测模式"), this.blindModeSelect, this.blindModeHelp);
+    grid.append(blindField);
     section.append(grid);
     return section;
+  }
+
+  private updateBlindModeHelp(): void {
+    const mode = normalizeBlindMode(this.blindModeSelect.value);
+    this.blindModeHelp.textContent = blindModeDescription(mode);
   }
 
   private resetSessionMetadata(): void {
@@ -188,6 +212,8 @@ export class BatchSetupRenderer {
       input.value = key === "date" ? defaults.date : key === "time" ? defaults.time : "";
     }
     this.titleInput.value = "";
+    this.blindModeSelect.value = "open";
+    this.updateBlindModeHelp();
   }
 
   private sessionMetadata(): CuppingSessionMetadata {
@@ -197,7 +223,8 @@ export class BatchSetupRenderer {
       organizer: this.sessionInputs.get("organizer")?.value,
       participants: this.sessionInputs.get("participants")?.value,
       target: this.sessionInputs.get("target")?.value,
-      eventName: this.sessionInputs.get("eventName")?.value || this.titleInput.value
+      eventName: this.sessionInputs.get("eventName")?.value || this.titleInput.value,
+      blindMode: normalizeBlindMode(this.blindModeSelect.value)
     });
   }
 
@@ -208,6 +235,8 @@ export class BatchSetupRenderer {
       if (input && typeof value === "string") input.value = value;
     }
     if (metadata.eventName) this.titleInput.value = metadata.eventName;
+    this.blindModeSelect.value = normalizeBlindMode(metadata.blindMode);
+    this.updateBlindModeHelp();
   }
 
   private imageInput(multiple: boolean, capture: boolean): HTMLInputElement {
@@ -461,6 +490,7 @@ export class BatchSetupRenderer {
       for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
         const value = this.sessionInputs.get(key)?.value.trim(); if (value) sessionMetadata[key] = value;
       }
+      sessionMetadata.blindMode = normalizeBlindMode(this.blindModeSelect.value);
       await this.options.saveDraft?.({
         version: BATCH_SETUP_DRAFT_VERSION,
         title: this.titleInput.value,
