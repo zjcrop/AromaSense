@@ -14,6 +14,7 @@ export interface SensoryEditorRenderInput {
   observations: readonly SensoryObservation[];
   flavorPreferences: FlavorGroupPreferences;
   callbacks: SensoryEditorCallbacks;
+  fieldFilter?: ReadonlySet<string>;
 }
 
 const LAYER_LABELS: Partial<Record<SensoryAssessmentLayer, string>> = {
@@ -69,14 +70,30 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function renderTagPicker(
-  value: unknown,
-  preferences: FlavorGroupPreferences,
-  callbacks: SensoryEditorCallbacks
-): HTMLElement {
+function renderTagPicker(value: unknown, preferences: FlavorGroupPreferences, callbacks: SensoryEditorCallbacks): HTMLElement {
   const root = element("div", "flavor-groups");
-  const selected = new Set(stringArray(value));
+  const orderedSelected = stringArray(value);
+  const selected = new Set(orderedSelected);
   const groups = new Map(DESCRIPTOR_GROUPS_V1.map((group) => [group.id, group] as const));
+  const descriptorLabels = new Map(DESCRIPTOR_GROUPS_V1.flatMap((group) => group.descriptors.map((item) => [item.id, item.label] as const)));
+
+  const stack = element("section", "selected-tag-stack-wrap");
+  stack.append(element("h3", "selected-tag-stack__title", "已选标签"));
+  const stackList = element("div", "selected-tag-stack");
+  stackList.dataset.fieldKey = "flavor_tags";
+  for (const descriptorId of orderedSelected) {
+    const item = element("span", "selected-tag-stack__item");
+    item.dataset.selectedId = descriptorId;
+    item.append(
+      element("span", "selected-tag-stack__label", descriptorLabels.get(descriptorId) ?? descriptorId),
+      button("selected-tag-stack__drag", "●", () => undefined)
+    );
+    item.querySelector<HTMLButtonElement>("button")!.dataset.dragHandle = "selected-tag";
+    stackList.append(item);
+  }
+  if (!orderedSelected.length) stackList.append(element("span", "selected-tag-stack__empty", "尚未选择"));
+  stack.append(stackList);
+  root.append(stack);
 
   for (const groupId of preferences.orderedGroupIds) {
     const group = groups.get(groupId);
@@ -86,15 +103,12 @@ function renderTagPicker(
     section.dataset.groupId = groupId;
 
     const header = element("div", "flavor-group__header");
-    const title = button("flavor-group__title", group.label, () =>
-      callbacks.setFlavorGroupCollapsed(groupId, !collapsed)
-    );
+    const title = button("flavor-group__title", group.label, () => callbacks.setFlavorGroupCollapsed(groupId, !collapsed));
     title.setAttribute("aria-expanded", String(!collapsed));
     const handle = button("flavor-group__drag", "●", () => undefined);
     handle.type = "button";
     handle.dataset.dragHandle = "group";
     handle.setAttribute("aria-label", `拖动${group.label}分组`);
-    handle.title = `长按拖动${group.label}分组`;
     header.append(title, handle);
     section.append(header);
 
@@ -102,27 +116,22 @@ function renderTagPicker(
       const tags = element("div", "flavor-group__tags");
       tags.dataset.groupId = groupId;
       const byId = new Map(group.descriptors.map((descriptor) => [descriptor.id, descriptor] as const));
-      const orderedIds = preferences.descriptorOrderByGroup[groupId]
-        ?? group.descriptors.map((descriptor) => descriptor.id);
+      const orderedIds = preferences.descriptorOrderByGroup[groupId] ?? group.descriptors.map((descriptor) => descriptor.id);
       for (const descriptorId of orderedIds) {
         const descriptor = byId.get(descriptorId);
         if (!descriptor) continue;
         const item = element("span", "flavor-tag-item");
         item.dataset.descriptorId = descriptor.id;
         const tag = button("flavor-tag", descriptor.label, () => {
-          if (selected.has(descriptor.id)) selected.delete(descriptor.id);
-          else selected.add(descriptor.id);
-          void callbacks.saveField("flavor_tags", [...selected]);
-          setPressed(tag, selected.has(descriptor.id));
+          const next = [...orderedSelected];
+          const existing = next.indexOf(descriptor.id);
+          if (existing >= 0) next.splice(existing, 1); else next.push(descriptor.id);
+          void callbacks.saveField("flavor_tags", next);
+          setPressed(tag, existing < 0);
         });
         setPressed(tag, selected.has(descriptor.id));
-        const drag = button("flavor-tag__drag", "●", () => undefined);
-        drag.type = "button";
-        drag.dataset.dragHandle = "descriptor";
-        drag.setAttribute("aria-label", `拖动${descriptor.label}`);
-        drag.title = `长按拖动${descriptor.label}`;
-        item.append(tag, drag);
         tags.append(item);
+        item.append(tag);
       }
       section.append(tags);
     }
@@ -138,21 +147,12 @@ function renderControl(spec: SensoryControlSpec, value: unknown, input: SensoryE
   if (spec.required) label.dataset.required = "true";
   field.append(label);
   const save = (next: unknown) => void input.callbacks.saveField(spec.fieldKey, next);
-
   switch (spec.kind) {
     case "slider":
-    case "score":
-      field.append(renderRange(spec, value, (next) => save(next)));
-      break;
-    case "toggle":
-      field.append(renderToggle(value, (next) => save(next)));
-      break;
-    case "text":
-      field.append(renderText(value, (next) => save(next)));
-      break;
-    case "tag-picker":
-      field.append(renderTagPicker(value, input.flavorPreferences, input.callbacks));
-      break;
+    case "score": field.append(renderRange(spec, value, (next) => save(next))); break;
+    case "toggle": field.append(renderToggle(value, (next) => save(next))); break;
+    case "text": field.append(renderText(value, (next) => save(next))); break;
+    case "tag-picker": field.append(renderTagPicker(value, input.flavorPreferences, input.callbacks)); break;
   }
   return field;
 }
@@ -160,7 +160,7 @@ function renderControl(spec: SensoryControlSpec, value: unknown, input: SensoryE
 export function renderSensoryEditor(root: HTMLElement, input: SensoryEditorRenderInput): void {
   clearElement(root);
   const values = observationMap(input.observations);
-  const controls = controlsForStage(input.stageId);
+  const controls = controlsForStage(input.stageId).filter((spec) => !input.fieldFilter || input.fieldFilter.has(spec.fieldKey));
   let activeLayer: SensoryAssessmentLayer | undefined;
 
   for (const spec of controls) {
@@ -171,15 +171,9 @@ export function renderSensoryEditor(root: HTMLElement, input: SensoryEditorRende
         const heading = element("div", `sensory-layer sensory-layer--${activeLayer}`);
         heading.append(
           element("h2", "sensory-layer__title", label),
-          element(
-            "p",
-            "sensory-layer__note",
-            activeLayer === "descriptive"
-              ? "记录感知到的属性与强度，不表达喜欢或质量高低。"
-              : activeLayer === "affective"
-                ? "独立评价质量印象，不替代描述性强度记录。"
-                : ""
-          )
+          element("p", "sensory-layer__note", activeLayer === "descriptive"
+            ? "记录感知到的属性与强度，不表达喜欢或质量高低。"
+            : activeLayer === "affective" ? "独立评价质量印象，不替代描述性强度记录。" : "")
         );
         root.append(heading);
       }
