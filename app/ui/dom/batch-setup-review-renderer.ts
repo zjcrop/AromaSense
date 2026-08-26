@@ -7,15 +7,20 @@ import {
   type BatchSetupDraftItem
 } from "../../core/batch-setup-draft";
 import type { CuppingSetupService } from "../../core/cupping-setup-service";
+import { normalizeImportBundle, type ImportBundle, type ImportSessionDraft } from "../../core/import-bundle";
+import { recognizeManualText } from "../../core/manual-text-recognizer";
 import {
   defaultSessionMetadata,
   normalizeSessionMetadata,
   type CuppingSessionMetadata
 } from "../../core/session-metadata";
 import type { RecognizedPage, RecognizedSample, SampleRecognitionService } from "../../core/sample-recognition-service";
+import { parseSpreadsheetFile, SPREADSHEET_ACCEPT } from "../../core/spreadsheet-import";
 import { openBatchReviewDialog, type BatchReviewDialogHandle, type BatchReviewField, type BatchReviewValue } from "./batch-review-dialog";
 import { button, clearElement, element } from "./dom-helpers";
 import { compactImagePreview } from "./image-preview-data";
+import { openImportBundleDialog } from "./import-bundle-dialog";
+import { openManualTextImportDialog } from "./manual-text-import-dialog";
 
 export interface RecentSessionItem {
   sessionId: string;
@@ -53,11 +58,16 @@ const FIELD_SPECS: readonly FieldSpec[] = [
 interface ReviewCandidateLike { normalizedValue?: string; value?: string; score?: number }
 interface ReviewDecisionLike { field?: string; value?: string; confidence?: number; candidates?: ReviewCandidateLike[] }
 interface RowState { id: string; previewDataUrl?: string; status?: string; requiresReview: boolean; confirmed: boolean }
-interface SharedImportPayload {
+interface ConfirmedImportSession {
   title?: string;
-  metadata?: Partial<CuppingSessionMetadata>;
-  session?: { title?: string; metadata?: Partial<CuppingSessionMetadata> };
-  samples?: Array<{ label?: string; metadata?: Record<string, unknown> }>;
+  metadata: CuppingSessionMetadata;
+  samples: Array<{ label: string; metadata: Record<string, unknown> }>;
+}
+interface ImportQueueState {
+  sessions: ImportSessionDraft[];
+  index: number;
+  completed: ConfirmedImportSession[];
+  sourceName: string;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -88,6 +98,8 @@ export class BatchSetupRenderer {
   private review?: BatchReviewDialogHandle;
   private sequence = 0;
   private saveTimer?: ReturnType<typeof setTimeout>;
+  private startButton?: HTMLButtonElement;
+  private importQueue?: ImportQueueState;
 
   constructor(
     private readonly root: HTMLElement,
@@ -117,18 +129,20 @@ export class BatchSetupRenderer {
     header.append(copy, headerActions);
 
     const metadataForm = this.renderSessionMetadataForm();
-    const cameraInput = this.fileInput(false, true);
-    const galleryInput = this.fileInput(true, false);
+    const cameraInput = this.imageInput(false, true);
+    const galleryInput = this.imageInput(true, false);
+    const spreadsheetInput = this.spreadsheetInput();
     const qrInput = this.qrInput();
     const actions = element("section", "batch-setup__capture-actions");
+    actions.setAttribute("aria-label", "识别方法");
     actions.append(
-      button("batch-setup__capture", "拍照", () => cameraInput.click()),
-      button("batch-setup__capture", "批量相册识别", () => galleryInput.click()),
-      button("batch-setup__add", "手工添加", () => this.addManualRow())
+      button("batch-setup__capture", "拍摄录入", () => cameraInput.click()),
+      button("batch-setup__capture", "批量识别", () => this.openBatchRecognitionMenu(galleryInput, spreadsheetInput, qrInput)),
+      button("batch-setup__add", "手工录入", () => this.openManualText())
     );
-    const start = button("batch-setup__start", "开始杯测", () => this.submit());
+    this.startButton = button("batch-setup__start", "开始杯测", () => this.submit());
     this.statusRoot.hidden = true;
-    this.root.append(header, metadataForm, actions, cameraInput, galleryInput, qrInput, this.rowsRoot, this.statusRoot, start);
+    this.root.append(header, metadataForm, actions, cameraInput, galleryInput, spreadsheetInput, qrInput, this.rowsRoot, this.statusRoot, this.startButton);
     const recent = this.renderRecentSessions();
     if (recent) this.root.append(recent);
     await this.restoreDraft();
@@ -164,6 +178,16 @@ export class BatchSetupRenderer {
     return section;
   }
 
+  private resetSessionMetadata(): void {
+    const defaults = defaultSessionMetadata(this.options.now());
+    for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
+      const input = this.sessionInputs.get(key);
+      if (!input) continue;
+      input.value = key === "date" ? defaults.date : key === "time" ? defaults.time : "";
+    }
+    this.titleInput.value = "";
+  }
+
   private sessionMetadata(): CuppingSessionMetadata {
     return normalizeSessionMetadata({
       date: this.sessionInputs.get("date")?.value,
@@ -184,12 +208,25 @@ export class BatchSetupRenderer {
     if (metadata.eventName) this.titleInput.value = metadata.eventName;
   }
 
-  private fileInput(multiple: boolean, capture: boolean): HTMLInputElement {
+  private imageInput(multiple: boolean, capture: boolean): HTMLInputElement {
     const input = element("input", "batch-setup__file-input");
     input.type = "file"; input.accept = "image/*"; input.multiple = multiple; input.hidden = true;
     if (capture) input.setAttribute("capture", "environment");
     input.addEventListener("change", () => {
       const files = [...(input.files ?? [])]; input.value = ""; void this.addPhotoFiles(files);
+    });
+    return input;
+  }
+
+  private spreadsheetInput(): HTMLInputElement {
+    const input = element("input", "batch-setup__file-input");
+    input.type = "file";
+    input.accept = SPREADSHEET_ACCEPT;
+    input.multiple = true;
+    input.hidden = true;
+    input.dataset.importSpreadsheet = "true";
+    input.addEventListener("change", () => {
+      const files = [...(input.files ?? [])]; input.value = ""; if (files.length) void this.importSpreadsheetFiles(files);
     });
     return input;
   }
@@ -203,21 +240,54 @@ export class BatchSetupRenderer {
     return input;
   }
 
+  private openBatchRecognitionMenu(gallery: HTMLInputElement, spreadsheet: HTMLInputElement, qr: HTMLInputElement): void {
+    const mode = window.prompt("批量识别：1 批量照片；2 表格/文档；3 链接；4 二维码。", "1")?.trim();
+    if (mode === "1") gallery.click();
+    else if (mode === "2") spreadsheet.click();
+    else if (mode === "3") {
+      const link = window.prompt("粘贴 AromaSense 分享链接");
+      if (link?.trim()) void this.importFromLink(link.trim());
+    } else if (mode === "4") qr.click();
+  }
+
   private openImportMenu(): void {
-    const mode = window.prompt("导入方式：输入 1 使用链接导入；输入 2 扫描二维码图片导入。", "1")?.trim();
-    if (mode === "2") {
-      this.root.querySelector<HTMLInputElement>('input[data-import-qr="true"]')?.click();
-      return;
+    const mode = window.prompt("导入：1 链接；2 二维码；3 表格文件。", "1")?.trim();
+    if (mode === "2") this.root.querySelector<HTMLInputElement>('input[data-import-qr="true"]')?.click();
+    else if (mode === "3") this.root.querySelector<HTMLInputElement>('input[data-import-spreadsheet="true"]')?.click();
+    else if (mode === "1") {
+      const link = window.prompt("粘贴 AromaSense 分享链接");
+      if (link?.trim()) void this.importFromLink(link.trim());
     }
-    if (mode !== "1") return;
-    const link = window.prompt("粘贴 AromaSense 分享链接");
-    if (link?.trim()) void this.importFromLink(link.trim());
+  }
+
+  private openManualText(): void {
+    openManualTextImportDialog({
+      root: this.root,
+      onParse: async (text) => this.previewImportBundle(recognizeManualText(text))
+    });
+  }
+
+  private async importSpreadsheetFiles(files: readonly File[]): Promise<void> {
+    this.root.toggleAttribute("aria-busy", true);
+    this.showStatus(`正在解析 ${files.length} 个表格/数据文件…`);
+    try {
+      const bundles = await Promise.all(files.map((file) => parseSpreadsheetFile(file)));
+      const bundle: ImportBundle = {
+        schema: "aromasense-import/1",
+        source: { kind: "spreadsheet", name: files.length === 1 ? files[0].name : `${files.length} 个文件` },
+        sessions: bundles.flatMap((item) => item.sessions),
+        warnings: bundles.flatMap((item) => item.warnings)
+      };
+      this.previewImportBundle(bundle);
+    } catch (error) {
+      this.showStatus(`表格导入失败：${error instanceof Error ? error.message : String(error)}`, true);
+    } finally { this.root.toggleAttribute("aria-busy", false); }
   }
 
   private async importQr(file: File): Promise<void> {
     const BarcodeDetectorCtor = (globalThis as unknown as { BarcodeDetector?: new (options: { formats: string[] }) => { detect(source: ImageBitmap): Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
     if (!BarcodeDetectorCtor || typeof createImageBitmap !== "function") {
-      const link = window.prompt("当前浏览器不支持本地二维码解析，请粘贴二维码中的链接");
+      const link = window.prompt("当前环境不支持二维码图片解析，请粘贴二维码中的链接");
       if (link?.trim()) await this.importFromLink(link.trim());
       return;
     }
@@ -227,40 +297,70 @@ export class BatchSetupRenderer {
       bitmap.close?.();
       const link = results[0]?.rawValue?.trim();
       if (!link) throw new Error("二维码中未检测到可用链接");
-      await this.importFromLink(link);
+      await this.importFromLink(link, "qr");
     } catch (error) { this.showStatus(`二维码导入失败：${error instanceof Error ? error.message : String(error)}`, true); }
   }
 
-  private async importFromLink(link: string): Promise<void> {
+  private async importFromLink(link: string, kind: "link" | "qr" = "link"): Promise<void> {
     this.root.toggleAttribute("aria-busy", true);
     this.showStatus("正在读取分享数据…");
     try {
       const url = new URL(link, window.location.href);
       const embedded = url.searchParams.get("import");
-      let payload: SharedImportPayload;
-      if (embedded) payload = JSON.parse(decodeURIComponent(embedded)) as SharedImportPayload;
-      else {
-        const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
-        if (!response.ok) throw new Error(`分享链接返回 HTTP ${response.status}`);
-        payload = await response.json() as SharedImportPayload;
-      }
-      const sessionMeta = payload.metadata ?? payload.session?.metadata;
-      if (sessionMeta) this.applySessionMetadata(sessionMeta);
-      const title = payload.title ?? payload.session?.title;
-      if (title) this.titleInput.value = title;
-      const samples = Array.isArray(payload.samples) ? payload.samples : [];
-      if (!samples.length) throw new Error("分享数据没有样品");
-      for (const sample of samples) {
-        const label = String(sample.label ?? "").trim();
-        if (!label) continue;
-        this.addRow(label, record(sample.metadata) ?? {}, {
-          id: this.rowId(), status: "分享数据导入", requiresReview: false, confirmed: true
-        });
-      }
-      await this.saveDraft();
-      this.showStatus(`已从分享链接导入 ${samples.length} 个样品。`);
+      const payload: unknown = embedded
+        ? JSON.parse(decodeURIComponent(embedded))
+        : await (async () => {
+            const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+            if (!response.ok) throw new Error(`分享链接返回 HTTP ${response.status}`);
+            return response.json();
+          })();
+      const bundle = normalizeImportBundle(payload, { kind, name: url.hostname || "分享链接" });
+      if (!bundle) throw new Error("分享数据没有可识别的杯测组或样品");
+      this.previewImportBundle(bundle);
     } catch (error) { this.showStatus(`链接导入失败：${error instanceof Error ? error.message : String(error)}`, true); }
     finally { this.root.toggleAttribute("aria-busy", false); }
+  }
+
+  private previewImportBundle(bundle: ImportBundle): void {
+    openImportBundleDialog({
+      root: this.root,
+      bundle,
+      onAccept: async (sessions) => {
+        if (sessions.length > 1) {
+          this.importQueue = { sessions: [...sessions], index: 0, completed: [], sourceName: bundle.source.name ?? "批量导入" };
+          await this.loadImportSession(this.importQueue.sessions[0], 0, this.importQueue.sessions.length);
+          return;
+        }
+        this.importQueue = undefined;
+        await this.loadImportSession(sessions[0], 0, 1);
+      }
+    });
+  }
+
+  private async loadImportSession(session: ImportSessionDraft, index: number, total: number): Promise<void> {
+    this.review?.close(); this.review = undefined;
+    clearElement(this.rowsRoot);
+    this.resetSessionMetadata();
+    this.applySessionMetadata(session.metadata);
+    this.titleInput.value = session.title ?? session.metadata.eventName ?? "";
+    for (const sample of session.samples) {
+      const metadata = { ...sample.metadata };
+      if (sample.rawText) {
+        const recognition = record(metadata.recognition) ?? {};
+        metadata.recognition = { ...recognition, rawText: sample.rawText, sourceRow: sample.sourceRow };
+      }
+      this.addRow(sample.label, metadata, {
+        id: this.rowId(),
+        status: `${session.sourceGroup} · 导入待确认`,
+        requiresReview: sample.requiresReview,
+        confirmed: false
+      });
+    }
+    if (this.startButton) this.startButton.textContent = total > 1 ? (index + 1 < total ? "保存本组并继续" : "完成批量导入") : "开始杯测";
+    await this.saveDraft();
+    this.showStatus(total > 1 ? `批量导入 ${index + 1}/${total}：${session.sourceGroup} · ${session.samples.length} 个样品。先逐一确认。` : `已导入 ${session.samples.length} 个样品，开始逐一确认。`);
+    const pending = firstPendingItemIndex(this.items());
+    if (pending >= 0) { const row = this.rows()[pending]; if (row) this.openReview(row); }
   }
 
   private renderRecentSessions(): HTMLElement | undefined {
@@ -279,18 +379,13 @@ export class BatchSetupRenderer {
     return section;
   }
 
-  private addManualRow(): void {
-    const row = this.addRow("", {}, { id: this.rowId(), status: "手工录入 · 待确认", requiresReview: true, confirmed: false });
-    void this.saveDraft(); this.openReview(row);
-  }
-
   private rowId(): string { this.sequence += 1; return `batch-${Date.now().toString(36)}-${this.sequence.toString(36)}`; }
 
   private addRow(label: string, metadata: Record<string, unknown>, state: RowState): HTMLElement {
     this.rowsRoot.querySelector(".batch-setup__empty-hint")?.remove();
     const row = element("article", "batch-setup__row"); row.dataset.rowId = state.id;
     this.metadata.set(row, { ...metadata }); this.state.set(row, state);
-    const preview = state.previewDataUrl ? element("button", "batch-setup__preview-button") : element("button", "batch-setup__manual-mark", "手工");
+    const preview = state.previewDataUrl ? element("button", "batch-setup__preview-button") : element("button", "batch-setup__manual-mark", "录入");
     preview.type = "button";
     if (state.previewDataUrl) {
       const image = element("img", "batch-setup__preview"); image.src = state.previewDataUrl; image.alt = "样品来源图片预览"; preview.append(image);
@@ -313,9 +408,9 @@ export class BatchSetupRenderer {
     main.querySelector(".batch-setup__recognition-status")?.remove(); main.querySelector(".batch-setup__field-summary")?.remove();
     main.append(element("small", `batch-setup__recognition-status${state.confirmed ? " is-confirmed" : state.requiresReview ? " is-review" : ""}`, `${state.confirmed ? "已确认" : "待确认"}${state.status ? ` · ${state.status}` : ""}`));
     const metadata = this.metadata.get(row) ?? {}; const summary = element("div", "batch-setup__field-summary");
-    for (const [key, label] of FIELD_SPECS) {
+    for (const [key, labelText] of FIELD_SPECS) {
       const value = String(metadata[key] ?? "").trim(); if (!value || summary.childElementCount >= 8) continue;
-      summary.append(element("span", "batch-setup__field-chip", `${label}：${value}`));
+      summary.append(element("span", "batch-setup__field-chip", `${labelText}：${value}`));
     }
     if (summary.childElementCount) main.append(summary);
   }
@@ -330,6 +425,13 @@ export class BatchSetupRenderer {
     return this.rows().flatMap((row) => {
       const state = this.state.get(row); if (!state) return [];
       return [{ id: state.id, label: row.querySelector<HTMLInputElement>(".batch-setup__sample-label")?.value ?? "", metadata: { ...(this.metadata.get(row) ?? {}) }, previewDataUrl: state.previewDataUrl, recognitionStatus: state.status, requiresReview: state.requiresReview, confirmed: state.confirmed }];
+    });
+  }
+
+  private sampleDrafts(): Array<{ label: string; metadata: Record<string, unknown> }> {
+    return this.rows().flatMap((row) => {
+      const label = row.querySelector<HTMLInputElement>(".batch-setup__sample-label")?.value.trim() ?? "";
+      return label && !/^待确认样品\s+\d+$/u.test(label) ? [{ label, metadata: { ...(this.metadata.get(row) ?? {}) } }] : [];
     });
   }
 
@@ -358,7 +460,7 @@ export class BatchSetupRenderer {
 
   private reviewFields(row: HTMLElement): BatchReviewField[] {
     const metadata = this.metadata.get(row) ?? {};
-    return FIELD_SPECS.map(([key, label, group, kind]) => ({ key, label, group, value: String(metadata[key] ?? ""), candidates: candidates(metadata, key), confidence: confidence(metadata, key), multiline: kind === "multiline", date: kind === "date" }));
+    return FIELD_SPECS.map(([key, labelText, group, kind]) => ({ key, label: labelText, group, value: String(metadata[key] ?? ""), candidates: candidates(metadata, key), confidence: confidence(metadata, key), multiline: kind === "multiline", date: kind === "date" }));
   }
 
   private applyReviewValue(row: HTMLElement, value: BatchReviewValue, markDirty: boolean, confirm: boolean): void {
@@ -387,7 +489,11 @@ export class BatchSetupRenderer {
         this.applyReviewValue(row, value, false, true); await this.saveDraft();
         const next = firstPendingItemIndex(this.items(), index);
         if (next >= 0) { const target = this.rows()[next]; if (target) this.openReview(target); return; }
-        this.review?.close(); this.review = undefined; const final = batchSetupDraftCounts(this.items()); this.showStatus(`已完成 ${final.total} 个样品确认。`);
+        this.review?.close(); this.review = undefined;
+        const final = batchSetupDraftCounts(this.items());
+        this.showStatus(this.importQueue
+          ? `本组 ${final.total} 个样品已确认。检查日期、时间和组织方后点击“${this.startButton?.textContent ?? "保存本组"}”。`
+          : `已完成 ${final.total} 个样品确认。`);
       }
     });
   }
@@ -419,20 +525,63 @@ export class BatchSetupRenderer {
   }
 
   private renumber(): void { this.rows().forEach((row, index) => { const input = row.querySelector<HTMLInputElement>(".batch-setup__sample-label"); if (input) input.placeholder = `样品 ${index + 1}`; }); }
-  private ensureEmptyHint(): void { if (!this.rows().length && !this.rowsRoot.querySelector(".batch-setup__empty-hint")) this.rowsRoot.append(element("p", "batch-setup__empty-hint", "尚未添加样品。可拍照、批量相册识别或手工添加。")); }
+  private ensureEmptyHint(): void { if (!this.rows().length && !this.rowsRoot.querySelector(".batch-setup__empty-hint")) this.rowsRoot.append(element("p", "batch-setup__empty-hint", "尚未添加样品。可使用拍摄录入、批量识别或手工录入。")); }
 
-  private async submit(): Promise<void> {
-    const rows = this.rows(); const pending = rows.filter((row) => this.state.get(row)?.confirmed !== true);
-    if (pending.length) { this.showStatus(`仍有 ${pending.length} 个样品未确认。`, true); this.openReview(pending[0]); return; }
-    const samples = rows.flatMap((row) => { const label = row.querySelector<HTMLInputElement>(".batch-setup__sample-label")?.value.trim() ?? ""; return label && !/^待确认样品\s+\d+$/u.test(label) ? [{ label, metadata: { ...(this.metadata.get(row) ?? {}) } }] : []; });
-    if (!samples.length || samples.length !== rows.length) { this.showStatus("所有样品都必须确认有效名称后才能开始杯测。", true); return; }
+  private validateCurrentGroup(): ConfirmedImportSession | undefined {
+    const rows = this.rows();
+    const pending = rows.filter((row) => this.state.get(row)?.confirmed !== true);
+    if (pending.length) { this.showStatus(`仍有 ${pending.length} 个样品未确认。`, true); this.openReview(pending[0]); return undefined; }
+    const samples = this.sampleDrafts();
+    if (!samples.length || samples.length !== rows.length) { this.showStatus("所有样品都必须确认有效名称。", true); return undefined; }
     let metadata: CuppingSessionMetadata;
     try { metadata = this.sessionMetadata(); }
-    catch { this.showStatus("日期、时间和组织方为必填项。", true); return; }
+    catch { this.showStatus("日期、时间和组织方为必填项。", true); return undefined; }
+    return { title: metadata.eventName || this.titleInput.value.trim() || undefined, metadata, samples };
+  }
+
+  private async saveImportGroupAndContinue(): Promise<void> {
+    const queue = this.importQueue;
+    if (!queue) return;
+    const current = this.validateCurrentGroup();
+    if (!current) return;
+    queue.completed.push(current);
+    if (queue.index + 1 < queue.sessions.length) {
+      queue.index += 1;
+      await this.loadImportSession(queue.sessions[queue.index], queue.index, queue.sessions.length);
+      return;
+    }
+
     this.root.toggleAttribute("aria-busy", true);
     try {
-      const title = metadata.eventName || this.titleInput.value.trim() || undefined;
-      const result = await this.service.create({ sessionId: this.options.createSessionId(), title, metadata, samples, now: this.options.now(), sampleIdFactory: (index) => this.options.createSampleId(index) });
+      for (const group of queue.completed) {
+        await this.service.create({
+          sessionId: this.options.createSessionId(),
+          title: group.title,
+          metadata: group.metadata,
+          samples: group.samples,
+          now: this.options.now(),
+          sampleIdFactory: (index) => this.options.createSampleId(index)
+        });
+      }
+      const count = queue.completed.length;
+      this.importQueue = undefined;
+      await this.options.clearDraft?.();
+      clearElement(this.rowsRoot);
+      if (this.startButton) this.startButton.textContent = "开始杯测";
+      this.showStatus(`已完成 ${count} 组杯测批量导入，均保存为未开始记录。`);
+      await this.options.onOpenRecords?.();
+    } catch (error) {
+      this.showStatus(`批量建立杯测失败：${error instanceof Error ? error.message : String(error)}`, true);
+    } finally { this.root.toggleAttribute("aria-busy", false); }
+  }
+
+  private async submit(): Promise<void> {
+    if (this.importQueue) { await this.saveImportGroupAndContinue(); return; }
+    const group = this.validateCurrentGroup();
+    if (!group) return;
+    this.root.toggleAttribute("aria-busy", true);
+    try {
+      const result = await this.service.create({ sessionId: this.options.createSessionId(), title: group.title, metadata: group.metadata, samples: group.samples, now: this.options.now(), sampleIdFactory: (index) => this.options.createSampleId(index) });
       await this.options.clearDraft?.(); this.showStatus(""); await this.options.onCreated(result.session.sessionId);
     } catch (error) { this.showStatus(error instanceof Error ? error.message : String(error), true); }
     finally { this.root.toggleAttribute("aria-busy", false); }
