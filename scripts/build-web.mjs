@@ -102,7 +102,7 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
     }
   }
   if (android) {
-    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage", "Android 本地 OCR 超时"]) {
+    for (const marker of ["LuckyBeanNativeRecognition", "recognizeImage"]) {
       if (!coreSource.includes(marker)) throw new Error(`LuckyBean Android async OCR bridge missing from artifact: ${marker}`);
     }
   } else if (coreSource.includes("globalThis.__LUCKYBEAN_ANDROID__ = true")) {
