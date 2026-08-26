@@ -1,5 +1,9 @@
 import type { StageId } from "../../../shared/protocol/aromasense-v1";
 import {
+  blindGuessFieldKey,
+  blindIdentificationFieldsForMode
+} from "../../core/blind-scoring";
+import {
   blindModeDescription,
   blindModeLabel,
   isBlindSessionRevealed,
@@ -28,6 +32,26 @@ const SAMPLE_DETAIL_FIELDS: readonly [string, string][] = [
   ["country", "国家"], ["region", "产区"], ["farm", "庄园/处理站"], ["variety", "品种"],
   ["process", "处理法"], ["roast", "烘焙度"], ["roastDate", "烘焙日期"], ["altitude", "海拔"], ["flavorNotes", "风味"]
 ];
+
+function ensureBlindScoreStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-blind-score]")) return;
+  const style = document.createElement("style");
+  style.dataset.aromasenseBlindScore = "true";
+  style.textContent = `
+    .cupping-main__blind-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:7px 10px;border:1px solid rgba(185,153,90,.25);border-radius:9px;background:rgba(185,153,90,.07)}
+    .cupping-main__blind-mode{color:#d4bc82;font-size:12px}
+    .cupping-main__blind-copy{color:#9c968c;font-size:10px;line-height:1.45}
+    .blind-identification{margin-top:14px;padding:13px;border:1px solid rgba(185,153,90,.22);border-radius:12px;background:#1b1b1b}
+    .blind-identification__title{margin:0 0 4px;color:#d6c394;font-size:14px}
+    .blind-identification__note{margin:0 0 12px;color:#918b82;font-size:10px;line-height:1.5}
+    .blind-identification__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 10px}
+    .blind-identification__field{display:grid;gap:5px;color:#aaa39a;font-size:10px}
+    .blind-identification__input{min-width:0;min-height:40px;border:1px solid rgba(185,153,90,.3);border-radius:8px;padding:8px 9px;background:#242424;color:#f4efe4;font:inherit}
+    .blind-identification__input:focus{border-color:#b9995a;outline:none;box-shadow:0 0 0 2px rgba(185,153,90,.1)}
+    @media(max-width:620px){.blind-identification__grid{grid-template-columns:1fr}}
+  `;
+  document.head.append(style);
+}
 
 function readableMetadataValue(value: unknown): string | undefined {
   if (typeof value === "string") { const normalized = value.trim(); return normalized || undefined; }
@@ -75,6 +99,7 @@ export class CuppingScreenRenderer {
     private readonly summaryReader: SampleSummaryReader,
     private readonly options: CuppingScreenRendererOptions
   ) {
+    ensureBlindScoreStyles();
     this.root.classList.add("aromasense-cupping");
     this.stageStripRoot.setAttribute("aria-label", "杯测流程");
     this.mainRoot.append(this.headerRoot, this.statusRoot, this.editorRoot, this.stageStripRoot, this.footerRoot);
@@ -196,6 +221,40 @@ export class CuppingScreenRenderer {
     return banner;
   }
 
+  private renderBlindIdentification(
+    state: CuppingScreenState,
+    observations: readonly { fieldKey: string; value: unknown }[],
+    saveField: (fieldKey: string, value: unknown) => void | Promise<void>
+  ): void {
+    const mode = normalizeBlindMode(state.sessionMetadata.blindMode);
+    if (mode === "open") return;
+    const fields = blindIdentificationFieldsForMode(mode, state.sessionMetadata.semiBlindVisibleFields);
+    if (!fields.length) return;
+    const current = new Map(observations.map((item) => [item.fieldKey, item.value] as const));
+    const section = element("section", "blind-identification");
+    section.append(
+      element("h3", "blind-identification__title", mode === "full_blind" ? "盲测识别答卷" : "半盲识别答卷"),
+      element("p", "blind-identification__note", mode === "full_blind"
+        ? "填写你对样品身份信息的判断。整场杯测结束后统一揭盲并计算识别命中分；参考资料本身为空的项目不进入分母。"
+        : "仅对半盲状态下未公开的身份字段作答和计分；已公开信息不会计入识别成绩。")
+    );
+    const grid = element("div", "blind-identification__grid");
+    for (const field of fields) {
+      const label = element("label", "blind-identification__field");
+      label.append(element("span", "", field.label));
+      const input = element("input", "blind-identification__input");
+      input.type = "text";
+      input.placeholder = `判断${field.label}`;
+      const existing = current.get(blindGuessFieldKey(field.key));
+      input.value = typeof existing === "string" ? existing : "";
+      input.addEventListener("change", () => void saveField(blindGuessFieldKey(field.key), input.value.trim()));
+      label.append(input);
+      grid.append(label);
+    }
+    section.append(grid);
+    this.editorRoot.append(section);
+  }
+
   private attachTagStackDrag(): void {
     const stack = this.editorRoot.querySelector<HTMLElement>(".selected-tag-stack");
     if (!stack || !stack.querySelector(".selected-tag-stack__item")) return;
@@ -267,6 +326,9 @@ export class CuppingScreenRenderer {
 
     if (active.context.stageId === "final") {
       renderFinalAssessment(this.editorRoot, { observations: active.slice.observations, flavorPreferences: preferences, callbacks });
+      if (finalAssessmentPhase(active.slice.observations) === "score") {
+        this.renderBlindIdentification(state, active.slice.observations, callbacks.saveField);
+      }
     } else {
       renderSensoryEditor(this.editorRoot, { stageId: active.context.stageId, observations: active.slice.observations, flavorPreferences: preferences, callbacks });
     }
