@@ -6,6 +6,10 @@ function queued<T>(work: () => Promise<T>): Promise<T> {
   return task;
 }
 
+function isAndroidNativeRuntime(): boolean {
+  return (globalThis as typeof globalThis & { __LUCKYBEAN_ANDROID__?: boolean }).__LUCKYBEAN_ANDROID__ === true;
+}
+
 async function decodeImage(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; close(): void }> {
   if (typeof createImageBitmap === "function") {
     const bitmap = await createImageBitmap(file);
@@ -61,7 +65,14 @@ async function compactImagePreviewInternal(file: File, maxEdge: number): Promise
  * Generates a deliberately small persisted preview. Calls are serialized even
  * when callers use Promise.all so a batch selection cannot decode many full
  * camera images at once and exhaust a mobile WebView heap.
+ *
+ * Android is intentionally different: its OCR path owns the original content://
+ * URI, so decoding a full camera image in WebView solely to make a persisted
+ * preview is prohibited. Returning an empty preview keeps the capture/review
+ * flow functional while removing a second full-resolution decode from the UI
+ * thread. A native thumbnail can be added later without reintroducing Canvas.
  */
 export function compactImagePreview(file: File, maxEdge = 560): Promise<string> {
+  if (isAndroidNativeRuntime()) return Promise.resolve("");
   return queued(() => compactImagePreviewInternal(file, maxEdge));
 }
