@@ -12,7 +12,8 @@
   "dependencies": {
     "luckybean-static-app": "github:zjcrop/luckybean#0b2bae7a48b0194ac7dbcea5d5fe7c3fb51c60fa",
     "qrcode": "^1.5.4",
-    "sql.js": "1.14.2"
+    "sql.js": "1.14.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
