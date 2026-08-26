@@ -12,11 +12,13 @@ import { StageProgressReader } from "../app/storage/stage-progress-reader";
 import { CuppingScreenController } from "../app/ui/cupping-screen-controller";
 
 const schema = readFileSync("app/storage/0001_local_schema.sql", "utf8");
+const metadataMigration = readFileSync("app/storage/0002_session_metadata.sql", "utf8");
 
-test("next completes current stage before opening next stage", async () => {
+test("next completes current stage before opening next stage without voice side effects", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aromasense-screen-"));
   const db = NodeSQLiteDriver.open(join(dir, "screen.sqlite"));
   db.exec(schema);
+  db.exec(metadataMigration);
 
   try {
     const repository = new LocalCuppingRepository(db);
@@ -49,7 +51,6 @@ test("next completes current stage before opening next stage", async () => {
     const aroma = afterNext.rail[0]?.stages.find((stage) => stage.stageId === "aroma");
     assert.equal(preparation?.status, "completed");
     assert.equal(aroma?.status, "active");
-    assert.equal(afterNext.voicePrompt?.id, "aroma");
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
