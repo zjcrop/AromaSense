@@ -1,5 +1,5 @@
 import { TAXONOMY_VERSION } from "../../shared/protocol/aromasense-v1";
-import { normalizeSessionMetadata, type CuppingSessionMetadata } from "./session-metadata";
+import { defaultSessionMetadata, normalizeSessionMetadata, type CuppingSessionMetadata } from "./session-metadata";
 
 export type SessionStatus = "draft" | "active" | "completed" | "archived";
 
@@ -17,7 +17,7 @@ export interface CuppingSession {
 export interface CreateSessionInput {
   sessionId: string;
   title?: string;
-  metadata: CuppingSessionMetadata;
+  metadata?: CuppingSessionMetadata;
   now: string;
   taxonomyVersion?: string;
 }
@@ -27,12 +27,17 @@ function normalizeTitle(title: string | undefined): string | undefined {
   return normalized ? normalized : undefined;
 }
 
+function backwardCompatibleMetadata(input: CreateSessionInput): CuppingSessionMetadata {
+  if (input.metadata) return normalizeSessionMetadata(input.metadata);
+  return { ...defaultSessionMetadata(input.now), organizer: "未标注" };
+}
+
 export function createSession(input: CreateSessionInput): CuppingSession {
   if (!input.sessionId.trim()) throw new Error("SESSION_ID_REQUIRED");
   return {
     sessionId: input.sessionId,
     title: normalizeTitle(input.title),
-    metadata: normalizeSessionMetadata(input.metadata),
+    metadata: backwardCompatibleMetadata(input),
     status: "draft",
     taxonomyVersion: input.taxonomyVersion ?? TAXONOMY_VERSION,
     createdAt: input.now,
@@ -50,9 +55,7 @@ export function updateSessionMetadata(
   metadata: CuppingSessionMetadata,
   now: string
 ): CuppingSession {
-  if (session.status === "completed" || session.status === "archived") {
-    throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
-  }
+  if (session.status === "completed" || session.status === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
   return { ...session, metadata: normalizeSessionMetadata(metadata), updatedAt: now };
 }
 
