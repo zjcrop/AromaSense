@@ -127,6 +127,15 @@ export class LocalCuppingRepository {
 
   constructor(private readonly db: SQLiteDriver) {}
 
+  /**
+   * Runs a higher-level unit of work atomically. All shipped drivers support
+   * nested savepoints, so repository methods may safely open their own inner
+   * transactions while a multi-session import is wrapped by this boundary.
+   */
+  transaction<T>(work: () => Promise<T>): Promise<T> {
+    return this.db.transaction(work);
+  }
+
   private async supportsSessionMetadata(): Promise<boolean> {
     if (this.sessionMetadataColumn !== undefined) return this.sessionMetadataColumn;
     const columns = await this.db.all<{ name: string }>("PRAGMA table_info(sessions)");
@@ -147,9 +156,6 @@ export class LocalCuppingRepository {
             session.createdAt, session.updatedAt, session.completedAt ?? null]
         );
       } else {
-        // Legacy 0001 databases are still readable while the 0.1C migration is
-        // being applied.  Production startup upgrades them before normal use;
-        // this branch also keeps migration tests and interrupted upgrades safe.
         await this.db.run(
           `INSERT INTO sessions (
             session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
