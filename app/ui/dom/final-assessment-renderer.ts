@@ -19,23 +19,13 @@ export interface FinalAssessmentInput {
 }
 
 const PROFILE_AXES = [
-  ["profile_floral", "花香"],
-  ["profile_fruit", "果香"],
-  ["profile_tea", "茶感"],
-  ["profile_nut", "坚果"],
-  ["profile_ferment", "酵感"],
-  ["profile_spice", "香料"]
+  ["profile_floral", "花香"], ["profile_fruit", "果香"], ["profile_tea", "茶感"],
+  ["profile_nut", "坚果"], ["profile_ferment", "酵感"], ["profile_spice", "香料"]
 ] as const;
 
 const QUALITY_AXES = [
-  ["quality_flavor", "风味"],
-  ["quality_aftertaste", "余韵"],
-  ["quality_acidity", "酸质"],
-  ["quality_sweetness", "甜感"],
-  ["quality_body", "醇厚度"],
-  ["quality_clean", "干净度"],
-  ["quality_uniformity", "一致性"],
-  ["quality_balance", "平衡性"]
+  ["quality_flavor", "风味"], ["quality_aftertaste", "余韵"], ["quality_acidity", "酸质"], ["quality_sweetness", "甜感"],
+  ["quality_body", "醇厚度"], ["quality_clean", "干净度"], ["quality_uniformity", "一致性"], ["quality_balance", "平衡性"]
 ] as const;
 
 function values(observations: readonly SensoryObservation[]): Map<string, unknown> {
@@ -56,8 +46,7 @@ function axisValues(map: Map<string, unknown>, axes: readonly (readonly [string,
   return axes.map(([key, label]) => ({ key, label, value: numeric(map, key), max: 10 }));
 }
 
-export function calculateAromaSenseScore(observations: readonly SensoryObservation[]): number {
-  const map = values(observations);
+function scoreFromMap(map: Map<string, unknown>): number {
   const quality = QUALITY_AXES.map(([key]) => numeric(map, key));
   const base = quality.length ? quality.reduce((sum, value) => sum + value, 0) / quality.length * 10 : 0;
   const overtPenalty = (map.get("defect_overt_mold") === true ? 5 : 0)
@@ -67,12 +56,16 @@ export function calculateAromaSenseScore(observations: readonly SensoryObservati
   return Math.max(0, Math.min(100, Math.round((base - overtPenalty - latentPenalty - offFlavorPenalty) * 10) / 10));
 }
 
+export function calculateAromaSenseScore(observations: readonly SensoryObservation[]): number {
+  return scoreFromMap(values(observations));
+}
+
 function renderScale(
   map: Map<string, unknown>,
   key: string,
   label: string,
   callbacks: FinalAssessmentCallbacks,
-  onLive?: () => void
+  onLive?: (key: string, value: number) => void
 ): HTMLElement {
   const field = element("label", "final-assessment__scale");
   field.dataset.fieldKey = key;
@@ -87,19 +80,14 @@ function renderScale(
   output.value = input.value;
   input.addEventListener("input", () => {
     output.value = input.value;
-    onLive?.();
+    onLive?.(key, Number(input.value));
   });
   input.addEventListener("change", () => void callbacks.saveField(key, Number(input.value)));
   field.append(header, input, output);
   return field;
 }
 
-function renderChoice(
-  map: Map<string, unknown>,
-  key: string,
-  label: string,
-  callbacks: FinalAssessmentCallbacks
-): HTMLButtonElement {
+function renderChoice(map: Map<string, unknown>, key: string, label: string, callbacks: FinalAssessmentCallbacks): HTMLButtonElement {
   const selected = map.get(key) === true;
   const control = button("final-assessment__choice", label, () => {
     void callbacks.saveField(key, control.getAttribute("aria-pressed") !== "true");
@@ -111,6 +99,15 @@ function renderChoice(
 
 function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
   const map = values(input.observations);
+  const liveScore = element("section", "final-assessment__live-score");
+  const liveValue = element("strong", "final-assessment__live-score-value", scoreFromMap(map).toFixed(1));
+  liveScore.append(
+    element("span", "final-assessment__live-score-label", "实时总分"),
+    liveValue,
+    element("small", "final-assessment__live-score-note", "质量分项变化会立即反映在总分；缺陷与异味在确认后同步扣减。")
+  );
+  root.append(liveScore);
+
   const radarGrid = element("div", "final-assessment__radars");
   const flavorRadar = element("div", "final-assessment__radar");
   const qualityRadar = element("div", "final-assessment__radar");
@@ -128,14 +125,21 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
   const profile = element("section", "final-assessment__section");
   profile.append(element("h3", "final-assessment__section-title", "风味倾向"));
   const profileGrid = element("div", "final-assessment__scale-grid");
-  for (const [key, label] of PROFILE_AXES) profileGrid.append(renderScale(map, key, label, input.callbacks));
+  for (const [key, label] of PROFILE_AXES) {
+    profileGrid.append(renderScale(map, key, label, input.callbacks, (fieldKey, next) => map.set(fieldKey, next)));
+  }
   profile.append(profileGrid);
   root.append(profile);
 
   const quality = element("section", "final-assessment__section");
   quality.append(element("h3", "final-assessment__section-title", "综合质量"));
   const qualityGrid = element("div", "final-assessment__scale-grid");
-  for (const [key, label] of QUALITY_AXES) qualityGrid.append(renderScale(map, key, label, input.callbacks));
+  for (const [key, label] of QUALITY_AXES) {
+    qualityGrid.append(renderScale(map, key, label, input.callbacks, (fieldKey, next) => {
+      map.set(fieldKey, next);
+      liveValue.textContent = scoreFromMap(map).toFixed(1);
+    }));
+  }
   quality.append(qualityGrid);
   root.append(quality);
 
@@ -153,10 +157,7 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
     renderChoice(map, "defect_latent_mild_astringency", "轻微涩", input.callbacks)
   );
   const off = element("div", "final-assessment__choice-group");
-  off.append(
-    element("strong", "final-assessment__choice-heading", "异味"),
-    renderChoice(map, "off_flavor_present", "存在异味", input.callbacks)
-  );
+  off.append(element("strong", "final-assessment__choice-heading", "异味"), renderChoice(map, "off_flavor_present", "存在异味", input.callbacks));
   const offNotes = element("textarea", "final-assessment__notes");
   offNotes.rows = 2;
   offNotes.placeholder = "异味说明（可选）";
@@ -178,7 +179,7 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
 
 function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
   const map = values(input.observations);
-  const score = calculateAromaSenseScore(input.observations);
+  const score = scoreFromMap(map);
   const hero = element("section", "final-assessment__score-hero");
   hero.append(
     element("span", "final-assessment__score-label", "AromaSense 总分"),
