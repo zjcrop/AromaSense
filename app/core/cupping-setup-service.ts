@@ -6,7 +6,7 @@ import type { LocalCuppingRepository } from "../storage/local-cupping-repository
 export interface CreateCuppingSetupInput {
   sessionId: string;
   title?: string;
-  metadata: CuppingSessionMetadata;
+  metadata?: CuppingSessionMetadata;
   samples: readonly SampleDraftInput[];
   now: string;
   sampleIdFactory: SampleIdFactory;
