@@ -9,7 +9,8 @@ import {
 /**
  * Keeps the cupping editor at the user's current vertical position while the
  * base renderer replaces DOM after local persistence. The user can still
- * scroll deliberately; only renderer/focus-induced jumps are cancelled.
+ * scroll deliberately inside the editor; renderer/focus-induced page jumps
+ * are cancelled and the outer document remains fixed to the viewport.
  */
 export class CuppingScreenRenderer {
   private readonly base: BaseCuppingScreenRenderer;
@@ -19,6 +20,10 @@ export class CuppingScreenRenderer {
   private lockedScrollTop?: number;
   private suppressScrollCapture = false;
   private releaseTimer?: ReturnType<typeof setTimeout>;
+  private previousHtmlOverflow = "";
+  private previousBodyOverflow = "";
+  private previousRootHeight = "";
+  private previousRootOverflow = "";
 
   private readonly captureInteractionPosition = (): void => {
     if (!this.editor) return;
@@ -57,6 +62,10 @@ export class CuppingScreenRenderer {
     this.root.removeEventListener("keydown", this.captureInteractionPosition, true);
     this.root.removeEventListener("input", this.captureInteractionPosition, true);
     this.root.removeEventListener("change", this.captureInteractionPosition, true);
+    document.documentElement.style.overflow = this.previousHtmlOverflow;
+    document.body.style.overflow = this.previousBodyOverflow;
+    this.root.style.height = this.previousRootHeight;
+    this.root.style.overflow = this.previousRootOverflow;
     this.editor = undefined;
     this.base.dispose();
   }
@@ -66,6 +75,18 @@ export class CuppingScreenRenderer {
     if (!editor) return;
     this.editor = editor;
     this.lastScrollTop = editor.scrollTop;
+
+    this.previousHtmlOverflow = document.documentElement.style.overflow;
+    this.previousBodyOverflow = document.body.style.overflow;
+    this.previousRootHeight = this.root.style.height;
+    this.previousRootOverflow = this.root.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    this.root.style.height = "100dvh";
+    this.root.style.overflow = "hidden";
+    editor.style.overflowAnchor = "none";
+    editor.style.scrollBehavior = "auto";
+    editor.style.overscrollBehavior = "contain";
 
     editor.addEventListener("scroll", this.captureUserScroll, { passive: true });
     this.root.addEventListener("pointerdown", this.captureInteractionPosition, true);
