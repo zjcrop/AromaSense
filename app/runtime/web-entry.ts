@@ -10,8 +10,10 @@ import { AromaSenseDomApp } from "./dom-app";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
   if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
+  // Keep the established browser database name so 0.1C migrates existing local
+  // sessions in place instead of silently creating an empty versioned database.
   return BrowserSQLiteDriver.open({
-    databaseName: "aromasense-web-0.1C",
+    databaseName: "aromasense-web-B0.1.a",
     wasmUrl: "./sql-wasm.wasm"
   });
 }
