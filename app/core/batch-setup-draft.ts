@@ -53,9 +53,10 @@ function normalizedSessionMetadata(value: unknown): Partial<CuppingSessionMetada
 
 function normalizeConfirmedSession(value: unknown): ConfirmedImportSessionDraft | undefined {
   const source = record(value);
-  if (!source || !Array.isArray(source.samples)) return undefined;
+  const metadataSource = record(source?.metadata);
+  if (!source || !metadataSource || !Array.isArray(source.samples)) return undefined;
   let metadata: CuppingSessionMetadata;
-  try { metadata = normalizeSessionMetadata(source.metadata); }
+  try { metadata = normalizeSessionMetadata(metadataSource as Partial<CuppingSessionMetadata>); }
   catch { return undefined; }
   const samples = source.samples.flatMap((item) => {
     const row = record(item);
