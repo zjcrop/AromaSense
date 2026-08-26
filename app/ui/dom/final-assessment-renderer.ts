@@ -1,4 +1,5 @@
 import type { SensoryObservation } from "../../../shared/protocol/aromasense-v1";
+import { scoreProfileForMode, type CuppingScoreProfile } from "../../core/cupping-score-profile";
 import type { FlavorGroupPreferences } from "../flavor-group-preferences";
 import type { RadarAxisValue } from "../sample-summary-model";
 import { button, clearElement, element, setPressed } from "./dom-helpers";
@@ -16,6 +17,7 @@ export interface FinalAssessmentInput {
   observations: readonly SensoryObservation[];
   flavorPreferences: FlavorGroupPreferences;
   callbacks: FinalAssessmentCallbacks;
+  scoreProfile?: CuppingScoreProfile;
 }
 
 const PROFILE_AXES = [
@@ -56,8 +58,17 @@ function scoreFromMap(map: Map<string, unknown>): number {
   return Math.max(0, Math.min(100, Math.round((base - overtPenalty - latentPenalty - offFlavorPenalty) * 10) / 10));
 }
 
-export function calculateAromaSenseScore(observations: readonly SensoryObservation[]): number {
+export function calculateCuppingScore(
+  observations: readonly SensoryObservation[],
+  profile: CuppingScoreProfile = scoreProfileForMode("open")
+): number {
+  if (profile.calculatorVersion !== "aromasense-quality-0.1c") throw new Error(`UNKNOWN_SCORE_CALCULATOR:${profile.calculatorVersion}`);
   return scoreFromMap(values(observations));
+}
+
+/** Backward-compatible public name used by existing reports/tests. */
+export function calculateAromaSenseScore(observations: readonly SensoryObservation[]): number {
+  return calculateCuppingScore(observations, scoreProfileForMode("open"));
 }
 
 function renderScale(
@@ -99,12 +110,13 @@ function renderChoice(map: Map<string, unknown>, key: string, label: string, cal
 
 function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
   const map = values(input.observations);
+  const profile = input.scoreProfile ?? scoreProfileForMode("open");
   const liveScore = element("section", "final-assessment__live-score");
   const liveValue = element("strong", "final-assessment__live-score-value", scoreFromMap(map).toFixed(1));
   liveScore.append(
-    element("span", "final-assessment__live-score-label", "实时总分"),
+    element("span", "final-assessment__live-score-label", `实时总分 · ${profile.label}`),
     liveValue,
-    element("small", "final-assessment__live-score-note", "质量分项变化会立即反映在总分；缺陷与异味在确认后同步扣减。")
+    element("small", "final-assessment__live-score-note", `${profile.scoreNote} 缺陷与异味在确认后同步扣减。`)
   );
   root.append(liveScore);
 
@@ -122,14 +134,14 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
   radarGrid.append(flavorRadar, qualityRadar);
   root.append(radarGrid);
 
-  const profile = element("section", "final-assessment__section");
-  profile.append(element("h3", "final-assessment__section-title", "风味倾向"));
+  const profileSection = element("section", "final-assessment__section");
+  profileSection.append(element("h3", "final-assessment__section-title", "风味倾向"));
   const profileGrid = element("div", "final-assessment__scale-grid");
   for (const [key, label] of PROFILE_AXES) {
     profileGrid.append(renderScale(map, key, label, input.callbacks, (fieldKey, next) => map.set(fieldKey, next)));
   }
-  profile.append(profileGrid);
-  root.append(profile);
+  profileSection.append(profileGrid);
+  root.append(profileSection);
 
   const quality = element("section", "final-assessment__section");
   quality.append(element("h3", "final-assessment__section-title", "综合质量"));
@@ -179,12 +191,13 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
 
 function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
   const map = values(input.observations);
+  const profile = input.scoreProfile ?? scoreProfileForMode("open");
   const score = scoreFromMap(map);
   const hero = element("section", "final-assessment__score-hero");
   hero.append(
-    element("span", "final-assessment__score-label", "AromaSense 总分"),
+    element("span", "final-assessment__score-label", profile.scoreLabel),
     element("strong", "final-assessment__score-value", score.toFixed(1)),
-    element("small", "final-assessment__score-note", "依据本次综合质量分项实时计算；缺陷与异味按 0.1C 规则扣减。")
+    element("small", "final-assessment__score-note", `${profile.scoreNote} 当前使用 ${profile.calculatorVersion}。`)
   );
   root.append(hero);
 

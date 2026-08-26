@@ -1,5 +1,9 @@
 import { normalizeImportBundle, type ImportSessionDraft } from "./import-bundle";
-import { normalizeBlindMode, normalizeSessionMetadata, type CuppingSessionMetadata } from "./session-metadata";
+import {
+  normalizeCuppingMode,
+  normalizeSessionMetadata,
+  type CuppingSessionMetadata
+} from "./session-metadata";
 
 export const BATCH_SETUP_DRAFT_VERSION = 2 as const;
 
@@ -48,7 +52,7 @@ function normalizedSessionMetadata(value: unknown): Partial<CuppingSessionMetada
     const field = source[key];
     if (typeof field === "string" && field.trim()) result[key] = field.trim();
   }
-  if (typeof source.blindMode === "string") result.blindMode = normalizeBlindMode(source.blindMode);
+  result.cuppingMode = normalizeCuppingMode(source.cuppingMode, source.blindMode);
   if (Array.isArray(source.semiBlindVisibleFields)) {
     const fields = [...new Set(source.semiBlindVisibleFields.map((item) => String(item ?? "").trim()).filter(Boolean))];
     if (fields.length) result.semiBlindVisibleFields = fields;

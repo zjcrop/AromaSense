@@ -1,5 +1,9 @@
+export type CuppingMode = "open" | "blind" | "semi_blind";
+
+/** Legacy storage compatibility only. New code should use CuppingMode. */
 export type BlindMode = "open" | "semi_blind" | "full_blind";
 
+export const CUPPING_MODES: readonly CuppingMode[] = ["open", "blind", "semi_blind"] as const;
 export const BLIND_MODES: readonly BlindMode[] = ["open", "semi_blind", "full_blind"] as const;
 export const DEFAULT_SEMI_BLIND_VISIBLE_FIELDS = ["country", "region", "process", "roast"] as const;
 
@@ -8,8 +12,11 @@ export interface CuppingSessionMetadata {
   time: string;
   organizer: string;
   participants?: string;
+  /** Legacy free-text field retained when old records are read. New sessions use cuppingMode as the source of truth. */
   target?: string;
   eventName?: string;
+  cuppingMode?: CuppingMode;
+  /** Legacy compatibility input. normalizeSessionMetadata migrates it into cuppingMode and does not require new writes to use it. */
   blindMode?: BlindMode;
   semiBlindVisibleFields?: readonly string[];
   revealedAt?: string;
@@ -30,6 +37,34 @@ export function normalizeBlindMode(value: unknown): BlindMode {
   return BLIND_MODES.includes(value as BlindMode) ? value as BlindMode : "open";
 }
 
+export function cuppingModeFromBlindMode(value: unknown): CuppingMode {
+  const legacy = normalizeBlindMode(value);
+  if (legacy === "full_blind") return "blind";
+  if (legacy === "semi_blind") return "semi_blind";
+  return "open";
+}
+
+export function normalizeCuppingMode(value: unknown, legacyBlindMode?: unknown): CuppingMode {
+  if (CUPPING_MODES.includes(value as CuppingMode)) return value as CuppingMode;
+  return cuppingModeFromBlindMode(legacyBlindMode);
+}
+
+export function legacyBlindModeFromCuppingMode(mode: CuppingMode): BlindMode {
+  if (mode === "blind") return "full_blind";
+  if (mode === "semi_blind") return "semi_blind";
+  return "open";
+}
+
+export function cuppingModeFromMetadata(metadata: Partial<CuppingSessionMetadata>): CuppingMode {
+  return normalizeCuppingMode(metadata.cuppingMode, metadata.blindMode);
+}
+
+export function cuppingModeLabel(mode: CuppingMode): string {
+  if (mode === "blind") return "盲测";
+  if (mode === "semi_blind") return "半盲测";
+  return "公开杯测";
+}
+
 export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>): CuppingSessionMetadata {
   const date = String(value.date ?? "").trim();
   const time = String(value.time ?? "").trim();
@@ -44,7 +79,7 @@ export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>)
     participants: normalizeOptional(value.participants),
     target: normalizeOptional(value.target),
     eventName: normalizeOptional(value.eventName),
-    blindMode: normalizeBlindMode(value.blindMode),
+    cuppingMode: normalizeCuppingMode(value.cuppingMode, value.blindMode),
     semiBlindVisibleFields: normalizeFieldList(value.semiBlindVisibleFields),
     revealedAt: normalizeOptional(value.revealedAt)
   };
@@ -57,7 +92,7 @@ export function defaultSessionMetadata(now: string): CuppingSessionMetadata {
     date: localDate.slice(0, 10),
     time: localDate.slice(11, 16),
     organizer: "",
-    blindMode: "open"
+    cuppingMode: "open"
   };
 }
 
@@ -65,7 +100,7 @@ export function sessionDisplayName(metadata: Partial<CuppingSessionMetadata>, ti
   const eventName = normalizeOptional(metadata.eventName);
   if (eventName) return eventName;
   const organizer = normalizeOptional(metadata.organizer);
-  const target = normalizeOptional(metadata.target);
+  const target = normalizeOptional(metadata.target) ?? cuppingModeLabel(cuppingModeFromMetadata(metadata));
   const combined = [organizer, target].filter(Boolean).join(" · ");
   return combined || normalizeOptional(title) || "未命名杯测";
 }

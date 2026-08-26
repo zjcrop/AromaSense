@@ -1,4 +1,4 @@
-import type { CuppingSessionMetadata } from "./session-metadata";
+import { normalizeCuppingMode, type CuppingSessionMetadata } from "./session-metadata";
 
 export const IMPORT_BUNDLE_SCHEMA = "aromasense-import/1" as const;
 
@@ -47,6 +47,7 @@ const SESSION_FIELD_ALIASES: Readonly<Record<string, keyof CuppingSessionMetadat
   organizer: "organizer", organisation: "organizer", organization: "organizer", 主办方: "organizer", 组织方: "organizer",
   participants: "participants", participant: "participants", 对象: "participants", 参与对象: "participants", 参与者: "participants",
   target: "target", goal: "target", objective: "target", 测试目标: "target", 杯测目标: "target", 目标: "target",
+  mode: "cuppingMode", cuppingmode: "cuppingMode", "cupping mode": "cuppingMode", 杯测模式: "cuppingMode", 杯测类型: "cuppingMode",
   event: "eventName", eventname: "eventName", "event name": "eventName", 杯测会名称: "eventName", 杯测名称: "eventName", 会名称: "eventName"
 });
 
@@ -120,13 +121,26 @@ function stringValue(value: unknown): string | undefined {
   return normalized ? normalized : undefined;
 }
 
+function modeFromTarget(value: string | undefined): "open" | "blind" | "semi_blind" | undefined {
+  const normalized = value?.normalize("NFKC").trim().toLocaleLowerCase("zh-CN");
+  if (!normalized) return undefined;
+  if (["公开杯测", "公开", "open", "open cupping"].includes(normalized)) return "open";
+  if (["盲测", "全盲", "blind", "full blind", "full_blind"].includes(normalized)) return "blind";
+  if (["半盲测", "半盲", "semi blind", "semi_blind"].includes(normalized)) return "semi_blind";
+  return undefined;
+}
+
 function normalizeMetadata(value: unknown): Partial<CuppingSessionMetadata> {
   const source = object(value) ?? {};
   const result: Partial<CuppingSessionMetadata> = {};
-  for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
+  for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
     const normalized = stringValue(source[key]);
     if (normalized) result[key] = normalized;
   }
+  const target = stringValue(source.target);
+  const targetMode = modeFromTarget(target);
+  result.cuppingMode = targetMode ?? normalizeCuppingMode(source.cuppingMode, source.blindMode);
+  if (target && !targetMode) result.target = target;
   return result;
 }
 

@@ -18,19 +18,37 @@ A session may contain multiple coffee samples. Samples are imported/created, aut
 
 Each sample progresses through structured sensory stages such as preparation/aroma and temperature-dependent tasting stages. The exact stage taxonomy remains versioned and must not be hard-coded into database table names.
 
-## Blind cupping modes
+## Cupping target and blind modes
 
-Blindness is a Session-level visibility rule, not a separate storage model. The underlying sample label and metadata remain stored locally so that one immutable observation history can be revealed and reviewed later without copying or rewriting sample records.
+`cuppingMode` is the canonical Session-level cup-test target. It is also the source of truth for visibility and score-profile routing. The setup UI exposes exactly three choices:
 
-Three modes are supported when establishing a cupping Session:
+- `open` — **公开杯测** (default): sample information is entered first; clicking Start uses the number of confirmed imported samples and does not ask for a second quantity.
+- `blind` — **盲测**: sample information is not required before starting. Clicking Start asks for the cup-test quantity and creates that many empty Sample records/processes. Empty blind samples have no fake label or placeholder bean metadata; the active UI shows the derived anonymous `Sample NN` code only.
+- `semi_blind` — **半盲测**: the normal photo/batch/manual import path remains available and incomplete bean metadata is allowed. Clicking Start asks for the total cup-test quantity. The total may equal or exceed the number of confirmed imported samples; any difference is filled with true empty Sample records. A total smaller than the imported sample count is rejected.
 
-- `open`: show the sample label and all recorded sample metadata during cupping;
-- `semi_blind`: hide the sample label/direct identity during active cupping and expose only a limited metadata whitelist. The default whitelist is country, region, process and roast level;
-- `full_blind`: show only an anonymous `Sample NN` code and expose no sample metadata during active cupping.
+The old setup combination of free-text target plus a second independent blind-mode selector is deprecated. New Session writes use `cuppingMode`. Legacy `blindMode` values in existing metadata are read only for migration compatibility and normalize into the canonical mode.
 
-For semi/full blind Sessions, reveal occurs at the whole-Session completion boundary rather than per sample. `revealedAt` is written into Session metadata when the active Session becomes completed; completed/archived records then render the original label and metadata. Starting a new Session from imported or historical metadata clears any stale reveal timestamp.
+Blindness remains a Session-level visibility rule, not a separate storage model. The underlying imported sample label and metadata remain stored locally so that one observation history can be revealed and reviewed later without copying or rewriting sample records.
 
-The blind-mode fields live in the existing `sessions.metadata_json` document. This does not add a physical table or schema column and therefore does not require a new SQLite migration. Legacy Session metadata without a blind-mode field normalizes to `open`.
+During active cupping:
+
+- `open`: show sample label and all recorded sample metadata;
+- `semi_blind`: hide the sample label/direct identity and expose only the limited metadata whitelist. The default whitelist is country, region, process and roast level;
+- `blind`: expose no sample metadata and derive only `Sample NN` from display order.
+
+For blind/semi-blind Sessions, reveal occurs at the whole-Session completion boundary rather than per sample. `revealedAt` is written into Session metadata when the active Session becomes completed; completed/archived records then render any original label and metadata that exists. Starting a new Session from imported or historical metadata clears any stale reveal timestamp.
+
+These fields live in the existing `sessions.metadata_json` document. This does not add a physical table or schema column and therefore does not require a new SQLite migration.
+
+## Score-profile routing
+
+The sensory workflow, raw observations, flavor tags, radar data and defect observations remain shared across all three cupping modes. At the final scoring stage the Session mode routes to one explicit score profile:
+
+- `open` -> `OpenCuppingScoreProfile`
+- `blind` -> `BlindCuppingScoreProfile`
+- `semi_blind` -> `SemiBlindCuppingScoreProfile`
+
+The profile owns the scoring label, metadata policy and calculator version. The current 0.1C profiles all use the existing `aromasense-quality-0.1c` sensory-quality calculator because no separate mode-specific numerical weighting has been formally defined in product requirements. Blind and semi-blind profiles explicitly exclude hidden sample identity/bean metadata from the calculation. Do not invent an identification-hit percentage or new weighting without a separately approved scoring specification.
 
 ## Interaction principles
 

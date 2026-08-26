@@ -6,15 +6,20 @@ import {
   type BatchSetupDraft,
   type BatchSetupDraftItem
 } from "../../core/batch-setup-draft";
-import { blindModeDescription, blindModeLabel } from "../../core/blind-session";
+import {
+  buildEmptySampleDrafts,
+  cuppingTargetChoiceFromMetadata,
+  type CuppingTargetChoice
+} from "../../core/cupping-target";
 import type { CuppingSetupService } from "../../core/cupping-setup-service";
 import { normalizeImportBundle, type ImportBundle, type ImportSessionDraft } from "../../core/import-bundle";
 import { recognizeManualText } from "../../core/manual-text-recognizer";
 import {
+  cuppingModeLabel,
   defaultSessionMetadata,
-  normalizeBlindMode,
+  normalizeCuppingMode,
   normalizeSessionMetadata,
-  type BlindMode,
+  type CuppingMode,
   type CuppingSessionMetadata
 } from "../../core/session-metadata";
 import type { RecognizedPage, RecognizedSample, SampleRecognitionService } from "../../core/sample-recognition-service";
@@ -60,13 +65,16 @@ const FIELD_SPECS: readonly FieldSpec[] = [
   ["altitude", "海拔", "其他信息"], ["roaster", "烘焙商", "其他信息"], ["weight", "净重", "其他信息"], ["flavorNotes", "风味", "其他信息", "multiline"], ["aroma", "香气", "其他信息", "multiline"]
 ];
 
+const CUPPING_TARGET_OPTIONS: readonly CuppingTargetChoice[] = ["open", "blind", "semi_blind"] as const;
+
 interface ReviewCandidateLike { normalizedValue?: string; value?: string; score?: number }
 interface ReviewDecisionLike { field?: string; value?: string; confidence?: number; candidates?: ReviewCandidateLike[] }
 interface RowState { id: string; previewDataUrl?: string; status?: string; requiresReview: boolean; confirmed: boolean }
+interface SampleSetupDraft { label?: string; metadata: Record<string, unknown> }
 interface ConfirmedImportSession {
   title?: string;
   metadata: CuppingSessionMetadata;
-  samples: Array<{ label: string; metadata: Record<string, unknown> }>;
+  samples: SampleSetupDraft[];
 }
 interface ImportQueueState {
   sessions: ImportSessionDraft[];
@@ -93,19 +101,52 @@ function confidence(metadata: Record<string, unknown>, key: string): number | un
   return Number.isFinite(value) ? value : undefined;
 }
 
+function installCuppingTargetStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-cupping-target]")) return;
+  const style = document.createElement("style");
+  style.dataset.aromasenseCuppingTarget = "true";
+  style.textContent = `
+    .batch-setup__target-shell{position:relative;display:grid;gap:6px}
+    .batch-setup__target-button{width:100%;min-height:42px;border:1px solid rgba(185,153,90,.34);border-radius:9px;padding:8px 10px;background:#242424;color:#f4efe4;text-align:left;font:inherit;cursor:pointer}
+    .batch-setup__target-button::after{content:'⌄';float:right;color:#b9995a}
+    .batch-setup__target-menu{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:1400;overflow:hidden;border:1px solid #777;border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.42)}
+    .batch-setup__target-option{display:block;width:100%;min-height:40px;border:0;border-bottom:1px solid #dedede;padding:8px 11px;background:#fff;color:#111;text-align:left;font:inherit;cursor:pointer}
+    .batch-setup__target-option:last-child{border-bottom:0}
+    .batch-setup__target-option:hover,.batch-setup__target-option:focus-visible,.batch-setup__target-option.is-selected{background:#3b3b3b;color:#fff;outline:none}
+    .batch-setup__target-help{color:#928d84;font-size:10px;line-height:1.45}
+    .batch-setup__blind-entry-note{margin:0 0 14px;padding:12px;border:1px dashed rgba(185,153,90,.28);border-radius:10px;color:#aaa39a;background:rgba(185,153,90,.05);font-size:11px;line-height:1.55}
+    .cupping-count-dialog{position:fixed;inset:0;z-index:1700;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(5px)}
+    .cupping-count-dialog__panel{width:min(420px,100%);border:1px solid rgba(185,153,90,.36);border-radius:14px;padding:18px;background:#181818;color:#f4efe4;box-shadow:0 18px 48px rgba(0,0,0,.55)}
+    .cupping-count-dialog__title{margin:0 0 8px;font-size:18px}
+    .cupping-count-dialog__note{margin:0 0 14px;color:#aaa39a;font-size:12px;line-height:1.5}
+    .cupping-count-dialog__label{display:grid;gap:6px;color:#c6b58b;font-size:12px}
+    .cupping-count-dialog__input{width:100%;min-height:44px;border:1px solid rgba(185,153,90,.42);border-radius:9px;padding:8px 10px;background:#fff;color:#111;font:inherit}
+    .cupping-count-dialog__input:focus{border-color:#b9995a;outline:none;box-shadow:0 0 0 2px rgba(185,153,90,.12)}
+    .cupping-count-dialog__error{min-height:18px;margin:8px 0 0;color:#ef9e9e;font-size:11px}
+    .cupping-count-dialog__actions{display:grid;grid-template-columns:.7fr 1fr;gap:8px;margin-top:14px}
+    .cupping-count-dialog__cancel,.cupping-count-dialog__confirm{min-height:42px;border-radius:9px;font-weight:700}
+    .cupping-count-dialog__cancel{border:1px solid rgba(185,153,90,.32);background:#222;color:#c9c0ae}
+    .cupping-count-dialog__confirm{border:1px solid #b9995a;background:#b9995a;color:#111}
+  `;
+  document.head.append(style);
+}
+
 export class BatchSetupRenderer {
   private readonly rowsRoot = element("div", "batch-setup__rows");
   private readonly statusRoot = element("div", "batch-setup__status");
   private readonly titleInput = element("input", "batch-setup__title");
   private readonly sessionInputs = new Map<keyof CuppingSessionMetadata, HTMLInputElement>();
-  private readonly blindModeSelect = element("select", "batch-setup__session-meta-input");
-  private readonly blindModeHelp = element("small", "batch-setup__session-meta-help");
   private readonly metadata = new WeakMap<HTMLElement, Record<string, unknown>>();
   private readonly state = new WeakMap<HTMLElement, RowState>();
+  private readonly blindEntryNote = element("p", "batch-setup__blind-entry-note", "盲测无需预先录入样品信息。点击“开始杯测”后填写样品数量，系统会自动建立对应数量的空标签杯测进程。 ");
   private review?: BatchReviewDialogHandle;
   private sequence = 0;
   private saveTimer?: ReturnType<typeof setTimeout>;
   private startButton?: HTMLButtonElement;
+  private captureActions?: HTMLElement;
+  private cuppingModeButton?: HTMLButtonElement;
+  private cuppingModeMenu?: HTMLElement;
+  private cuppingMode: CuppingMode = "open";
   private importQueue?: ImportQueueState;
 
   constructor(
@@ -114,20 +155,11 @@ export class BatchSetupRenderer {
     private readonly recognizer: SampleRecognitionService,
     private readonly options: BatchSetupRendererOptions
   ) {
+    installCuppingTargetStyles();
     this.titleInput.type = "text";
     this.titleInput.placeholder = "杯测会名称（可选）";
     this.titleInput.addEventListener("change", () => void this.saveDraft());
-    for (const mode of ["open", "semi_blind", "full_blind"] as const) {
-      const option = element("option", "", blindModeLabel(mode));
-      option.value = mode;
-      this.blindModeSelect.append(option);
-    }
-    this.blindModeSelect.value = "open";
-    this.updateBlindModeHelp();
-    this.blindModeSelect.addEventListener("change", () => {
-      this.updateBlindModeHelp();
-      void this.saveDraft();
-    });
+    this.blindEntryNote.hidden = true;
   }
 
   async render(): Promise<void> {
@@ -158,62 +190,120 @@ export class BatchSetupRenderer {
       button("batch-setup__capture", "批量识别", () => this.openBatchRecognitionMenu(galleryInput, spreadsheetInput, qrInput)),
       button("batch-setup__add", "手工录入", () => this.openManualText())
     );
+    this.captureActions = actions;
     this.startButton = button("batch-setup__start", "开始杯测", () => this.submit());
     this.statusRoot.hidden = true;
-    this.root.append(header, metadataForm, actions, cameraInput, galleryInput, spreadsheetInput, qrInput, this.rowsRoot, this.statusRoot, this.startButton);
+    this.root.append(header, metadataForm, actions, this.blindEntryNote, cameraInput, galleryInput, spreadsheetInput, qrInput, this.rowsRoot, this.statusRoot, this.startButton);
     const recent = this.renderRecentSessions();
     if (recent) this.root.append(recent);
     await this.restoreDraft();
+    this.applyCuppingModeUi();
     this.ensureEmptyHint();
+  }
+
+  private renderMetadataInput(key: keyof CuppingSessionMetadata, label: string, type: string, required: boolean, value = ""): HTMLLabelElement {
+    const field = element("label", "batch-setup__session-meta-field");
+    const caption = element("span", "batch-setup__session-meta-label", required ? `${label} *` : label);
+    const input = element("input", "batch-setup__session-meta-input");
+    input.type = type;
+    input.required = required;
+    input.value = value;
+    input.addEventListener("change", () => {
+      if (key === "eventName") this.titleInput.value = input.value;
+      void this.saveDraft();
+    });
+    this.sessionInputs.set(key, input);
+    field.append(caption, input);
+    return field;
+  }
+
+  private renderCuppingModeField(): HTMLLabelElement {
+    const field = element("label", "batch-setup__session-meta-field batch-setup__session-meta-field--target");
+    const caption = element("span", "batch-setup__session-meta-label", "杯测目标");
+    const shell = element("div", "batch-setup__target-shell");
+    const trigger = button("batch-setup__target-button", cuppingModeLabel(this.cuppingMode), () => this.toggleCuppingModeMenu());
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    this.cuppingModeButton = trigger;
+    const menu = element("div", "batch-setup__target-menu");
+    menu.hidden = true;
+    menu.setAttribute("role", "listbox");
+    for (const mode of CUPPING_TARGET_OPTIONS) {
+      const option = button(`batch-setup__target-option${mode === this.cuppingMode ? " is-selected" : ""}`, cuppingModeLabel(mode), () => this.setCuppingMode(mode));
+      option.dataset.cuppingMode = mode;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", String(mode === this.cuppingMode));
+      menu.append(option);
+    }
+    this.cuppingModeMenu = menu;
+    const help = element("small", "batch-setup__target-help", "公开杯测为默认；盲测无需录入；半盲测保留现有录入流程，开始时再确认杯测数量。 ");
+    shell.append(trigger, menu, help);
+    field.append(caption, shell);
+    return field;
   }
 
   private renderSessionMetadataForm(): HTMLElement {
     const defaults = defaultSessionMetadata(this.options.now());
+    this.cuppingMode = "open";
     const section = element("section", "batch-setup__session-meta");
     section.append(element("h2", "batch-setup__session-meta-title", "本次杯测标注"));
     const grid = element("div", "batch-setup__session-meta-grid");
-    const specs: Array<[keyof CuppingSessionMetadata, string, string, boolean]> = [
-      ["date", "日期", "date", true], ["time", "时间", "time", true], ["organizer", "组织方", "text", true],
-      ["participants", "参与对象", "text", false], ["target", "测试目标", "text", false], ["eventName", "杯测会名称", "text", false]
-    ];
-    for (const [key, label, type, required] of specs) {
-      const field = element("label", "batch-setup__session-meta-field");
-      const caption = element("span", "batch-setup__session-meta-label", required ? `${label} *` : label);
-      const input = element("input", "batch-setup__session-meta-input");
-      input.type = type;
-      input.required = required;
-      if (key === "date") input.value = defaults.date;
-      if (key === "time") input.value = defaults.time;
-      input.addEventListener("change", () => {
-        if (key === "eventName") this.titleInput.value = input.value;
-        void this.saveDraft();
-      });
-      this.sessionInputs.set(key, input);
-      field.append(caption, input);
-      grid.append(field);
-    }
-    const blindField = element("label", "batch-setup__session-meta-field batch-setup__session-meta-field--blind");
-    blindField.append(element("span", "batch-setup__session-meta-label", "盲测模式"), this.blindModeSelect, this.blindModeHelp);
-    grid.append(blindField);
+    grid.append(
+      this.renderMetadataInput("date", "日期", "date", true, defaults.date),
+      this.renderMetadataInput("time", "时间", "time", true, defaults.time),
+      this.renderMetadataInput("organizer", "组织方", "text", true),
+      this.renderMetadataInput("participants", "参与对象", "text", false),
+      this.renderCuppingModeField(),
+      this.renderMetadataInput("eventName", "杯测会名称", "text", false)
+    );
     section.append(grid);
     return section;
   }
 
-  private updateBlindModeHelp(): void {
-    const mode = normalizeBlindMode(this.blindModeSelect.value);
-    this.blindModeHelp.textContent = blindModeDescription(mode);
+  private toggleCuppingModeMenu(): void {
+    if (!this.cuppingModeMenu || !this.cuppingModeButton) return;
+    const opening = this.cuppingModeMenu.hidden;
+    this.cuppingModeMenu.hidden = !opening;
+    this.cuppingModeButton.setAttribute("aria-expanded", String(opening));
+    if (opening) {
+      queueMicrotask(() => document.addEventListener("click", () => {
+        if (this.cuppingModeMenu) this.cuppingModeMenu.hidden = true;
+        this.cuppingModeButton?.setAttribute("aria-expanded", "false");
+      }, { once: true }));
+    }
+  }
+
+  private setCuppingMode(mode: CuppingMode, save = true): void {
+    this.cuppingMode = mode;
+    if (this.cuppingModeButton) this.cuppingModeButton.textContent = cuppingModeLabel(mode);
+    if (this.cuppingModeMenu) {
+      for (const option of this.cuppingModeMenu.querySelectorAll<HTMLButtonElement>("[data-cupping-mode]")) {
+        const selected = option.dataset.cuppingMode === mode;
+        option.classList.toggle("is-selected", selected);
+        option.setAttribute("aria-selected", String(selected));
+      }
+      this.cuppingModeMenu.hidden = true;
+    }
+    this.applyCuppingModeUi();
+    if (save) void this.saveDraft();
+  }
+
+  private applyCuppingModeUi(): void {
+    const blind = this.cuppingMode === "blind";
+    if (this.captureActions) this.captureActions.hidden = blind;
+    this.rowsRoot.hidden = blind;
+    this.blindEntryNote.hidden = !blind;
   }
 
   private resetSessionMetadata(): void {
     const defaults = defaultSessionMetadata(this.options.now());
-    for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
+    for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
       const input = this.sessionInputs.get(key);
       if (!input) continue;
       input.value = key === "date" ? defaults.date : key === "time" ? defaults.time : "";
     }
     this.titleInput.value = "";
-    this.blindModeSelect.value = "open";
-    this.updateBlindModeHelp();
+    this.setCuppingMode("open", false);
   }
 
   private sessionMetadata(): CuppingSessionMetadata {
@@ -222,21 +312,19 @@ export class BatchSetupRenderer {
       time: this.sessionInputs.get("time")?.value,
       organizer: this.sessionInputs.get("organizer")?.value,
       participants: this.sessionInputs.get("participants")?.value,
-      target: this.sessionInputs.get("target")?.value,
       eventName: this.sessionInputs.get("eventName")?.value || this.titleInput.value,
-      blindMode: normalizeBlindMode(this.blindModeSelect.value)
+      cuppingMode: this.cuppingMode
     });
   }
 
   private applySessionMetadata(metadata: Partial<CuppingSessionMetadata>): void {
-    for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
+    for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
       const input = this.sessionInputs.get(key);
       const value = metadata[key];
       if (input && typeof value === "string") input.value = value;
     }
     if (metadata.eventName) this.titleInput.value = metadata.eventName;
-    this.blindModeSelect.value = normalizeBlindMode(metadata.blindMode);
-    this.updateBlindModeHelp();
+    this.setCuppingMode(cuppingTargetChoiceFromMetadata(metadata), false);
   }
 
   private imageInput(multiple: boolean, capture: boolean): HTMLInputElement {
@@ -475,7 +563,7 @@ export class BatchSetupRenderer {
     });
   }
 
-  private sampleDrafts(): Array<{ label: string; metadata: Record<string, unknown> }> {
+  private sampleDrafts(): SampleSetupDraft[] {
     return this.rows().flatMap((row) => {
       const label = row.querySelector<HTMLInputElement>(".batch-setup__sample-label")?.value.trim() ?? "";
       return label && !/^待确认样品\s+\d+$/u.test(label) ? [{ label, metadata: { ...(this.metadata.get(row) ?? {}) } }] : [];
@@ -486,11 +574,10 @@ export class BatchSetupRenderer {
     try {
       const items = this.items();
       if (!items.length) { await this.options.clearDraft?.(); return; }
-      const sessionMetadata: Partial<CuppingSessionMetadata> = {};
-      for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
+      const sessionMetadata: Partial<CuppingSessionMetadata> = { cuppingMode: this.cuppingMode };
+      for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
         const value = this.sessionInputs.get(key)?.value.trim(); if (value) sessionMetadata[key] = value;
       }
-      sessionMetadata.blindMode = normalizeBlindMode(this.blindModeSelect.value);
       await this.options.saveDraft?.({
         version: BATCH_SETUP_DRAFT_VERSION,
         title: this.titleInput.value,
@@ -502,7 +589,7 @@ export class BatchSetupRenderer {
           completed: this.importQueue.completed.map((group) => ({
             title: group.title,
             metadata: { ...group.metadata },
-            samples: group.samples.map((sample) => ({ label: sample.label, metadata: { ...sample.metadata } }))
+            samples: group.samples.flatMap((sample) => sample.label ? [{ label: sample.label, metadata: { ...sample.metadata } }] : [])
           })),
           sourceName: this.importQueue.sourceName
         } : undefined,
@@ -634,18 +721,112 @@ export class BatchSetupRenderer {
   }
 
   private renumber(): void { this.rows().forEach((row, index) => { const input = row.querySelector<HTMLInputElement>(".batch-setup__sample-label"); if (input) input.placeholder = `样品 ${index + 1}`; }); }
-  private ensureEmptyHint(): void { if (!this.rows().length && !this.rowsRoot.querySelector(".batch-setup__empty-hint")) this.rowsRoot.append(element("p", "batch-setup__empty-hint", "尚未添加样品。可使用拍摄录入、批量识别或手工录入。")); }
+  private ensureEmptyHint(): void {
+    if (this.cuppingMode === "blind") return;
+    if (!this.rows().length && !this.rowsRoot.querySelector(".batch-setup__empty-hint")) this.rowsRoot.append(element("p", "batch-setup__empty-hint", "尚未添加样品。可使用拍摄录入、批量识别或手工录入。"));
+  }
+
+  private validateSessionMetadata(): CuppingSessionMetadata | undefined {
+    try { return this.sessionMetadata(); }
+    catch { this.showStatus("日期、时间和组织方为必填项。", true); return undefined; }
+  }
 
   private validateCurrentGroup(): ConfirmedImportSession | undefined {
     const rows = this.rows();
+    if (!rows.length) {
+      this.showStatus(this.cuppingMode === "semi_blind" ? "半盲测需要先录入至少一个样品。" : "请先录入至少一个样品。", true);
+      return undefined;
+    }
     const pending = rows.filter((row) => this.state.get(row)?.confirmed !== true);
     if (pending.length) { this.showStatus(`仍有 ${pending.length} 个样品未确认。`, true); this.openReview(pending[0]); return undefined; }
     const samples = this.sampleDrafts();
-    if (!samples.length || samples.length !== rows.length) { this.showStatus("所有样品都必须确认有效名称。", true); return undefined; }
-    let metadata: CuppingSessionMetadata;
-    try { metadata = this.sessionMetadata(); }
-    catch { this.showStatus("日期、时间和组织方为必填项。", true); return undefined; }
+    if (!samples.length || samples.length !== rows.length) { this.showStatus("所有已录入样品都必须确认有效名称；豆子资料字段允许留空。", true); return undefined; }
+    const metadata = this.validateSessionMetadata();
+    if (!metadata) return undefined;
     return { title: metadata.eventName || this.titleInput.value.trim() || undefined, metadata, samples };
+  }
+
+  private async createSession(group: ConfirmedImportSession, samples: readonly SampleSetupDraft[]): Promise<void> {
+    this.root.toggleAttribute("aria-busy", true);
+    try {
+      const result = await this.service.create({
+        sessionId: this.options.createSessionId(),
+        title: group.title,
+        metadata: group.metadata,
+        samples,
+        now: this.options.now(),
+        sampleIdFactory: (index) => this.options.createSampleId(index)
+      });
+      await this.options.clearDraft?.();
+      this.showStatus("");
+      await this.options.onCreated(result.session.sessionId);
+    } catch (error) {
+      this.showStatus(error instanceof Error ? error.message : String(error), true);
+    } finally {
+      this.root.toggleAttribute("aria-busy", false);
+    }
+  }
+
+  private openCountDialog(mode: "blind" | "semi_blind", group: ConfirmedImportSession): void {
+    this.root.querySelector(".cupping-count-dialog")?.remove();
+    const importedCount = mode === "semi_blind" ? group.samples.length : 0;
+    const hiddenDraftRows = mode === "blind" ? this.rows().length : 0;
+    const overlay = element("div", "cupping-count-dialog");
+    const panel = element("section", "cupping-count-dialog__panel");
+    const note = mode === "blind"
+      ? `${hiddenDraftRows ? `当前暂存的 ${hiddenDraftRows} 个录入项不会带入本次盲测。` : ""}填写数量后，系统按数量建立空标签 Sample 与独立杯测进程。`
+      : `已录入 ${importedCount} 个样品。杯测数量可以大于已录入数量，不足部分会建立空标签进程；数量不能小于已录入数量。`;
+    panel.append(
+      element("h2", "cupping-count-dialog__title", mode === "blind" ? "建立盲测" : "建立半盲测"),
+      element("p", "cupping-count-dialog__note", note)
+    );
+    const field = element("label", "cupping-count-dialog__label");
+    field.append(element("span", "", "杯测数量"));
+    const input = element("input", "cupping-count-dialog__input");
+    input.type = "number";
+    input.min = String(mode === "semi_blind" ? Math.max(1, importedCount) : 1);
+    input.max = "50";
+    input.step = "1";
+    input.inputMode = "numeric";
+    input.value = String(mode === "semi_blind" ? Math.max(1, importedCount) : 6);
+    field.append(input);
+    const error = element("p", "cupping-count-dialog__error");
+    const actions = element("div", "cupping-count-dialog__actions");
+    actions.append(
+      button("cupping-count-dialog__cancel", "取消", () => overlay.remove()),
+      button("cupping-count-dialog__confirm", "开始杯测", () => void this.confirmCount(mode, group, Number(input.value), overlay, error))
+    );
+    panel.append(field, error, actions);
+    overlay.append(panel);
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
+    this.root.append(overlay);
+    input.focus();
+    input.select();
+  }
+
+  private async confirmCount(
+    mode: "blind" | "semi_blind",
+    group: ConfirmedImportSession,
+    count: number,
+    overlay: HTMLElement,
+    error: HTMLElement
+  ): Promise<void> {
+    if (!Number.isInteger(count) || count < 1 || count > 50) {
+      error.textContent = "杯测数量必须是 1–50 的整数。";
+      return;
+    }
+    if (mode === "semi_blind" && count < group.samples.length) {
+      error.textContent = `已录入 ${group.samples.length} 个样品，杯测数量不能小于已录入数量。请先删除不参与样品，或提高杯测数量。`;
+      return;
+    }
+    const samples = mode === "blind"
+      ? [...buildEmptySampleDrafts(count)]
+      : [
+          ...group.samples,
+          ...(count > group.samples.length ? buildEmptySampleDrafts(count - group.samples.length) : [])
+        ];
+    overlay.remove();
+    await this.createSession(group, samples);
   }
 
   private async saveImportGroupAndContinue(): Promise<void> {
@@ -690,14 +871,26 @@ export class BatchSetupRenderer {
 
   private async submit(): Promise<void> {
     if (this.importQueue) { await this.saveImportGroupAndContinue(); return; }
+
+    if (this.cuppingMode === "blind") {
+      const metadata = this.validateSessionMetadata();
+      if (!metadata) return;
+      const group: ConfirmedImportSession = {
+        title: metadata.eventName || this.titleInput.value.trim() || undefined,
+        metadata,
+        samples: []
+      };
+      this.openCountDialog("blind", group);
+      return;
+    }
+
     const group = this.validateCurrentGroup();
     if (!group) return;
-    this.root.toggleAttribute("aria-busy", true);
-    try {
-      const result = await this.service.create({ sessionId: this.options.createSessionId(), title: group.title, metadata: group.metadata, samples: group.samples, now: this.options.now(), sampleIdFactory: (index) => this.options.createSampleId(index) });
-      await this.options.clearDraft?.(); this.showStatus(""); await this.options.onCreated(result.session.sessionId);
-    } catch (error) { this.showStatus(error instanceof Error ? error.message : String(error), true); }
-    finally { this.root.toggleAttribute("aria-busy", false); }
+    if (this.cuppingMode === "semi_blind") {
+      this.openCountDialog("semi_blind", group);
+      return;
+    }
+    await this.createSession(group, group.samples);
   }
 
   private showStatus(text: string, error = false): void { this.statusRoot.textContent = text; this.statusRoot.classList.toggle("is-error", error); this.statusRoot.hidden = text.length === 0; }
