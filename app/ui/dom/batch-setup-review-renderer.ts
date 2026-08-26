@@ -20,6 +20,7 @@ import { openBatchReviewDialog, type BatchReviewDialogHandle, type BatchReviewFi
 import { button, clearElement, element } from "./dom-helpers";
 import { compactImagePreview } from "./image-preview-data";
 import { openImportBundleDialog } from "./import-bundle-dialog";
+import { openImportSourceDialog } from "./import-source-dialog";
 import { openManualTextImportDialog } from "./manual-text-import-dialog";
 import { openQrScannerDialog } from "./qr-scanner-dialog";
 
@@ -135,7 +136,7 @@ export class BatchSetupRenderer {
     const spreadsheetInput = this.spreadsheetInput();
     const qrInput = this.qrInput();
     const actions = element("section", "batch-setup__capture-actions");
-    actions.setAttribute("aria-label", "识别方法");
+    actions.setAttribute("aria-label", "录入方法");
     actions.append(
       button("batch-setup__capture", "拍摄录入", () => cameraInput.click()),
       button("batch-setup__capture", "批量识别", () => this.openBatchRecognitionMenu(galleryInput, spreadsheetInput, qrInput)),
@@ -250,25 +251,27 @@ export class BatchSetupRenderer {
   }
 
   private openBatchRecognitionMenu(gallery: HTMLInputElement, spreadsheet: HTMLInputElement, qr: HTMLInputElement): void {
-    const mode = window.prompt("批量识别：1 批量照片；2 表格/文档；3 链接；4 二维码。", "1")?.trim();
-    if (mode === "1") gallery.click();
-    else if (mode === "2") spreadsheet.click();
-    else if (mode === "3") {
-      const link = window.prompt("粘贴 AromaSense 分享链接");
-      if (link?.trim()) void this.importFromLink(link.trim());
-    } else if (mode === "4") this.scanQr(qr);
+    openImportSourceDialog({
+      root: this.root,
+      allowPhotos: true,
+      onPhotos: () => gallery.click(),
+      onSpreadsheet: () => spreadsheet.click(),
+      onLink: async (link) => this.importFromLink(link),
+      onQr: () => this.scanQr(qr)
+    });
   }
 
   private openImportMenu(): void {
-    const mode = window.prompt("导入：1 链接；2 二维码；3 表格文件。", "1")?.trim();
-    if (mode === "2") {
-      const qr = this.root.querySelector<HTMLInputElement>('input[data-import-qr="true"]');
-      if (qr) this.scanQr(qr);
-    } else if (mode === "3") this.root.querySelector<HTMLInputElement>('input[data-import-spreadsheet="true"]')?.click();
-    else if (mode === "1") {
-      const link = window.prompt("粘贴 AromaSense 分享链接");
-      if (link?.trim()) void this.importFromLink(link.trim());
-    }
+    const spreadsheet = this.root.querySelector<HTMLInputElement>('input[data-import-spreadsheet="true"]');
+    const qr = this.root.querySelector<HTMLInputElement>('input[data-import-qr="true"]');
+    if (!spreadsheet || !qr) return;
+    openImportSourceDialog({
+      root: this.root,
+      allowPhotos: false,
+      onSpreadsheet: () => spreadsheet.click(),
+      onLink: async (link) => this.importFromLink(link),
+      onQr: () => this.scanQr(qr)
+    });
   }
 
   private openManualText(): void {
@@ -282,7 +285,12 @@ export class BatchSetupRenderer {
     this.root.toggleAttribute("aria-busy", true);
     this.showStatus(`正在解析 ${files.length} 个表格/数据文件…`);
     try {
-      const bundles = await Promise.all(files.map((file) => parseSpreadsheetFile(file)));
+      const bundles: ImportBundle[] = [];
+      for (let index = 0; index < files.length; index += 1) {
+        this.showStatus(`正在解析表格 ${index + 1}/${files.length}：${files[index].name}`);
+        bundles.push(await parseSpreadsheetFile(files[index]));
+        await this.yieldToUi();
+      }
       const bundle: ImportBundle = {
         schema: "aromasense-import/1",
         source: { kind: "spreadsheet", name: files.length === 1 ? files[0].name : `${files.length} 个文件` },
@@ -298,8 +306,7 @@ export class BatchSetupRenderer {
   private async importQr(file: File): Promise<void> {
     const BarcodeDetectorCtor = (globalThis as unknown as { BarcodeDetector?: new (options: { formats: string[] }) => { detect(source: ImageBitmap): Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
     if (!BarcodeDetectorCtor || typeof createImageBitmap !== "function") {
-      const link = window.prompt("当前环境不支持二维码图片解析，请粘贴二维码中的链接");
-      if (link?.trim()) await this.importFromLink(link.trim());
+      this.showStatus("当前环境不支持二维码图片解析，请使用链接导入。", true);
       return;
     }
     try {
@@ -454,7 +461,23 @@ export class BatchSetupRenderer {
       for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
         const value = this.sessionInputs.get(key)?.value.trim(); if (value) sessionMetadata[key] = value;
       }
-      await this.options.saveDraft?.({ version: BATCH_SETUP_DRAFT_VERSION, title: this.titleInput.value, sessionMetadata, items, updatedAt: this.options.now() });
+      await this.options.saveDraft?.({
+        version: BATCH_SETUP_DRAFT_VERSION,
+        title: this.titleInput.value,
+        sessionMetadata,
+        items,
+        importQueue: this.importQueue ? {
+          sessions: [...this.importQueue.sessions],
+          index: this.importQueue.index,
+          completed: this.importQueue.completed.map((group) => ({
+            title: group.title,
+            metadata: { ...group.metadata },
+            samples: group.samples.map((sample) => ({ label: sample.label, metadata: { ...sample.metadata } }))
+          })),
+          sourceName: this.importQueue.sourceName
+        } : undefined,
+        updatedAt: this.options.now()
+      });
     } catch (error) { this.showStatus(`本地暂存失败：${error instanceof Error ? error.message : String(error)}`, true); }
   }
   private scheduleSave(): void { if (this.saveTimer) clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => void this.saveDraft(), 250); }
@@ -463,9 +486,28 @@ export class BatchSetupRenderer {
     try {
       const draft = normalizeBatchSetupDraft(await this.options.loadDraft?.()); if (!draft) return;
       this.titleInput.value = draft.title; this.applySessionMetadata(draft.sessionMetadata);
+      if (draft.importQueue) {
+        this.importQueue = {
+          sessions: [...draft.importQueue.sessions],
+          index: draft.importQueue.index,
+          completed: draft.importQueue.completed.map((group) => ({
+            title: group.title,
+            metadata: { ...group.metadata },
+            samples: group.samples.map((sample) => ({ label: sample.label, metadata: { ...sample.metadata } }))
+          })),
+          sourceName: draft.importQueue.sourceName
+        };
+      }
       for (const item of draft.items) this.addRow(item.label, item.metadata, { id: item.id, previewDataUrl: item.previewDataUrl, status: item.recognitionStatus, requiresReview: item.requiresReview, confirmed: item.confirmed });
       const counts = batchSetupDraftCounts(draft.items);
-      this.showStatus(counts.pending ? `已恢复上次录入：${counts.confirmed}/${counts.total} 已确认，剩余 ${counts.pending} 个。` : `已恢复 ${counts.total} 个已确认样品。`);
+      if (this.importQueue && this.startButton) {
+        const index = this.importQueue.index;
+        const total = this.importQueue.sessions.length;
+        this.startButton.textContent = index + 1 < total ? "保存本组并继续" : "完成批量导入";
+        this.showStatus(`已恢复批量导入 ${index + 1}/${total}：${counts.confirmed}/${counts.total} 个样品已确认。`);
+      } else {
+        this.showStatus(counts.pending ? `已恢复上次录入：${counts.confirmed}/${counts.total} 已确认，剩余 ${counts.pending} 个。` : `已恢复 ${counts.total} 个已确认样品。`);
+      }
     } catch (error) { this.showStatus(`恢复批量录入草稿失败：${error instanceof Error ? error.message : String(error)}`, true); }
   }
 
@@ -517,19 +559,45 @@ export class BatchSetupRenderer {
     return page.samples.length;
   }
 
+  private async yieldToUi(): Promise<void> {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
   private async addPhotoFiles(files: readonly File[]): Promise<void> {
-    const images = files.filter((file) => file.type.startsWith("image/")); if (!images.length) { this.showStatus("没有选择可识别的图片", true); return; }
-    this.root.toggleAttribute("aria-busy", true); this.showStatus(`正在分析 ${images.length} 张图片…`);
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (!images.length) { this.showStatus("没有选择可识别的图片", true); return; }
+    this.root.toggleAttribute("aria-busy", true);
+    let count = 0;
+    let failed = 0;
     try {
-      const previewPromise = Promise.all(images.map((file) => compactImagePreview(file)));
-      const results = await this.recognizer.recognizeBatch(images, (progress) => this.showStatus(`识别 ${progress.index}/${progress.total}：${progress.fileName}${progress.message ? ` · ${progress.message}` : ""}`, progress.status === "failed"));
-      const previews = await previewPromise; let count = 0;
-      for (let index = 0; index < results.length; index += 1) {
-        const result = results[index]; const preview = previews[index];
-        if (result instanceof Error) { this.addRow("", { recognition: { source: "photo", fileName: images[index].name, status: "failed", error: result.message } }, { id: this.rowId(), previewDataUrl: preview, status: `自动识别失败：${result.message}`, requiresReview: true, confirmed: false }); count += 1; }
-        else count += this.addRecognizedPage(result, preview);
+      for (let index = 0; index < images.length; index += 1) {
+        const file = images[index];
+        this.showStatus(`处理 ${index + 1}/${images.length}：${file.name} · 正在生成轻量预览`);
+        let preview: string | undefined;
+        try { preview = await compactImagePreview(file); }
+        catch { preview = undefined; }
+        await this.yieldToUi();
+
+        this.showStatus(`识别 ${index + 1}/${images.length}：${file.name} · LuckyBean 正式识别核心`);
+        try {
+          const result = await this.recognizer.recognizePage(file, index);
+          count += this.addRecognizedPage(result, preview ?? "");
+          this.showStatus(`完成 ${index + 1}/${images.length}：${file.name} · ${result.samples.length} 个样品`);
+        } catch (error) {
+          failed += 1;
+          const normalized = error instanceof Error ? error : new Error(String(error));
+          this.addRow("", { recognition: { source: "photo", fileName: file.name, status: "failed", error: normalized.message } }, {
+            id: this.rowId(), previewDataUrl: preview, status: `自动识别失败：${normalized.message}`, requiresReview: true, confirmed: false
+          });
+          count += 1;
+          this.showStatus(`识别 ${index + 1}/${images.length} 失败：${file.name} · ${normalized.message}`, true);
+        }
+
+        await this.saveDraft();
+        await this.yieldToUi();
+        preview = undefined;
       }
-      await this.saveDraft(); this.showStatus(`已得到 ${count} 个样品。`);
+      this.showStatus(`已逐张处理 ${images.length} 张图片，得到 ${count} 个样品${failed ? `，${failed} 张需要手工核对` : ""}。`);
       const pending = firstPendingItemIndex(this.items()); if (pending >= 0) { const row = this.rows()[pending]; if (row) this.openReview(row); }
     } catch (error) { this.showStatus(error instanceof Error ? error.message : String(error), true); }
     finally { this.root.toggleAttribute("aria-busy", false); this.renumber(); }
