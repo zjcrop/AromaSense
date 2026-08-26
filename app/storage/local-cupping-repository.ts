@@ -1,5 +1,6 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import type { CuppingSession } from "../core/session-lifecycle";
+import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { SampleRecord } from "../core/sample-batch-service";
 import type { StageStatus } from "../core/cupping-state-machine";
 
@@ -23,6 +24,7 @@ export interface EditingSlice {
 interface SessionRow {
   session_id: string;
   title: string | null;
+  metadata_json: string;
   status: CuppingSession["status"];
   taxonomy_version: string;
   created_at: string;
@@ -41,10 +43,7 @@ interface SampleRow {
   updated_at: string;
 }
 
-interface StageRow {
-  status: StageStatus;
-}
-
+interface StageRow { status: StageStatus; }
 interface ObservationRow {
   observation_id: string;
   session_id: string;
@@ -58,16 +57,37 @@ interface ObservationRow {
 
 function parseJsonObject(json: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(json);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("INVALID_OBJECT_JSON_IN_LOCAL_DB");
-  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("INVALID_OBJECT_JSON_IN_LOCAL_DB");
   return parsed as Record<string, unknown>;
+}
+
+function legacyMetadata(createdAt: string): CuppingSessionMetadata {
+  const date = new Date(createdAt);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString();
+  return { date: local.slice(0, 10), time: local.slice(11, 16), organizer: "历史记录" };
+}
+
+function sessionMetadata(row: SessionRow): CuppingSessionMetadata {
+  try {
+    const parsed = parseJsonObject(row.metadata_json || "{}");
+    const date = String(parsed.date ?? "").trim();
+    const time = String(parsed.time ?? "").trim();
+    const organizer = String(parsed.organizer ?? "").trim();
+    if (!date || !time || !organizer) return legacyMetadata(row.created_at);
+    return {
+      date, time, organizer,
+      participants: typeof parsed.participants === "string" && parsed.participants.trim() ? parsed.participants.trim() : undefined,
+      target: typeof parsed.target === "string" && parsed.target.trim() ? parsed.target.trim() : undefined,
+      eventName: typeof parsed.eventName === "string" && parsed.eventName.trim() ? parsed.eventName.trim() : undefined
+    };
+  } catch { return legacyMetadata(row.created_at); }
 }
 
 function sessionFromRow(row: SessionRow): CuppingSession {
   return {
     sessionId: row.session_id,
     title: row.title ?? undefined,
+    metadata: sessionMetadata(row),
     status: row.status,
     taxonomyVersion: row.taxonomy_version,
     createdAt: row.created_at,
@@ -106,19 +126,15 @@ export class LocalCuppingRepository {
   constructor(private readonly db: SQLiteDriver) {}
 
   async createSessionWithSamples(session: CuppingSession, samples: readonly SampleRecord[]): Promise<void> {
-    if (samples.some((sample) => sample.sessionId !== session.sessionId)) {
-      throw new Error("SAMPLE_SESSION_MISMATCH");
-    }
-
+    if (samples.some((sample) => sample.sessionId !== session.sessionId)) throw new Error("SAMPLE_SESSION_MISMATCH");
     await this.db.transaction(async () => {
       await this.db.run(
         `INSERT INTO sessions (
-          session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [session.sessionId, session.title ?? null, session.status, session.taxonomyVersion,
+          session_id, title, metadata_json, status, taxonomy_version, created_at, updated_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [session.sessionId, session.title ?? null, JSON.stringify(session.metadata), session.status, session.taxonomyVersion,
           session.createdAt, session.updatedAt, session.completedAt ?? null]
       );
-
       for (const sample of samples) {
         await this.db.run(
           `INSERT INTO samples (
@@ -133,7 +149,7 @@ export class LocalCuppingRepository {
 
   async getSession(sessionId: string): Promise<CuppingSession> {
     const row = await this.db.get<SessionRow>(
-      `SELECT session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
+      `SELECT session_id, title, metadata_json, status, taxonomy_version, created_at, updated_at, completed_at
        FROM sessions WHERE session_id = ?`, [sessionId]
     );
     if (!row) throw new Error(`SESSION_NOT_FOUND:${sessionId}`);
@@ -142,11 +158,15 @@ export class LocalCuppingRepository {
 
   async saveSession(session: CuppingSession): Promise<void> {
     await this.db.run(
-      `UPDATE sessions SET title = ?, status = ?, taxonomy_version = ?, updated_at = ?, completed_at = ?
+      `UPDATE sessions SET title = ?, metadata_json = ?, status = ?, taxonomy_version = ?, updated_at = ?, completed_at = ?
        WHERE session_id = ?`,
-      [session.title ?? null, session.status, session.taxonomyVersion, session.updatedAt,
-        session.completedAt ?? null, session.sessionId]
+      [session.title ?? null, JSON.stringify(session.metadata), session.status, session.taxonomyVersion,
+        session.updatedAt, session.completedAt ?? null, session.sessionId]
     );
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.db.run(`DELETE FROM sessions WHERE session_id = ?`, [sessionId]);
   }
 
   async replaceSampleOrder(sessionId: string, samples: readonly SampleRecord[]): Promise<void> {
@@ -162,10 +182,8 @@ export class LocalCuppingRepository {
     });
   }
 
-  async setStageState(
-    sessionId: string, sampleId: string, stageId: StageId, status: StageStatus,
-    now: string, startedAt?: string, completedAt?: string
-  ): Promise<void> {
+  async setStageState(sessionId: string, sampleId: string, stageId: StageId, status: StageStatus,
+    now: string, startedAt?: string, completedAt?: string): Promise<void> {
     await this.db.run(
       `INSERT INTO stage_state (
         session_id, sample_id, stage_id, status, started_at, completed_at, updated_at
@@ -207,13 +225,7 @@ export class LocalCuppingRepository {
       `SELECT status FROM stage_state WHERE sample_id = ? AND stage_id = ?`, [sampleId, stageId]
     );
     const observations = await this.listObservationsForStage(sampleId, stageId);
-    return {
-      session,
-      sample: sampleFromRow(sampleRow),
-      stageId,
-      stageStatus: stageRow?.status ?? "not_started",
-      observations
-    };
+    return { session, sample: sampleFromRow(sampleRow), stageId, stageStatus: stageRow?.status ?? "not_started", observations };
   }
 
   async listSamples(sessionId: string): Promise<readonly SampleRecord[]> {
@@ -228,8 +240,7 @@ export class LocalCuppingRepository {
     const rows = await this.db.all<ObservationRow>(
       `SELECT observation_id, session_id, sample_id, stage_id, field_key, value_json,
               dictionary_version, updated_at
-       FROM observations WHERE sample_id = ? AND stage_id = ? ORDER BY field_key`,
-      [sampleId, stageId]
+       FROM observations WHERE sample_id = ? AND stage_id = ? ORDER BY field_key`, [sampleId, stageId]
     );
     return rows.map(observationFromRow);
   }
