@@ -1,0 +1,34 @@
+/* Emergency mobile layout guard: these three primary input methods must remain
+   on one row even on narrow phones. Loaded after batch-setup.css so it overrides
+   the older two-column mobile rule. */
+@media (max-width: 620px) {
+  .batch-setup__capture-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .batch-setup__capture-actions .batch-setup__capture,
+  .batch-setup__capture-actions .batch-setup__add {
+    grid-column: auto;
+    width: auto;
+    min-width: 0;
+    padding: 8px 4px;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+  }
+}
+
+@media (max-width: 360px) {
+  .batch-setup__capture-actions { gap: 4px; }
+  .batch-setup__capture-actions .batch-setup__capture,
+  .batch-setup__capture-actions .batch-setup__add {
+    padding-inline: 2px;
+    font-size: 11px;
+    letter-spacing: -0.02em;
+  }
+}
