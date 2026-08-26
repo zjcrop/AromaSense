@@ -1,5 +1,6 @@
 import { SENSORY_DICTIONARY_VERSION } from "../core/sensory-dictionary-v1";
 import localSchema from "../storage/0001_local_schema.sql";
+import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
@@ -10,7 +11,7 @@ import { AromaSenseDomApp } from "./dom-app";
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
   if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
   return BrowserSQLiteDriver.open({
-    databaseName: "aromasense-web-B0.1.a",
+    databaseName: "aromasense-web-0.1C",
     wasmUrl: "./sql-wasm.wasm"
   });
 }
@@ -38,7 +39,10 @@ async function main(): Promise<void> {
 
   const db = await openRuntimeDatabase();
   await new LocalMigrationRunner(db).apply(
-    [{ id: 1, name: "local_schema_v1", sql: localSchema }],
+    [
+      { id: 1, name: "local_schema_v1", sql: localSchema },
+      { id: 2, name: "session_metadata_0_1c", sql: sessionMetadataMigration }
+    ],
     new Date().toISOString()
   );
   startup.setStatus("database", "ready", "本地数据库与迁移已就绪");
