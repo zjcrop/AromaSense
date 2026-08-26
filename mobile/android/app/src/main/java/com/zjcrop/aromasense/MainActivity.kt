@@ -39,11 +39,18 @@ class MainActivity : Activity() {
 
         database = openOrCreateDatabase("aromasense.sqlite", MODE_PRIVATE, null)
         database.execSQL("PRAGMA foreign_keys = ON")
-        recognitionBridge = AromaSenseRecognitionBridge(this) { imageId, _ ->
-            resolveOriginalSource(imageId)
-        }
 
         webView = WebView(this)
+        recognitionBridge = AromaSenseRecognitionBridge(
+            activity = this,
+            sourceForRequest = { imageId, _ -> resolveOriginalSource(imageId) },
+            evaluateJavascript = { script ->
+                runOnUiThread {
+                    if (!isDestroyed && ::webView.isInitialized) webView.evaluateJavascript(script, null)
+                }
+            }
+        )
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -57,7 +64,10 @@ class MainActivity : Activity() {
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         WebView.setWebContentsDebuggingEnabled(debuggable)
         webView.addJavascriptInterface(AromaSenseSQLiteBridge(database), "AromaSenseSQLite")
-        webView.addJavascriptInterface(recognitionBridge, "AromaSenseRecognitionBridge")
+        // Use LuckyBean's production Android transport contract directly. The JS side loads
+        // luckybean/android/native-bridge.js and talks to this interface without an AromaSense
+        // compatibility wrapper.
+        webView.addJavascriptInterface(recognitionBridge, "LuckyBeanNative")
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url ?: return true
@@ -235,12 +245,12 @@ class MainActivity : Activity() {
         filePathCallback = null
         pendingWebCameraRequest?.deny()
         pendingWebCameraRequest = null
+        if (::recognitionBridge.isInitialized) recognitionBridge.close()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("AromaSenseSQLite")
-            webView.removeJavascriptInterface("AromaSenseRecognitionBridge")
+            webView.removeJavascriptInterface("LuckyBeanNative")
             webView.destroy()
         }
-        if (::recognitionBridge.isInitialized) recognitionBridge.close()
         if (::database.isInitialized) database.close()
         super.onDestroy()
     }
