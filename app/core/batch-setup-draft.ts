@@ -26,9 +26,25 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function normalizedSessionMetadata(value: unknown): Partial<CuppingSessionMetadata> {
+  const source = record(value) ?? {};
+  const result: Partial<CuppingSessionMetadata> = {};
+  for (const key of ["date", "time", "organizer", "participants", "target", "eventName"] as const) {
+    const field = source[key];
+    if (typeof field === "string" && field.trim()) result[key] = field.trim();
+  }
+  return result;
+}
+
+/**
+ * Normalizes the current 0.1C draft shape and transparently upgrades the
+ * pre-0.1C v1 shape.  v1 did not have sessionMetadata; keeping it readable is
+ * important because drafts live in SQLite user_preferences across upgrades.
+ */
 export function normalizeBatchSetupDraft(value: unknown): BatchSetupDraft | undefined {
   const source = record(value);
-  if (!source || source.version !== BATCH_SETUP_DRAFT_VERSION || !Array.isArray(source.items)) return undefined;
+  const version = Number(source?.version);
+  if (!source || (version !== 1 && version !== BATCH_SETUP_DRAFT_VERSION) || !Array.isArray(source.items)) return undefined;
   const items = source.items.flatMap((item): BatchSetupDraftItem[] => {
     const row = record(item);
     const metadata = record(row?.metadata);
@@ -45,18 +61,10 @@ export function normalizeBatchSetupDraft(value: unknown): BatchSetupDraft | unde
     }];
   });
   if (!items.length) return undefined;
-  const sessionMetadata = record(source.sessionMetadata) ?? {};
   return {
     version: BATCH_SETUP_DRAFT_VERSION,
     title: String(source.title ?? ""),
-    sessionMetadata: {
-      date: typeof sessionMetadata.date === "string" ? sessionMetadata.date : undefined,
-      time: typeof sessionMetadata.time === "string" ? sessionMetadata.time : undefined,
-      organizer: typeof sessionMetadata.organizer === "string" ? sessionMetadata.organizer : undefined,
-      participants: typeof sessionMetadata.participants === "string" ? sessionMetadata.participants : undefined,
-      target: typeof sessionMetadata.target === "string" ? sessionMetadata.target : undefined,
-      eventName: typeof sessionMetadata.eventName === "string" ? sessionMetadata.eventName : undefined
-    },
+    sessionMetadata: version === 1 ? {} : normalizedSessionMetadata(source.sessionMetadata),
     items,
     updatedAt: String(source.updatedAt ?? "")
   };
