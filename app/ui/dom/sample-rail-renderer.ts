@@ -31,6 +31,7 @@ interface ActiveTabState {
   scrollContainer?: HTMLElement;
   scrollHandler?: () => void;
   resizeHandler?: () => void;
+  resizeObserver?: ResizeObserver;
 }
 
 const activeTabStates = new WeakMap<HTMLElement, ActiveTabState>();
@@ -78,10 +79,37 @@ function installActivationStyles(): void {
   const style = document.createElement("style");
   style.dataset.aromasenseSampleRailActivation = "true";
   style.textContent = `
-    .cupping-layout{column-gap:18px!important}
-    .cupping-layout.is-rail-compact{column-gap:14px!important}
-    .cupping-layout__rail{overflow-x:visible!important;z-index:3}
+    .cupping-layout{
+      position:relative;
+      grid-template-columns:46px minmax(0,1fr)!important;
+      column-gap:14px!important;
+      overflow:visible;
+    }
+    .cupping-layout.is-rail-compact{grid-template-columns:46px minmax(0,1fr)!important;column-gap:14px!important}
+    .cupping-layout__rail{
+      position:relative;
+      z-index:40!important;
+      width:min(300px,72vw);
+      height:100dvh;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden!important;
+      padding:7px 5px max(7px,env(safe-area-inset-bottom))!important;
+      background:#121212;
+      border-right:1px solid rgba(185,153,90,.28)!important;
+      box-shadow:12px 0 28px rgba(0,0,0,.28);
+      transition:width 560ms cubic-bezier(.45,0,.55,1),box-shadow 560ms cubic-bezier(.45,0,.55,1);
+      will-change:width;
+    }
+    .cupping-layout.is-rail-compact .cupping-layout__rail{
+      width:46px;
+      box-shadow:none;
+    }
     .cupping-layout__main{
+      position:relative;
+      z-index:1;
+      grid-column:2;
       width:100%;
       max-width:980px;
       justify-self:center;
@@ -98,7 +126,14 @@ function installActivationStyles(): void {
       margin-right:auto;
       box-sizing:border-box;
     }
-    .cupping-layout__rail-list{overflow:visible!important}
+    .cupping-main__footer.is-two-action{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+    .cupping-layout__rail-list{
+      flex:1 1 auto;
+      min-height:0;
+      overflow-y:auto!important;
+      overflow-x:visible!important;
+      scrollbar-width:thin;
+    }
     .sample-rail{position:relative;overflow:visible!important}
     .sample-rail__item{
       position:relative;
@@ -168,11 +203,9 @@ function installActivationStyles(): void {
     }
     .sample-rail__item.is-active .sample-rail__label,
     .sample-rail__item.is-active .sample-rail__stage,
-    .sample-rail__item.is-active .sample-rail__progress{
-      color:#fff!important;
-    }
-    .sample-rail__label{font-size:9px!important;line-height:1.15!important}
-    .sample-rail__stage,.sample-rail__progress{font-size:8px!important;line-height:1.1!important}
+    .sample-rail__item.is-active .sample-rail__progress{color:#fff!important}
+    .sample-rail__label{font-size:10px!important;line-height:1.2!important}
+    .sample-rail__stage,.sample-rail__progress{font-size:9px!important;line-height:1.15!important}
     .sample-rail__state-dot{position:relative;z-index:3}
     .sample-rail__item.is-active .sample-rail__state-dot{background:#fff!important;box-shadow:none!important}
     .sample-rail__actions{position:relative;z-index:4}
@@ -191,12 +224,75 @@ function installActivationStyles(): void {
       transform-origin:left center;
       will-change:left,top,width,height,opacity,transform;
     }
-    .sample-rail.is-compact .sample-rail__number{font-size:15px!important}
+    .sample-rail.is-compact .sample-rail__active-copy,
+    .sample-rail.is-compact .sample-rail__actions{display:none!important}
+    .sample-rail.is-compact .sample-rail__number{font-size:15px!important;min-width:0!important}
     .sample-rail.is-compact .sample-rail__item.is-active .sample-rail__number{font-size:27px!important}
-    .cupping-rail-tools{z-index:50!important}
+    .sample-rail.is-compact .sample-rail__select{grid-template-columns:1fr!important;justify-items:center!important;padding:2px 0!important}
+    .sample-rail.is-compact .sample-rail__state-dot{width:5px!important;height:5px!important}
+    .cupping-rail-tools{
+      flex:0 0 auto;
+      z-index:50!important;
+      position:relative!important;
+      top:auto!important;
+      padding:0 0 7px!important;
+      background:#121212!important;
+    }
+    .cupping-rail-footer{
+      position:relative;
+      z-index:55;
+      flex:0 0 auto;
+      display:grid;
+      gap:6px;
+      padding:7px 0 0;
+      border-top:1px solid rgba(255,255,255,.065);
+      background:#121212;
+    }
+    .cupping-rail-footer__toggle{
+      width:100%;
+      min-height:25px;
+      border:1px solid rgba(185,153,90,.24);
+      border-radius:7px;
+      background:#1b1b1b;
+      color:#bda66f;
+      font-size:17px;
+      line-height:1;
+    }
+    .cupping-rail-footer__actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+    .cupping-rail-footer__exit,
+    .cupping-rail-footer__finish{
+      min-width:0;
+      min-height:37px;
+      border:1px solid rgba(185,153,90,.34);
+      border-radius:8px;
+      padding:5px 7px;
+      background:#1d1d1d;
+      color:#c8c0b2;
+      font-size:11px;
+      font-weight:650;
+    }
+    .cupping-rail-footer__finish:not(:disabled){border-color:#b9995a;background:#b9995a;color:#111}
+    .cupping-rail-footer__finish:disabled{
+      border-color:rgba(255,255,255,.08);
+      background:#252525;
+      color:#65615b;
+      opacity:1;
+      cursor:not-allowed;
+    }
+    .cupping-layout.is-rail-compact .cupping-rail-footer{gap:4px}
+    .cupping-layout.is-rail-compact .cupping-rail-footer__actions{grid-template-columns:1fr;gap:4px}
+    .cupping-layout.is-rail-compact .cupping-rail-footer__exit,
+    .cupping-layout.is-rail-compact .cupping-rail-footer__finish{
+      min-height:31px;
+      padding:3px 1px;
+      font-size:9px;
+      border-radius:6px;
+    }
     @media (max-width:720px){
-      .cupping-layout{column-gap:16px!important}
-      .cupping-layout.is-rail-compact{column-gap:12px!important}
+      .cupping-layout{grid-template-columns:40px minmax(0,1fr)!important;column-gap:12px!important}
+      .cupping-layout.is-rail-compact{grid-template-columns:40px minmax(0,1fr)!important;column-gap:12px!important}
+      .cupping-layout__rail{width:min(260px,78vw);padding-left:3px!important;padding-right:3px!important}
+      .cupping-layout.is-rail-compact .cupping-layout__rail{width:40px}
       .cupping-layout__main{max-width:100%;padding-right:max(10px,env(safe-area-inset-right))}
       .cupping-main__header,
       .cupping-main__editor,
@@ -213,6 +309,7 @@ function installActivationStyles(): void {
       .sample-rail__expand{display:grid!important;place-items:center;width:15px!important;min-height:15px!important;font-size:8px!important;opacity:.62}
       .sample-rail__drag{width:15px!important;min-height:15px!important;font-size:7px!important}
     }
+    @media (prefers-reduced-motion:reduce){.cupping-layout__rail{transition:none!important}}
   `;
   document.head.append(style);
 }
@@ -267,6 +364,10 @@ function ensureActiveTabState(root: HTMLElement): ActiveTabState {
   if (scrollContainer) {
     state.scrollHandler = () => positionActiveTab(root, false);
     scrollContainer.addEventListener("scroll", state.scrollHandler, { passive: true });
+    if (typeof ResizeObserver !== "undefined") {
+      state.resizeObserver = new ResizeObserver(() => positionActiveTab(root, false));
+      state.resizeObserver.observe(scrollContainer);
+    }
   }
   state.resizeHandler = () => positionActiveTab(root, false);
   window.addEventListener("resize", state.resizeHandler, { passive: true });
@@ -291,14 +392,14 @@ function targetActiveTabGeometry(root: HTMLElement): ActiveTabGeometry | undefin
   const railRect = rail.getBoundingClientRect();
   const compact = root.classList.contains("is-compact");
   const height = Math.ceil(Math.max(compact ? 33 : 36, numberRect.height + (compact ? 6 : 8)));
-  const protrusion = compact ? 12 : 16;
+  const protrusion = compact ? 7 : 18;
   const left = Math.round(cardRect.left - 1);
   const visible = cardRect.bottom > railRect.top && cardRect.top < railRect.bottom;
 
   return {
     top: Math.round(numberRect.top + numberRect.height / 2 - height / 2),
     left,
-    width: Math.max(42, Math.round(railRect.right + protrusion - left)),
+    width: Math.max(compact ? 40 : 54, Math.round(railRect.right + protrusion - left)),
     height,
     visible
   };
