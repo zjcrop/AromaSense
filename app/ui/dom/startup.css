@@ -1,20 +1,97 @@
-.startup-screen { min-height: 100dvh; background: #151515; color: #f4efe4; }
-.startup { width: min(440px, calc(100vw - 32px)); min-height: 100dvh; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; padding: 28px 0 max(30px, env(safe-area-inset-bottom)); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.startup__brand { text-align: center; margin-bottom: 28px; }
-.startup__mark { width: 68px; height: 68px; margin: 0 auto 12px; display: grid; place-items: center; border: 1px solid rgba(185,153,90,.7); border-radius: 22px; color: #b9995a; font-family: serif; font-size: 24px; letter-spacing: .08em; background: #191919; box-shadow: 0 12px 30px rgba(0,0,0,.22); }
-.startup__title { margin: 0; color: #f4efe4; font-size: 28px; letter-spacing: .02em; }
-.startup__subtitle { margin: 7px 0 0; color: #8f897f; font-size: 12px; }
-.startup__status-list { display: grid; gap: 7px; padding: 12px; border: 1px solid rgba(185,153,90,.22); border-radius: 14px; background: #1b1b1b; }
-.startup__status { display: grid; grid-template-columns: 10px 76px minmax(0,1fr); align-items: center; gap: 8px; min-height: 32px; font-size: 11px; }
-.startup__status-indicator { width: 7px; height: 7px; border-radius: 999px; background: #68645e; box-shadow: 0 0 0 3px rgba(255,255,255,.02); }
-.startup__status-label { color: #bcb5aa; font-weight: 650; }
-.startup__status-message { min-width: 0; color: #858078; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.startup__status.is-loading .startup__status-indicator { background: #b9995a; animation: startup-pulse 900ms ease-in-out infinite alternate; }
-.startup__status.is-ready .startup__status-indicator { background: #86a780; }
-.startup__status.is-ready .startup__status-message { color: #aeb4a6; }
-.startup__status.is-degraded .startup__status-indicator { background: #e89a55; }
-.startup__status.is-error .startup__status-indicator { background: #c96f6f; }
-.startup__note { margin: 13px 3px 0; color: #79746d; font-size: 10px; line-height: 1.55; text-align: center; }
-.startup__enter { width: 100%; min-height: 48px; margin-top: 18px; border: 0; border-radius: 13px; background: #b9995a; color: #111; font-weight: 760; font-size: 14px; }
-.startup__enter:disabled { opacity: .42; }
-@keyframes startup-pulse { from { opacity: .45; transform: scale(.82); } to { opacity: 1; transform: scale(1.12); } }
+.startup-screen {
+  min-height: 100dvh;
+  background: #151515;
+  color: #f4efe4;
+}
+
+.startup {
+  width: min(460px, calc(100vw - 40px));
+  min-height: 100dvh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 28px 0 max(30px, env(safe-area-inset-bottom));
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.startup__brand {
+  text-align: center;
+  margin: 0 0 34px;
+}
+
+.startup__title {
+  margin: 0;
+  color: #f5f1e8;
+  font-size: clamp(30px, 7vw, 42px);
+  line-height: 1.05;
+  font-weight: 690;
+  letter-spacing: .015em;
+}
+
+.startup__chinese {
+  margin-top: 13px;
+  color: #d6ad63;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: clamp(19px, 4.8vw, 26px);
+  line-height: 1;
+  font-weight: 560;
+  letter-spacing: .34em;
+  text-indent: .34em;
+}
+
+.startup__progress {
+  width: min(330px, 76vw);
+  margin: 0 auto;
+  display: grid;
+  gap: 9px;
+}
+
+.startup__progress-track {
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #383633;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.018);
+}
+
+.startup__progress-fill {
+  width: 0;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #665d4e 0%, #a78c53 52%, #efd078 100%);
+  box-shadow: 0 0 10px rgba(239,208,120,.16);
+  transition: width 360ms cubic-bezier(.45,0,.55,1), filter 280ms ease, box-shadow 280ms ease;
+}
+
+.startup__progress.is-complete .startup__progress-fill {
+  filter: brightness(1.08) saturate(1.06);
+  box-shadow: 0 0 15px rgba(239,208,120,.32);
+}
+
+.startup__progress-value {
+  justify-self: center;
+  color: #8d887f;
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
+  transition: color 240ms ease;
+}
+
+.startup__progress.is-complete .startup__progress-value {
+  color: #e4c36d;
+}
+
+.startup-screen.is-entering .startup {
+  opacity: .88;
+  transition: opacity 180ms ease;
+}
+
+@media (max-width: 520px) {
+  .startup { width: calc(100vw - 28px); }
+  .startup__brand { margin-bottom: 30px; }
+  .startup__progress { width: min(290px, 78vw); }
+}
