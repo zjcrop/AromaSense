@@ -1,4 +1,4 @@
-import { button, clearElement, element } from "./dom-helpers";
+import { clearElement, element } from "./dom-helpers";
 
 export type StartupStatusKey = "database" | "dictionary" | "recognition" | "account" | "sync";
 export type StartupState = "loading" | "ready" | "degraded" | "error";
@@ -7,64 +7,80 @@ export interface StartupRendererOptions {
   onEnter(): void | Promise<void>;
 }
 
-const STATUS_LABELS: Record<StartupStatusKey, string> = {
-  database: "本地数据",
-  dictionary: "感官字典",
-  recognition: "图像识别",
-  account: "账户状态",
-  sync: "同步队列"
-};
+const STATUS_KEYS: readonly StartupStatusKey[] = ["database", "dictionary", "recognition", "account", "sync"] as const;
 
 export class StartupRenderer {
-  private readonly list = element("div", "startup__status-list");
-  private readonly enter: HTMLButtonElement;
-  private readonly statusNodes = new Map<StartupStatusKey, HTMLElement>();
+  private readonly states = new Map<StartupStatusKey, StartupState>();
+  private readonly progressFill = element("span", "startup__progress-fill");
+  private readonly progressValue = element("span", "startup__progress-value", "0%");
+  private enterAllowed = false;
+  private entering = false;
 
   constructor(private readonly root: HTMLElement, private readonly options: StartupRendererOptions) {
-    this.enter = button("startup__enter", "进入 AromaSense", () => this.options.onEnter());
-    this.enter.disabled = true;
+    for (const key of STATUS_KEYS) this.states.set(key, "loading");
   }
 
   render(): void {
     clearElement(this.root);
     this.root.classList.add("startup-screen");
+
     const shell = element("main", "startup");
     const brand = element("section", "startup__brand");
+    brand.setAttribute("aria-label", "AromaSense 香迹");
     brand.append(
-      element("div", "startup__mark", "香迹"),
       element("h1", "startup__title", "AromaSense"),
-      element("p", "startup__subtitle", "数字化咖啡杯测与感官记录")
+      element("div", "startup__chinese", "香  迹")
     );
-    for (const key of Object.keys(STATUS_LABELS) as StartupStatusKey[]) {
-      const row = element("div", "startup__status is-loading");
-      row.dataset.statusKey = key;
-      row.append(
-        element("span", "startup__status-indicator", ""),
-        element("strong", "startup__status-label", STATUS_LABELS[key]),
-        element("span", "startup__status-message", "正在准备…")
-      );
-      this.statusNodes.set(key, row);
-      this.list.append(row);
-    }
-    const note = element("p", "startup__note", "本地杯测优先。图像识别或云服务暂不可用时，不会阻止进入和保存本地记录。 ");
-    shell.append(brand, this.list, note, this.enter);
+
+    const progress = element("div", "startup__progress");
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-valuemin", "0");
+    progress.setAttribute("aria-valuemax", "100");
+    progress.setAttribute("aria-valuenow", "0");
+    const track = element("div", "startup__progress-track");
+    track.append(this.progressFill);
+    progress.append(track, this.progressValue);
+
+    shell.append(brand, progress);
     this.root.append(shell);
+    this.updateProgress();
   }
 
-  setStatus(key: StartupStatusKey, state: StartupState, message: string): void {
-    const row = this.statusNodes.get(key);
-    if (!row) return;
-    row.className = `startup__status is-${state}`;
-    const messageNode = row.querySelector<HTMLElement>(".startup__status-message");
-    if (messageNode) messageNode.textContent = message;
+  setStatus(key: StartupStatusKey, state: StartupState, _message: string): void {
+    this.states.set(key, state);
+    this.updateProgress();
   }
 
   allowEnter(): void {
-    this.enter.disabled = false;
+    this.enterAllowed = true;
+    this.maybeEnter();
   }
 
   setEntering(): void {
-    this.enter.disabled = true;
-    this.enter.textContent = "正在进入…";
+    this.entering = true;
+    this.root.classList.add("is-entering");
+  }
+
+  private updateProgress(): void {
+    const settled = STATUS_KEYS.filter((key) => {
+      const state = this.states.get(key);
+      return state === "ready" || state === "degraded" || state === "error";
+    }).length;
+    const percent = Math.round((settled / STATUS_KEYS.length) * 100);
+    this.progressFill.style.width = `${percent}%`;
+    this.progressValue.textContent = `${percent}%`;
+    const progress = this.root.querySelector<HTMLElement>(".startup__progress");
+    progress?.setAttribute("aria-valuenow", String(percent));
+    progress?.classList.toggle("is-complete", percent === 100);
+    this.maybeEnter();
+  }
+
+  private maybeEnter(): void {
+    if (!this.enterAllowed || this.entering) return;
+    const complete = STATUS_KEYS.every((key) => this.states.get(key) !== "loading");
+    if (!complete) return;
+    this.entering = true;
+    this.root.classList.add("is-entering");
+    window.setTimeout(() => { void this.options.onEnter(); }, 180);
   }
 }
