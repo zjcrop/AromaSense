@@ -96,8 +96,8 @@ export class CuppingScreenRenderer {
     this.root.append(this.layoutRoot);
 
     const autoCollapse = (): void => this.collapseRailForEditing();
-    this.editorRoot.addEventListener("pointerdown", autoCollapse, { passive: true });
-    this.editorRoot.addEventListener("focusin", autoCollapse);
+    this.mainRoot.addEventListener("pointerdown", autoCollapse, { passive: true });
+    this.mainRoot.addEventListener("focusin", autoCollapse);
   }
 
   async initialize(sessionId: string): Promise<void> {
@@ -133,8 +133,6 @@ export class CuppingScreenRenderer {
 
   private collapseRailForEditing(): void {
     if (this.railCompact) return;
-    // Only switch presentation classes here. Re-rendering on pointer/focus would
-    // replace the control the user is interacting with and can cancel the input.
     this.applyRailModeWithoutRender(true);
   }
 
