@@ -206,7 +206,7 @@ function installActivationStyles(): void {
       background:transparent;
       color:inherit;
       padding:2px 20px 2px 0;
-      text-align:left;
+      text-align:left!important;
     }
     .sample-rail__number{
       min-width:2.05em!important;
@@ -232,21 +232,27 @@ function installActivationStyles(): void {
       min-width:0;
       display:grid;
       grid-template-rows:auto auto;
+      justify-items:start;
       gap:7px;
       overflow:hidden;
+      text-align:left!important;
     }
     .sample-rail__identity-line{
+      width:100%;
       min-width:0;
       overflow:hidden;
       white-space:nowrap;
       text-overflow:clip;
       line-height:1.22;
+      text-align:left!important;
+      justify-self:stretch;
     }
     .sample-rail__sample-name{
-      display:inline;
+      display:inline-block;
       font-size:18px;
       font-weight:600;
       margin-right:1em;
+      text-align:left!important;
     }
     .sample-rail__metadata{
       display:inline;
@@ -257,6 +263,7 @@ function installActivationStyles(): void {
     .sample-rail__stage-progress{
       display:flex;
       align-items:flex-end;
+      justify-content:flex-start;
       gap:1em;
       min-width:0;
       overflow:hidden;
@@ -382,8 +389,13 @@ function installActivationStyles(): void {
     @media (max-width:720px){
       .cupping-layout{grid-template-columns:40px minmax(0,1fr)!important;column-gap:12px!important}
       .cupping-layout.is-rail-compact{grid-template-columns:40px minmax(0,1fr)!important;column-gap:12px!important}
-      .cupping-layout__rail{width:94vw;padding-left:3px!important;padding-right:3px!important}
-      .cupping-layout.is-rail-compact .cupping-layout__rail{width:40px}
+      .cupping-layout__rail{
+        width:clamp(286px,72vw,320px);
+        max-width:calc(100vw - 72px);
+        padding-left:3px!important;
+        padding-right:3px!important;
+      }
+      .cupping-layout.is-rail-compact .cupping-layout__rail{width:40px;max-width:40px}
       .cupping-layout__main{max-width:100%;padding-right:max(10px,env(safe-area-inset-right))}
       .sample-rail__item.is-expanded{min-height:66px!important;padding-top:6px!important;padding-bottom:6px!important}
       .sample-rail__select{grid-template-columns:auto minmax(0,1fr) auto;gap:6px;padding-right:17px}
