@@ -1,5 +1,5 @@
 import type { StageId } from "../../../shared/protocol/aromasense-v1";
-import type { SampleRailItemViewState } from "../cupping-view-model";
+import type { SampleRailItemViewState, StageIndicatorState } from "../cupping-view-model";
 import { button, element } from "./dom-helpers";
 
 export interface SampleRailCallbacks {
@@ -87,34 +87,25 @@ function readableMetadataValue(value: unknown): string | undefined {
   return undefined;
 }
 
-function identityLine(item: SampleRailItemViewState): string {
+function metadataLine(item: SampleRailItemViewState): string {
   const pieces: string[] = [];
-  const label = item.label?.trim();
-  if (label) pieces.push(label);
-
   for (const [key, caption] of IDENTITY_FIELDS) {
     const value = readableMetadataValue(item.metadata[key]);
     if (value) pieces.push(`${caption} ${value}`);
   }
-
   for (const [key, raw] of Object.entries(item.metadata)) {
     if (IDENTITY_FIELD_KEYS.has(key) || key.startsWith("_")) continue;
     const value = readableMetadataValue(raw);
     if (value) pieces.push(`${key} ${value}`);
   }
-
-  return pieces.length ? pieces.join(" · ") : `样品 ${String(item.displayNumber).padStart(2, "0")}`;
+  return pieces.join(" · ");
 }
 
-function stageStatusLabel(status: string): string {
-  if (status === "completed") return "已完成";
-  if (status === "active") return "进行中";
+function indicatorTitle(state: StageIndicatorState): string {
+  if (state === "completed") return "已完成";
+  if (state === "near_complete") return "已有录入，待完成";
+  if (state === "active") return "进行中，尚未录入";
   return "未开始";
-}
-
-function progressLine(item: SampleRailItemViewState): string {
-  const stages = item.stages.map((stage) => `${stage.label} ${stageStatusLabel(stage.status)}`);
-  return `进度 ${item.completedStageCount}/${item.totalStageCount} · ${stages.join(" · ")}`;
 }
 
 function prefersReducedMotion(): boolean {
@@ -191,13 +182,11 @@ function installActivationStyles(): void {
       margin-bottom:4px!important;
       padding:5px 4px!important;
       transform:none!important;
-      transform-origin:center;
       background:transparent!important;
       will-change:transform;
     }
-    .sample-rail__item.is-expanded{min-height:58px!important;padding-top:7px!important;padding-bottom:7px!important}
+    .sample-rail__item.is-expanded{min-height:68px!important;padding-top:7px!important;padding-bottom:7px!important}
     .sample-rail__item.is-active{
-      transform:none!important;
       border-top-color:transparent!important;
       border-right-color:transparent!important;
       border-bottom-color:rgba(255,255,255,.05)!important;
@@ -211,7 +200,7 @@ function installActivationStyles(): void {
       width:100%;
       display:grid;
       grid-template-columns:auto minmax(0,1fr) auto;
-      gap:8px;
+      gap:9px;
       align-items:center;
       border:0;
       background:transparent;
@@ -243,28 +232,62 @@ function installActivationStyles(): void {
       min-width:0;
       display:grid;
       grid-template-rows:auto auto;
-      gap:4px;
+      gap:7px;
       overflow:hidden;
     }
-    .sample-rail__identity-line,
-    .sample-rail__progress-line{
-      display:block;
+    .sample-rail__identity-line{
       min-width:0;
       overflow:hidden;
       white-space:nowrap;
       text-overflow:clip;
+      line-height:1.22;
+    }
+    .sample-rail__sample-name{
+      display:inline;
+      font-size:18px;
+      font-weight:600;
+      margin-right:1em;
+    }
+    .sample-rail__metadata{
+      display:inline;
+      font-size:13px;
       font-weight:400;
       letter-spacing:.005em;
     }
-    .sample-rail__identity-line{font-size:9px!important;line-height:1.25!important}
-    .sample-rail__progress-line{font-size:8px!important;line-height:1.2!important}
-    .sample-rail__item:not(.is-active) .sample-rail__identity-line,
-    .sample-rail__item:not(.is-active) .sample-rail__progress-line{
-      color:#85817b!important;
-      opacity:.88;
+    .sample-rail__stage-progress{
+      display:flex;
+      align-items:flex-end;
+      gap:1em;
+      min-width:0;
+      overflow:hidden;
+      white-space:nowrap;
+      font-size:13px;
+      line-height:1.05;
     }
+    .sample-rail__stage-token{
+      display:inline-grid;
+      grid-template-rows:auto 3px;
+      gap:4px;
+      flex:0 0 auto;
+      min-width:2.2em;
+      text-align:center;
+    }
+    .sample-rail__stage-name{display:block;padding:0 .05em}
+    .sample-rail__stage-line{
+      display:block;
+      width:100%;
+      height:3px;
+      border-radius:999px;
+      background:#505050;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.025);
+    }
+    .sample-rail__stage-token[data-state="active"] .sample-rail__stage-line{background:#4b8fd8}
+    .sample-rail__stage-token[data-state="near_complete"] .sample-rail__stage-line{background:#55a56b}
+    .sample-rail__stage-token[data-state="completed"] .sample-rail__stage-line{background:#d38a3c}
+    .sample-rail__item:not(.is-active) .sample-rail__identity-line,
+    .sample-rail__item:not(.is-active) .sample-rail__stage-progress{color:#85817b!important;opacity:.9}
     .sample-rail__item.is-active .sample-rail__identity-line,
-    .sample-rail__item.is-active .sample-rail__progress-line{color:#fff!important;opacity:1}
+    .sample-rail__item.is-active .sample-rail__stage-progress{color:#fff!important;opacity:1}
     .sample-rail__state-dot{position:relative;z-index:3}
     .sample-rail__item.is-active .sample-rail__state-dot{background:#fff!important;box-shadow:none!important}
     .sample-rail__actions{position:absolute!important;z-index:4;right:3px;top:50%;transform:translateY(-50%)}
@@ -362,17 +385,14 @@ function installActivationStyles(): void {
       .cupping-layout__rail{width:94vw;padding-left:3px!important;padding-right:3px!important}
       .cupping-layout.is-rail-compact .cupping-layout__rail{width:40px}
       .cupping-layout__main{max-width:100%;padding-right:max(10px,env(safe-area-inset-right))}
-      .cupping-main__header,
-      .cupping-main__editor,
-      .cupping-main__stage-strip,
-      .cupping-main__footer{max-width:100%}
-      .sample-rail__item{min-height:40px!important;padding:5px 3px!important}
-      .sample-rail__item.is-expanded{min-height:56px!important;padding-top:6px!important;padding-bottom:6px!important}
-      .sample-rail__select{grid-template-columns:auto minmax(0,1fr) auto;gap:5px;padding-right:17px}
+      .sample-rail__item.is-expanded{min-height:66px!important;padding-top:6px!important;padding-bottom:6px!important}
+      .sample-rail__select{grid-template-columns:auto minmax(0,1fr) auto;gap:6px;padding-right:17px}
       .sample-rail__number{font-size:15px!important}
       .sample-rail__item.is-active .sample-rail__number{font-size:29px!important}
-      .sample-rail__identity-line{font-size:7.5px!important}
-      .sample-rail__progress-line{font-size:7px!important}
+      .sample-rail__sample-name{font-size:16px}
+      .sample-rail__metadata{font-size:11px}
+      .sample-rail__stage-progress{font-size:12px;gap:1em}
+      .sample-rail__stage-token{grid-template-rows:auto 3px;gap:3px;min-width:2.1em}
     }
     @media (prefers-reduced-motion:reduce){.cupping-layout__rail{transition:none!important}}
   `;
@@ -419,11 +439,9 @@ function cancelRailAnimations(root: HTMLElement): void {
 function ensureActiveTabState(root: HTMLElement): ActiveTabState {
   const current = activeTabStates.get(root);
   if (current) return current;
-
   const tab = element("span", "sample-rail__active-tab");
   tab.setAttribute("aria-hidden", "true");
   root.append(tab);
-
   const scrollContainer = root.closest<HTMLElement>(".cupping-layout__rail") ?? undefined;
   const state: ActiveTabState = { tab, scrollContainer };
   if (scrollContainer) {
@@ -452,18 +470,16 @@ function targetActiveTabGeometry(root: HTMLElement): ActiveTabGeometry | undefin
   const copy = card?.querySelector<HTMLElement>(".sample-rail__active-copy");
   const rail = state.scrollContainer;
   if (!card || !number || !rail) return undefined;
-
   const cardRect = card.getBoundingClientRect();
   const numberRect = number.getBoundingClientRect();
   const copyRect = copy?.getBoundingClientRect();
   const railRect = rail.getBoundingClientRect();
   const compact = root.classList.contains("is-compact");
   const requiredHeight = Math.max(numberRect.height + (compact ? 6 : 8), (copyRect?.height ?? 0) + 12);
-  const height = Math.ceil(Math.max(compact ? 33 : 42, requiredHeight));
+  const height = Math.ceil(Math.max(compact ? 33 : 48, requiredHeight));
   const protrusion = compact ? 7 : 18;
   const left = Math.round(cardRect.left - 1);
   const visible = cardRect.bottom > railRect.top && cardRect.top < railRect.bottom;
-
   return {
     top: Math.round(cardRect.top + cardRect.height / 2 - height / 2),
     left,
@@ -481,41 +497,22 @@ function positionActiveTab(root: HTMLElement, animate: boolean, duration = 0, fr
     state.tab.style.opacity = "0";
     return;
   }
-
   state.tab.style.left = `${target.left}px`;
   state.tab.style.top = `${target.top}px`;
   state.tab.style.width = `${target.width}px`;
   state.tab.style.height = `${target.height}px`;
   state.tab.style.opacity = target.visible ? "1" : "0";
   if (!target.visible || !animate || duration <= 0 || !fromRect) return;
-
   state.tab.animate(
     [
-      {
-        left: `${Math.round(fromRect.left)}px`,
-        top: `${Math.round(fromRect.top)}px`,
-        width: `${Math.round(fromRect.width)}px`,
-        height: `${Math.round(fromRect.height)}px`,
-        opacity: 1
-      },
-      {
-        left: `${target.left}px`,
-        top: `${target.top}px`,
-        width: `${target.width}px`,
-        height: `${target.height}px`,
-        opacity: 1
-      }
+      { left: `${Math.round(fromRect.left)}px`, top: `${Math.round(fromRect.top)}px`, width: `${Math.round(fromRect.width)}px`, height: `${Math.round(fromRect.height)}px`, opacity: 1 },
+      { left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, opacity: 1 }
     ],
     { duration, easing: ACTIVATION_EASING }
   );
 }
 
-function animateCardLayout(
-  root: HTMLElement,
-  before: Map<string, RailGeometry>,
-  after: Map<string, RailGeometry>,
-  duration: number
-): void {
+function animateCardLayout(root: HTMLElement, before: Map<string, RailGeometry>, after: Map<string, RailGeometry>, duration: number): void {
   if (duration <= 0) return;
   const cards = cardMap(root);
   for (const [sampleId, next] of after) {
@@ -526,23 +523,13 @@ function animateCardLayout(
     const dy = previous.card.top - next.card.top;
     if (Math.abs(dx) < .5 && Math.abs(dy) < .5) continue;
     card.animate(
-      [
-        { transform: `translate3d(${dx}px,${dy}px,0)` },
-        { transform: "translate3d(0,0,0)" }
-      ],
+      [{ transform: `translate3d(${dx}px,${dy}px,0)` }, { transform: "translate3d(0,0,0)" }],
       { duration, easing: ACTIVATION_EASING }
     );
   }
 }
 
-function animateNumberTransition(
-  root: HTMLElement,
-  sampleId: string | undefined,
-  before: Map<string, RailGeometry>,
-  after: Map<string, RailGeometry>,
-  duration: number,
-  delay: number
-): void {
+function animateNumberTransition(root: HTMLElement, sampleId: string | undefined, before: Map<string, RailGeometry>, after: Map<string, RailGeometry>, duration: number, delay: number): void {
   if (!sampleId || duration <= 0) return;
   const previous = before.get(sampleId);
   const next = after.get(sampleId);
@@ -550,10 +537,7 @@ function animateNumberTransition(
   if (!previous || !next || !number) return;
   const scale = next.number.height > 0 ? previous.number.height / next.number.height : 1;
   number.animate(
-    [
-      { transform: `scale(${scale})`, color: previous.numberColor },
-      { transform: "scale(1)", color: next.numberColor }
-    ],
+    [{ transform: `scale(${scale})`, color: previous.numberColor }, { transform: "scale(1)", color: next.numberColor }],
     { duration, delay, easing: ACTIVATION_EASING }
   );
 }
@@ -563,20 +547,27 @@ function animateActiveCopy(root: HTMLElement, sampleId: string | undefined, dura
   const copy = cardMap(root).get(sampleId)?.querySelector<HTMLElement>(".sample-rail__active-copy");
   if (!copy) return;
   copy.animate(
-    [
-      { opacity: .25, transform: "translate3d(-2px,0,0)" },
-      { opacity: 1, transform: "translate3d(0,0,0)" }
-    ],
+    [{ opacity: .25, transform: "translate3d(-2px,0,0)" }, { opacity: 1, transform: "translate3d(0,0,0)" }],
     { duration, delay, easing: ACTIVATION_EASING }
   );
 }
 
-function updateCard(
-  card: HTMLElement,
-  item: SampleRailItemViewState,
-  callbacks: SampleRailCallbacks,
-  compact: boolean
-): void {
+function buildStageProgress(item: SampleRailItemViewState): HTMLElement {
+  const progress = element("span", "sample-rail__stage-progress");
+  for (const stage of item.stages) {
+    const token = element("span", "sample-rail__stage-token");
+    token.dataset.state = stage.indicatorState;
+    token.title = `${stage.label}：${indicatorTitle(stage.indicatorState)}`;
+    token.append(
+      element("span", "sample-rail__stage-name", stage.label),
+      element("span", "sample-rail__stage-line")
+    );
+    progress.append(token);
+  }
+  return progress;
+}
+
+function updateCard(card: HTMLElement, item: SampleRailItemViewState, callbacks: SampleRailCallbacks, compact: boolean): void {
   const isExpanded = !compact;
   const stage = currentStage(item);
   card.className = `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${isExpanded ? " is-expanded" : " is-collapsed"}`;
@@ -597,13 +588,13 @@ function updateCard(
 
   if (isExpanded) {
     const text = element("span", "sample-rail__active-copy");
-    const identity = identityLine(item);
-    const progress = progressLine(item);
-    const identityRow = element("span", "sample-rail__identity-line", identity);
-    const progressRow = element("small", "sample-rail__progress-line", progress);
-    identityRow.title = identity;
-    progressRow.title = progress;
-    text.append(identityRow, progressRow);
+    const identityRow = element("span", "sample-rail__identity-line");
+    const sampleName = item.label?.trim() || `样品 ${String(item.displayNumber).padStart(2, "0")}`;
+    const metadata = metadataLine(item);
+    identityRow.append(element("strong", "sample-rail__sample-name", sampleName));
+    if (metadata) identityRow.append(element("span", "sample-rail__metadata", metadata));
+    identityRow.title = metadata ? `${sampleName} · ${metadata}` : sampleName;
+    text.append(identityRow, buildStageProgress(item));
     select.append(text);
   }
 
