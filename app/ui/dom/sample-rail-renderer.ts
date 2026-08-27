@@ -121,7 +121,7 @@ function installActivationStyles(): void {
     }
     .sample-rail__select{
       position:relative;
-      z-index:21;
+      z-index:3;
       min-width:0;
       width:100%;
       display:grid;
@@ -154,7 +154,7 @@ function installActivationStyles(): void {
     }
     .sample-rail__active-copy{
       position:relative;
-      z-index:21;
+      z-index:3;
       min-width:0;
       display:grid;
       gap:2px;
@@ -173,12 +173,12 @@ function installActivationStyles(): void {
     }
     .sample-rail__label{font-size:9px!important;line-height:1.15!important}
     .sample-rail__stage,.sample-rail__progress{font-size:8px!important;line-height:1.1!important}
-    .sample-rail__state-dot{position:relative;z-index:21}
+    .sample-rail__state-dot{position:relative;z-index:3}
     .sample-rail__item.is-active .sample-rail__state-dot{background:#fff!important;box-shadow:none!important}
-    .sample-rail__actions{position:relative;z-index:22}
+    .sample-rail__actions{position:relative;z-index:4}
     .sample-rail__active-tab{
       position:fixed;
-      z-index:20;
+      z-index:1;
       margin:0;
       border:1px solid rgba(214,173,99,.34);
       border-left:0;
