@@ -198,6 +198,26 @@ export class LocalCuppingRepository {
     await this.db.run(`DELETE FROM sessions WHERE session_id = ?`, [sessionId]);
   }
 
+  async saveSampleIdentity(
+    sessionId: string,
+    sampleId: string,
+    label: string | undefined,
+    metadata: Record<string, unknown>,
+    now: string
+  ): Promise<SampleRecord> {
+    const normalizedLabel = label?.trim() || undefined;
+    await this.db.run(
+      `UPDATE samples SET label = ?, metadata_json = ?, updated_at = ? WHERE session_id = ? AND sample_id = ?`,
+      [normalizedLabel ?? null, JSON.stringify(metadata), now, sessionId, sampleId]
+    );
+    const row = await this.db.get<SampleRow>(
+      `SELECT sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at
+       FROM samples WHERE session_id = ? AND sample_id = ?`, [sessionId, sampleId]
+    );
+    if (!row) throw new Error(`SAMPLE_NOT_FOUND:${sampleId}`);
+    return sampleFromRow(row);
+  }
+
   async replaceSampleOrder(sessionId: string, samples: readonly SampleRecord[]): Promise<void> {
     if (samples.some((sample) => sample.sessionId !== sessionId)) throw new Error("SAMPLE_SESSION_MISMATCH");
     await this.db.transaction(async () => {
