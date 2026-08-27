@@ -152,7 +152,7 @@ button,
   transform: none !important;
 }
 .sample-rail__item.is-active .sample-rail__number,
-.sample-rail__item.is-active .sample-rail__label { color: var(--as-lb-gold) !important; font-weight: 800; }
+.sample-rail__item.is-active .sample-rail__label { color: #fff !important; font-weight: 800; }
 .sample-rail__state-dot { box-shadow: none !important; }
 
 /* Stage/status choices: text only. */
