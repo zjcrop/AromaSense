@@ -1,5 +1,5 @@
 import { STAGE_IDS, type StageId } from "../../shared/protocol/aromasense-v1";
-import { visibleSampleLabel } from "../core/blind-session";
+import { visibleSampleLabel, visibleSampleMetadata } from "../core/blind-session";
 import type { StageStatus } from "../core/cupping-state-machine";
 import type { SampleRecord } from "../core/sample-batch-service";
 import type { SessionStatus } from "../core/session-lifecycle";
@@ -19,6 +19,7 @@ export interface SampleRailItemViewState {
   sampleId: string;
   displayNumber: number;
   label?: string;
+  metadata: Readonly<Record<string, unknown>>;
   active: boolean;
   completedStageCount: number;
   startedStageCount: number;
@@ -72,6 +73,9 @@ export function buildSampleRailViewState(
         label: visibility
           ? visibleSampleLabel(sample.label, sample.displayNumber, visibility.metadata, visibility.status)
           : sample.label,
+        metadata: visibility
+          ? visibleSampleMetadata(sample.metadata, visibility.metadata, visibility.status)
+          : { ...sample.metadata },
         active: sample.sampleId === activeSampleId,
         completedStageCount,
         startedStageCount,
