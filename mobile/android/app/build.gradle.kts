@@ -2,6 +2,17 @@ plugins {
     id("com.android.application")
 }
 
+val releaseStoreFile = System.getenv("AROMASENSE_KEYSTORE_FILE")
+val releaseStorePassword = System.getenv("AROMASENSE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("AROMASENSE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("AROMASENSE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.zjcrop.aromasense"
     compileSdk = 36
@@ -14,8 +25,24 @@ android {
         versionName = "0.1C"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("aromaSenseRelease") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("aromaSenseRelease")
+            }
             isMinifyEnabled = false
         }
     }
