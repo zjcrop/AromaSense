@@ -37,6 +37,20 @@ interface ActiveTabState {
 const activeTabStates = new WeakMap<HTMLElement, ActiveTabState>();
 const ACTIVATION_EASING = "cubic-bezier(.45,0,.55,1)";
 
+const IDENTITY_FIELDS: readonly [string, string][] = [
+  ["country", "国家"],
+  ["region", "产区"],
+  ["farm", "庄园/处理站"],
+  ["variety", "品种"],
+  ["process", "处理"],
+  ["roast", "烘焙"],
+  ["roastDate", "烘焙日"],
+  ["altitude", "海拔"],
+  ["flavorNotes", "风味"]
+];
+
+const IDENTITY_FIELD_KEYS = new Set(IDENTITY_FIELDS.map(([key]) => key));
+
 function preferredStage(item: SampleRailItemViewState): StageId {
   return item.stages.find((stage) => stage.status === "active")?.stageId
     ?? item.stages.find((stage) => stage.status === "not_started")?.stageId
@@ -55,14 +69,52 @@ function progressTone(item: SampleRailItemViewState): string {
   return currentStage(item)?.tone ?? "neutral";
 }
 
-function shortLabel(item: SampleRailItemViewState): string {
-  const raw = (item.label ?? `样品 ${item.displayNumber}`).trim();
-  return raw.length > 18 ? `${raw.slice(0, 18)}…` : raw;
+function readableMetadataValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (Array.isArray(value)) {
+    const values = value.flatMap((entry) => {
+      if (typeof entry === "string") return entry.trim() ? [entry.trim()] : [];
+      if (typeof entry === "number" && Number.isFinite(entry)) return [String(entry)];
+      return [];
+    });
+    return values.length ? values.join("/") : undefined;
+  }
+  return undefined;
 }
 
-function progressLabel(item: SampleRailItemViewState): string {
-  const stage = currentStage(item);
-  return `${stage?.label ?? "准备"} · ${item.startedStageCount}/${item.totalStageCount}`;
+function identityLine(item: SampleRailItemViewState): string {
+  const pieces: string[] = [];
+  const label = item.label?.trim();
+  if (label) pieces.push(label);
+
+  for (const [key, caption] of IDENTITY_FIELDS) {
+    const value = readableMetadataValue(item.metadata[key]);
+    if (value) pieces.push(`${caption} ${value}`);
+  }
+
+  for (const [key, raw] of Object.entries(item.metadata)) {
+    if (IDENTITY_FIELD_KEYS.has(key) || key.startsWith("_")) continue;
+    const value = readableMetadataValue(raw);
+    if (value) pieces.push(`${key} ${value}`);
+  }
+
+  return pieces.length ? pieces.join(" · ") : `样品 ${String(item.displayNumber).padStart(2, "0")}`;
+}
+
+function stageStatusLabel(status: string): string {
+  if (status === "completed") return "已完成";
+  if (status === "active") return "进行中";
+  return "未开始";
+}
+
+function progressLine(item: SampleRailItemViewState): string {
+  const stages = item.stages.map((stage) => `${stage.label} ${stageStatusLabel(stage.status)}`);
+  return `进度 ${item.completedStageCount}/${item.totalStageCount} · ${stages.join(" · ")}`;
 }
 
 function prefersReducedMotion(): boolean {
@@ -89,23 +141,20 @@ function installActivationStyles(): void {
     .cupping-layout__rail{
       position:relative;
       z-index:40!important;
-      width:min(300px,72vw);
+      width:min(900px,92vw);
       height:100dvh;
       min-height:0;
       display:flex;
       flex-direction:column;
       overflow:hidden!important;
-      padding:7px 5px max(7px,env(safe-area-inset-bottom))!important;
+      padding:7px 6px max(7px,env(safe-area-inset-bottom))!important;
       background:#121212;
       border-right:1px solid rgba(185,153,90,.28)!important;
-      box-shadow:12px 0 28px rgba(0,0,0,.28);
+      box-shadow:14px 0 32px rgba(0,0,0,.31);
       transition:width 560ms cubic-bezier(.45,0,.55,1),box-shadow 560ms cubic-bezier(.45,0,.55,1);
       will-change:width;
     }
-    .cupping-layout.is-rail-compact .cupping-layout__rail{
-      width:46px;
-      box-shadow:none;
-    }
+    .cupping-layout.is-rail-compact .cupping-layout__rail{width:46px;box-shadow:none}
     .cupping-layout__main{
       position:relative;
       z-index:1;
@@ -131,7 +180,7 @@ function installActivationStyles(): void {
       flex:1 1 auto;
       min-height:0;
       overflow-y:auto!important;
-      overflow-x:visible!important;
+      overflow-x:hidden!important;
       scrollbar-width:thin;
     }
     .sample-rail{position:relative;overflow:visible!important}
@@ -139,13 +188,14 @@ function installActivationStyles(): void {
       position:relative;
       z-index:2;
       min-height:40px!important;
+      margin-bottom:4px!important;
       padding:5px 4px!important;
       transform:none!important;
       transform-origin:center;
       background:transparent!important;
       will-change:transform;
     }
-    .sample-rail__item.is-expanded{min-height:62px!important;padding-top:8px!important;padding-bottom:8px!important}
+    .sample-rail__item.is-expanded{min-height:58px!important;padding-top:7px!important;padding-bottom:7px!important}
     .sample-rail__item.is-active{
       transform:none!important;
       border-top-color:transparent!important;
@@ -161,19 +211,19 @@ function installActivationStyles(): void {
       width:100%;
       display:grid;
       grid-template-columns:auto minmax(0,1fr) auto;
-      gap:5px;
+      gap:8px;
       align-items:center;
       border:0;
       background:transparent;
       color:inherit;
-      padding:2px 0;
+      padding:2px 20px 2px 0;
       text-align:left;
     }
     .sample-rail__number{
       min-width:2.05em!important;
-      color:#87837d!important;
+      color:#b9995a!important;
       font-size:clamp(16px,1.65vw,19px)!important;
-      font-weight:430!important;
+      font-weight:650!important;
       line-height:1!important;
       letter-spacing:-.025em;
       font-variant-numeric:tabular-nums;
@@ -192,23 +242,41 @@ function installActivationStyles(): void {
       z-index:3;
       min-width:0;
       display:grid;
-      gap:2px;
+      grid-template-rows:auto auto;
+      gap:4px;
+      overflow:hidden;
     }
-    .sample-rail__item:not(.is-active) .sample-rail__label,
-    .sample-rail__item:not(.is-active) .sample-rail__stage,
-    .sample-rail__item:not(.is-active) .sample-rail__progress{
+    .sample-rail__identity-line,
+    .sample-rail__progress-line{
+      display:block;
+      min-width:0;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:clip;
+      font-weight:400;
+      letter-spacing:.005em;
+    }
+    .sample-rail__identity-line{font-size:9px!important;line-height:1.25!important}
+    .sample-rail__progress-line{font-size:8px!important;line-height:1.2!important}
+    .sample-rail__item:not(.is-active) .sample-rail__identity-line,
+    .sample-rail__item:not(.is-active) .sample-rail__progress-line{
       color:#85817b!important;
-      font-weight:400!important;
-      opacity:.82;
+      opacity:.88;
     }
-    .sample-rail__item.is-active .sample-rail__label,
-    .sample-rail__item.is-active .sample-rail__stage,
-    .sample-rail__item.is-active .sample-rail__progress{color:#fff!important}
-    .sample-rail__label{font-size:10px!important;line-height:1.2!important}
-    .sample-rail__stage,.sample-rail__progress{font-size:9px!important;line-height:1.15!important}
+    .sample-rail__item.is-active .sample-rail__identity-line,
+    .sample-rail__item.is-active .sample-rail__progress-line{color:#fff!important;opacity:1}
     .sample-rail__state-dot{position:relative;z-index:3}
     .sample-rail__item.is-active .sample-rail__state-dot{background:#fff!important;box-shadow:none!important}
-    .sample-rail__actions{position:relative;z-index:4}
+    .sample-rail__actions{position:absolute!important;z-index:4;right:3px;top:50%;transform:translateY(-50%)}
+    .sample-rail__drag{
+      width:14px!important;
+      min-height:22px!important;
+      border:0!important;
+      background:transparent!important;
+      color:#6f6a62!important;
+      font-size:7px!important;
+      opacity:.7;
+    }
     .sample-rail__active-tab{
       position:fixed;
       z-index:1;
@@ -226,8 +294,8 @@ function installActivationStyles(): void {
     }
     .sample-rail.is-compact .sample-rail__active-copy,
     .sample-rail.is-compact .sample-rail__actions{display:none!important}
-    .sample-rail.is-compact .sample-rail__number{font-size:15px!important;min-width:0!important}
-    .sample-rail.is-compact .sample-rail__item.is-active .sample-rail__number{font-size:27px!important}
+    .sample-rail.is-compact .sample-rail__number{font-size:15px!important;min-width:0!important;color:#b9995a!important}
+    .sample-rail.is-compact .sample-rail__item.is-active .sample-rail__number{font-size:27px!important;color:#fff!important}
     .sample-rail.is-compact .sample-rail__select{grid-template-columns:1fr!important;justify-items:center!important;padding:2px 0!important}
     .sample-rail.is-compact .sample-rail__state-dot{width:5px!important;height:5px!important}
     .cupping-rail-tools{
@@ -291,7 +359,7 @@ function installActivationStyles(): void {
     @media (max-width:720px){
       .cupping-layout{grid-template-columns:40px minmax(0,1fr)!important;column-gap:12px!important}
       .cupping-layout.is-rail-compact{grid-template-columns:40px minmax(0,1fr)!important;column-gap:12px!important}
-      .cupping-layout__rail{width:min(260px,78vw);padding-left:3px!important;padding-right:3px!important}
+      .cupping-layout__rail{width:94vw;padding-left:3px!important;padding-right:3px!important}
       .cupping-layout.is-rail-compact .cupping-layout__rail{width:40px}
       .cupping-layout__main{max-width:100%;padding-right:max(10px,env(safe-area-inset-right))}
       .cupping-main__header,
@@ -299,15 +367,12 @@ function installActivationStyles(): void {
       .cupping-main__stage-strip,
       .cupping-main__footer{max-width:100%}
       .sample-rail__item{min-height:40px!important;padding:5px 3px!important}
-      .sample-rail__item.is-expanded{min-height:64px!important;padding-top:7px!important;padding-bottom:7px!important}
-      .sample-rail__select{grid-template-columns:auto minmax(0,1fr);gap:3px;padding-right:15px}
+      .sample-rail__item.is-expanded{min-height:56px!important;padding-top:6px!important;padding-bottom:6px!important}
+      .sample-rail__select{grid-template-columns:auto minmax(0,1fr) auto;gap:5px;padding-right:17px}
       .sample-rail__number{font-size:15px!important}
       .sample-rail__item.is-active .sample-rail__number{font-size:29px!important}
-      .sample-rail__select .sample-rail__state-dot{grid-column:1 / -1;justify-self:center}
-      .sample-rail__active-copy{text-align:left}
-      .sample-rail__actions{position:absolute!important;right:1px!important;top:2px!important;display:grid!important;gap:1px!important}
-      .sample-rail__expand{display:grid!important;place-items:center;width:15px!important;min-height:15px!important;font-size:8px!important;opacity:.62}
-      .sample-rail__drag{width:15px!important;min-height:15px!important;font-size:7px!important}
+      .sample-rail__identity-line{font-size:7.5px!important}
+      .sample-rail__progress-line{font-size:7px!important}
     }
     @media (prefers-reduced-motion:reduce){.cupping-layout__rail{transition:none!important}}
   `;
@@ -384,20 +449,23 @@ function targetActiveTabGeometry(root: HTMLElement): ActiveTabGeometry | undefin
   const state = ensureActiveTabState(root);
   const card = activeCard(root);
   const number = card?.querySelector<HTMLElement>(".sample-rail__number");
+  const copy = card?.querySelector<HTMLElement>(".sample-rail__active-copy");
   const rail = state.scrollContainer;
   if (!card || !number || !rail) return undefined;
 
   const cardRect = card.getBoundingClientRect();
   const numberRect = number.getBoundingClientRect();
+  const copyRect = copy?.getBoundingClientRect();
   const railRect = rail.getBoundingClientRect();
   const compact = root.classList.contains("is-compact");
-  const height = Math.ceil(Math.max(compact ? 33 : 36, numberRect.height + (compact ? 6 : 8)));
+  const requiredHeight = Math.max(numberRect.height + (compact ? 6 : 8), (copyRect?.height ?? 0) + 12);
+  const height = Math.ceil(Math.max(compact ? 33 : 42, requiredHeight));
   const protrusion = compact ? 7 : 18;
   const left = Math.round(cardRect.left - 1);
   const visible = cardRect.bottom > railRect.top && cardRect.top < railRect.bottom;
 
   return {
-    top: Math.round(numberRect.top + numberRect.height / 2 - height / 2),
+    top: Math.round(cardRect.top + cardRect.height / 2 - height / 2),
     left,
     width: Math.max(compact ? 40 : 54, Math.round(railRect.right + protrusion - left)),
     height,
@@ -507,15 +575,13 @@ function updateCard(
   card: HTMLElement,
   item: SampleRailItemViewState,
   callbacks: SampleRailCallbacks,
-  compact: boolean,
-  expanded: boolean
+  compact: boolean
 ): void {
-  const isExpanded = !compact && expanded;
+  const isExpanded = !compact;
   const stage = currentStage(item);
   card.className = `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${isExpanded ? " is-expanded" : " is-collapsed"}`;
   card.dataset.sampleId = item.sampleId;
   card.dataset.displayNumber = String(item.displayNumber);
-  card.dataset.userExpanded = String(isExpanded);
 
   const existingNumber = card.querySelector<HTMLElement>(".sample-rail__number");
   const number = existingNumber ?? element("strong", "sample-rail__number");
@@ -531,10 +597,13 @@ function updateCard(
 
   if (isExpanded) {
     const text = element("span", "sample-rail__active-copy");
-    text.append(
-      element("span", "sample-rail__label", shortLabel(item)),
-      element("small", `sample-rail__progress sample-rail__stage--${stage?.tone ?? "neutral"}`, progressLabel(item))
-    );
+    const identity = identityLine(item);
+    const progress = progressLine(item);
+    const identityRow = element("span", "sample-rail__identity-line", identity);
+    const progressRow = element("small", "sample-rail__progress-line", progress);
+    identityRow.title = identity;
+    progressRow.title = progress;
+    text.append(identityRow, progressRow);
     select.append(text);
   }
 
@@ -544,11 +613,6 @@ function updateCard(
 
   const actions = element("div", "sample-rail__actions");
   if (!compact) {
-    const expand = button("sample-rail__expand", isExpanded ? "‹" : "›", () => callbacks.toggleExpanded(item.sampleId));
-    expand.setAttribute("aria-expanded", String(isExpanded));
-    expand.title = isExpanded ? "收起样品便签" : "展开样品便签";
-    actions.append(expand);
-
     const drag = button("sample-rail__drag", "●", () => undefined);
     drag.type = "button";
     drag.dataset.dragHandle = "sample";
@@ -580,19 +644,14 @@ export function renderSampleRail(
     : undefined;
 
   cancelRailAnimations(root);
+  const compact = Boolean(options.compact);
   root.classList.add("sample-rail");
-  root.classList.toggle("is-compact", Boolean(options.compact));
+  root.classList.toggle("is-compact", compact);
 
   const liveSampleIds = new Set(items.map((item) => item.sampleId));
   for (const item of items) {
     const card = existingCards.get(item.sampleId) ?? element("article", "sample-rail__item");
-    updateCard(
-      card,
-      item,
-      callbacks,
-      Boolean(options.compact),
-      options.expandedSampleIds?.has(item.sampleId) ?? false
-    );
+    updateCard(card, item, callbacks, compact);
     root.append(card);
   }
   for (const card of directCards(root)) {
