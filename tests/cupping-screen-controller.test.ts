@@ -98,6 +98,7 @@ test("blind identity edits persist during any active stage while rail identity r
     assert.equal(updated.samples[0]?.metadata.country, "Ethiopia");
     assert.equal(updated.active?.slice.sample.label, "Ethiopia Guji Lot 12");
     assert.equal(updated.rail[0]?.label, "Sample 01");
+    assert.deepEqual(updated.rail[0]?.metadata, {});
 
     const persisted = await repository.listSamples(session.sessionId);
     assert.equal(persisted[0]?.label, "Ethiopia Guji Lot 12");
