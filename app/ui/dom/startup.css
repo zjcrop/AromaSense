@@ -1,3 +1,5 @@
+#version { display: none !important; }
+
 .startup-screen {
   min-height: 100dvh;
   background: #151515;
