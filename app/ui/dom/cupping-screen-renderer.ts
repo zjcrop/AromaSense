@@ -69,9 +69,9 @@ export class CuppingScreenRenderer {
   private disposeRailDrag?: () => void;
   private disposeFlavorDrag?: () => void;
   private disposeSelectedStackDrag?: () => void;
-  private railCompact = false;
+  private railCompact = true;
   private readonly expandedSampleIds = new Set<string>();
-  private readonly layoutRoot = element("div", "cupping-layout");
+  private readonly layoutRoot = element("div", "cupping-layout is-rail-compact");
   private readonly railRoot = element("aside", "cupping-layout__rail");
   private readonly railListRoot = element("div", "cupping-layout__rail-list");
   private readonly mainRoot = element("main", "cupping-layout__main");
@@ -94,6 +94,10 @@ export class CuppingScreenRenderer {
     this.mainRoot.append(this.headerRoot, this.statusRoot, this.editorRoot, this.stageStripRoot, this.footerRoot);
     this.layoutRoot.append(this.railRoot, this.mainRoot);
     this.root.append(this.layoutRoot);
+
+    const autoCollapse = (): void => this.collapseRailForEditing();
+    this.editorRoot.addEventListener("pointerdown", autoCollapse, { passive: true });
+    this.editorRoot.addEventListener("focusin", autoCollapse);
   }
 
   async initialize(sessionId: string): Promise<void> {
@@ -108,6 +112,35 @@ export class CuppingScreenRenderer {
     this.disposeRailDrag?.(); this.disposeRailDrag = undefined;
     this.disposeFlavorDrag?.(); this.disposeFlavorDrag = undefined;
     this.disposeSelectedStackDrag?.(); this.disposeSelectedStackDrag = undefined;
+  }
+
+  private updateRailToggleLabels(): void {
+    for (const toggle of this.railRoot.querySelectorAll<HTMLButtonElement>("[data-rail-toggle]")) {
+      toggle.textContent = this.railCompact ? "›" : "‹";
+      toggle.title = this.railCompact ? "展开样品便签栏" : "收起样品便签栏";
+      toggle.setAttribute("aria-label", toggle.title);
+      toggle.setAttribute("aria-expanded", String(!this.railCompact));
+    }
+  }
+
+  private applyRailModeWithoutRender(compact: boolean): void {
+    this.railCompact = compact;
+    this.layoutRoot.classList.toggle("is-rail-compact", compact);
+    this.railListRoot.classList.toggle("is-compact", compact);
+    this.railRoot.setAttribute("aria-expanded", String(!compact));
+    this.updateRailToggleLabels();
+  }
+
+  private collapseRailForEditing(): void {
+    if (this.railCompact) return;
+    // Only switch presentation classes here. Re-rendering on pointer/focus would
+    // replace the control the user is interacting with and can cancel the input.
+    this.applyRailModeWithoutRender(true);
+  }
+
+  private async toggleRail(): Promise<void> {
+    this.railCompact = !this.railCompact;
+    await this.render();
   }
 
   private async select(sampleId: string, stageId: StageId): Promise<void> {
@@ -154,13 +187,22 @@ export class CuppingScreenRenderer {
     });
   }
 
+  private railToggleButton(className: string): HTMLButtonElement {
+    const toggle = button(className, this.railCompact ? "›" : "‹", () => this.toggleRail());
+    toggle.dataset.railToggle = "true";
+    toggle.title = this.railCompact ? "展开样品便签栏" : "收起样品便签栏";
+    toggle.setAttribute("aria-label", toggle.title);
+    toggle.setAttribute("aria-expanded", String(!this.railCompact));
+    return toggle;
+  }
+
   private renderRail(state: CuppingScreenState): void {
     clearElement(this.railRoot);
     this.layoutRoot.classList.toggle("is-rail-compact", this.railCompact);
+    this.railRoot.setAttribute("aria-expanded", String(!this.railCompact));
+
     const tools = element("div", "cupping-rail-tools");
-    const toggle = button("cupping-rail-tools__toggle", this.railCompact ? "›" : "‹", async () => { this.railCompact = !this.railCompact; await this.render(); });
-    toggle.title = this.railCompact ? "展开样品便签栏" : "收起样品便签栏";
-    tools.append(toggle);
+    tools.append(this.railToggleButton("cupping-rail-tools__toggle"));
     if (!this.railCompact) tools.append(button("cupping-rail-tools__action", "账户", () => this.openAccount()));
     this.railRoot.append(tools, this.railListRoot);
 
@@ -173,11 +215,23 @@ export class CuppingScreenRenderer {
       }
     }, { compact: this.railCompact, expandedSampleIds: this.expandedSampleIds });
 
-    if (!this.railCompact && this.controller.canFinishSession()) {
-      const end = button("cupping-rail-end", "END", () => this.finishFromEnd());
-      end.title = "完成本次杯测并进入杯测记录";
-      this.railRoot.append(end);
-    }
+    const controls = element("div", "cupping-rail-footer");
+    controls.append(this.railToggleButton("cupping-rail-footer__toggle"));
+
+    const actions = element("div", "cupping-rail-footer__actions");
+    const exit = button("cupping-rail-footer__exit", "退出", () => this.leaveSession());
+    exit.title = "暂时退出当前杯测，已录入内容保留为未完成记录";
+
+    const finish = button("cupping-rail-footer__finish", "完成", () => this.finishFromEnd());
+    const canFinish = state.sessionStatus !== "completed" && state.sessionStatus !== "archived" && this.controller.canFinishSession();
+    finish.disabled = !canFinish;
+    finish.title = canFinish
+      ? "完成整场杯测并归入已完成记录"
+      : "所有样品的全部杯测流程完成后才可结束整场杯测";
+    actions.append(exit, finish);
+    controls.append(actions);
+    this.railRoot.append(controls);
+    this.updateRailToggleLabels();
   }
 
   private renderStageStrip(state: CuppingScreenState, sampleId?: string, activeStageId?: StageId): void {
@@ -217,6 +271,7 @@ export class CuppingScreenRenderer {
       itemSelector: ".selected-tag-stack__item",
       itemIdAttribute: "data-selected-id",
       onReorder: async (ids) => {
+        this.collapseRailForEditing();
         await this.run(async () => { this.state = await this.controller.saveField("flavor_tags", ids, this.options.now()); });
       }
     });
@@ -236,6 +291,7 @@ export class CuppingScreenRenderer {
     }
 
     clearElement(this.headerRoot); clearElement(this.editorRoot); clearElement(this.footerRoot);
+    this.footerRoot.classList.remove("is-two-action");
     this.renderStageStrip(state, state.active?.context.sampleId, state.active?.context.stageId);
     const blindStatus = this.renderBlindStatus(state); if (blindStatus) this.headerRoot.append(blindStatus);
 
@@ -249,9 +305,8 @@ export class CuppingScreenRenderer {
 
     if (!state.active) {
       const empty = element("section", "cupping-empty");
-      empty.append(element("h2", "cupping-empty__title", "选择一个样品开始记录"), element("p", "cupping-empty__text", "左侧编号用于切换样品；展开后可直接切换温段。"));
+      empty.append(element("h2", "cupping-empty__title", "选择一个样品开始记录"), element("p", "cupping-empty__text", "左侧编号用于切换样品；需要查看标签详情时展开侧栏，开始填写后会自动收回。"));
       this.editorRoot.append(empty);
-      this.footerRoot.append(button("cupping-nav cupping-nav--exit", "退出杯测", () => this.leaveSession()));
       return;
     }
 
@@ -272,9 +327,11 @@ export class CuppingScreenRenderer {
     const preferences = this.flavorPreferences ?? await this.flavorService.load();
     const callbacks = {
       saveField: async (fieldKey: string, value: unknown) => {
+        this.collapseRailForEditing();
         await this.run(async () => { this.state = await this.controller.saveField(fieldKey, value, this.options.now()); });
       },
       setFlavorGroupCollapsed: async (groupId: string, collapsed: boolean) => {
+        this.collapseRailForEditing();
         await this.run(async () => { this.flavorPreferences = await this.flavorService.setCollapsed(groupId, collapsed, this.options.now()); });
       }
     };
@@ -295,12 +352,14 @@ export class CuppingScreenRenderer {
       this.disposeFlavorDrag = attachDragReorder(flavorGroups, {
         itemSelector: ".flavor-group",
         itemIdAttribute: "data-group-id",
-        onReorder: async (ids) => { await this.run(async () => { this.flavorPreferences = await this.flavorService.reorder(ids, this.options.now()); }); }
+        onReorder: async (ids) => {
+          this.collapseRailForEditing();
+          await this.run(async () => { this.flavorPreferences = await this.flavorService.reorder(ids, this.options.now()); });
+        }
       });
     }
     this.attachTagStackDrag();
 
-    const exit = button("cupping-nav cupping-nav--exit", "退出杯测", () => this.leaveSession());
     const previous = button("cupping-nav cupping-nav--previous", "上一步", () => this.run(async () => { this.state = await this.controller.goPrevious(this.options.now()); }));
     const finalPhase = active.context.stageId === "final" ? finalAssessmentPhase(active.slice.observations) : undefined;
     const next = button("cupping-nav cupping-nav--next", active.context.stageId === "final" ? "完成本样品" : "下一步", () =>
@@ -310,6 +369,7 @@ export class CuppingScreenRenderer {
       next.disabled = true;
       next.title = "请依次完成风味描述、综评和评分";
     }
-    this.footerRoot.append(exit, previous, next);
+    this.footerRoot.classList.add("is-two-action");
+    this.footerRoot.append(previous, next);
   }
 }
