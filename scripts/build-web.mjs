@@ -8,6 +8,7 @@ const pagesOut = resolve(root, "site");
 const cloudBaseUrl = process.env.AROMASENSE_CLOUD_URL ?? "";
 const firebaseApiKey = process.env.AROMASENSE_FIREBASE_API_KEY || "AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0";
 const firebaseProjectId = process.env.AROMASENSE_FIREBASE_PROJECT_ID || "romasense-f23eb";
+const buildId = (process.env.GITHUB_SHA || process.env.AROMASENSE_BUILD_ID || "dev").slice(0, 16);
 const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
 const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
@@ -176,7 +177,11 @@ async function buildTarget(out, { android = false } = {}) {
     .replaceAll("__CLOUD_BASE_URL__", escapeAttribute(cloudBaseUrl))
     .replaceAll("__FIREBASE_API_KEY__", escapeAttribute(firebaseApiKey))
     .replaceAll("__FIREBASE_PROJECT_ID__", escapeAttribute(firebaseProjectId))
-    .replace("  <script src=\"app.js\"></script>", `${recognitionBootstrap ? `  ${recognitionBootstrap}\n` : ""}  <script src=\"luckybean-recognition-core.js\"></script>\n  <script src=\"app.js\"></script>`);
+    .replaceAll("__BUILD_ID__", escapeAttribute(buildId))
+    .replace(
+      "  <script src=\"app.js\"></script>",
+      `${recognitionBootstrap ? `  ${recognitionBootstrap}\n` : ""}  <script src=\"luckybean-recognition-core.js?v=${encodeURIComponent(buildId)}\"></script>\n  <script src=\"app.js?v=${encodeURIComponent(buildId)}\"></script>`
+    );
   await writeFile(resolve(out, "index.html"), html, "utf8");
   await writeFile(resolve(out, ".nojekyll"), "", "utf8");
 }
