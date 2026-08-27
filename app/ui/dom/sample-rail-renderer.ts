@@ -98,13 +98,13 @@ function metadataLine(item: SampleRailItemViewState): string {
     const value = readableMetadataValue(raw);
     if (value) pieces.push(`${key} ${value}`);
   }
-  return pieces.join(" · ");
+  return pieces.join("　");
 }
 
 function indicatorTitle(state: StageIndicatorState): string {
   if (state === "completed") return "已完成";
-  if (state === "near_complete") return "已有录入，待完成";
-  if (state === "active") return "进行中，尚未录入";
+  if (state === "near_complete") return "接近完成";
+  if (state === "active") return "进行中";
   return "未开始";
 }
 
@@ -558,6 +558,7 @@ function buildStageProgress(item: SampleRailItemViewState): HTMLElement {
     const token = element("span", "sample-rail__stage-token");
     token.dataset.state = stage.indicatorState;
     token.title = `${stage.label}：${indicatorTitle(stage.indicatorState)}`;
+    token.setAttribute("aria-label", `${stage.label}：${indicatorTitle(stage.indicatorState)}`);
     token.append(
       element("span", "sample-rail__stage-name", stage.label),
       element("span", "sample-rail__stage-line")
@@ -593,14 +594,16 @@ function updateCard(card: HTMLElement, item: SampleRailItemViewState, callbacks:
     const metadata = metadataLine(item);
     identityRow.append(element("strong", "sample-rail__sample-name", sampleName));
     if (metadata) identityRow.append(element("span", "sample-rail__metadata", metadata));
-    identityRow.title = metadata ? `${sampleName} · ${metadata}` : sampleName;
+    identityRow.title = metadata ? `${sampleName}　${metadata}` : sampleName;
     text.append(identityRow, buildStageProgress(item));
     select.append(text);
   }
 
-  const stateDot = element("span", `sample-rail__state-dot sample-rail__state-dot--${stage?.tone ?? "neutral"}`);
-  stateDot.title = stage ? `${stage.label}：${stage.status}` : "尚未开始";
-  select.append(stateDot);
+  if (compact) {
+    const stateDot = element("span", `sample-rail__state-dot sample-rail__state-dot--${stage?.tone ?? "neutral"}`);
+    stateDot.title = stage ? `${stage.label}：${stage.status}` : "尚未开始";
+    select.append(stateDot);
+  }
 
   const actions = element("div", "sample-rail__actions");
   if (!compact) {
