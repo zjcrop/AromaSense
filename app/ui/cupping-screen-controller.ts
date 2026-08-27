@@ -66,6 +66,48 @@ export class CuppingScreenController {
     return this.refreshState(active);
   }
 
+  async saveSampleIdentity(
+    sampleId: string,
+    label: string | undefined,
+    metadataPatch: Readonly<Record<string, unknown>>,
+    now: string
+  ): Promise<CuppingScreenState> {
+    const state = this.requireState();
+    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
+    const sample = state.samples.find((item) => item.sampleId === sampleId);
+    if (!sample) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
+
+    await this.editor.flush();
+    const metadata = { ...sample.metadata };
+    for (const [key, value] of Object.entries(metadataPatch)) {
+      if (typeof value === "string") {
+        const normalized = value.trim();
+        if (normalized) metadata[key] = normalized;
+        else delete metadata[key];
+      } else if (value === undefined || value === null) {
+        delete metadata[key];
+      } else {
+        metadata[key] = value;
+      }
+    }
+
+    const saved = await this.repository.saveSampleIdentity(state.sessionId, sampleId, label, metadata, now);
+    const samples = state.samples.map((item) => item.sampleId === sampleId ? saved : item);
+    let active = this.editor.current();
+    if (active?.context.sampleId === sampleId) active = await this.editor.refresh();
+    const progress = await this.progressReader.listForSession(state.sessionId);
+    this.state = {
+      ...state,
+      samples,
+      rail: buildSampleRailViewState(samples, progress, active?.context.sampleId, {
+        metadata: state.sessionMetadata,
+        status: state.sessionStatus
+      }),
+      active
+    };
+    return this.state;
+  }
+
   async completeStage(now: string): Promise<CuppingScreenState> {
     const active = await this.editor.completeActiveStage(now);
     await this.revisions?.checkpointStage(active.context.sessionId, active.context.sampleId, active.context.stageId, now);
