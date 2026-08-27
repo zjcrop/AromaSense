@@ -7,12 +7,14 @@ import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { SampleStageProgress } from "../storage/stage-progress-reader";
 
 export type StageTone = "orange" | "pink" | "blue" | "white" | "neutral";
+export type StageIndicatorState = "not_started" | "active" | "near_complete" | "completed";
 
 export interface StageViewState {
   stageId: StageId;
   label: string;
   tone: StageTone;
   status: StageStatus;
+  indicatorState: StageIndicatorState;
 }
 
 export interface SampleRailItemViewState {
@@ -45,6 +47,12 @@ function progressKey(sampleId: string, stageId: StageId): string {
   return `${sampleId}:${stageId}`;
 }
 
+function indicatorState(progress: SampleStageProgress | undefined): StageIndicatorState {
+  if (!progress || progress.status === "not_started") return "not_started";
+  if (progress.status === "completed") return "completed";
+  return progress.observationCount > 0 ? "near_complete" : "active";
+}
+
 export function buildSampleRailViewState(
   samples: readonly SampleRecord[],
   progress: readonly SampleStageProgress[],
@@ -52,18 +60,22 @@ export function buildSampleRailViewState(
   visibility?: SampleVisibilityContext
 ): readonly SampleRailItemViewState[] {
   const progressByKey = new Map(
-    progress.map((item) => [progressKey(item.sampleId, item.stageId), item.status] as const)
+    progress.map((item) => [progressKey(item.sampleId, item.stageId), item] as const)
   );
 
   return [...samples]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((sample) => {
-      const stages = STAGE_IDS.map((stageId): StageViewState => ({
-        stageId,
-        label: STAGE_META[stageId].label,
-        tone: STAGE_META[stageId].tone,
-        status: progressByKey.get(progressKey(sample.sampleId, stageId)) ?? "not_started"
-      }));
+      const stages = STAGE_IDS.map((stageId): StageViewState => {
+        const stageProgress = progressByKey.get(progressKey(sample.sampleId, stageId));
+        return {
+          stageId,
+          label: STAGE_META[stageId].label,
+          tone: STAGE_META[stageId].tone,
+          status: stageProgress?.status ?? "not_started",
+          indicatorState: indicatorState(stageProgress)
+        };
+      });
       const completedStageCount = stages.filter((stage) => stage.status === "completed").length;
       const startedStageCount = stages.filter((stage) => stage.status !== "not_started").length;
 
