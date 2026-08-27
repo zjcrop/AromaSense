@@ -107,3 +107,42 @@ test("blind identity edits persist during any active stage while rail identity r
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("session finish remains locked when final is completed but any earlier stage is incomplete", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aromasense-finish-gate-"));
+  const db = NodeSQLiteDriver.open(join(dir, "finish.sqlite"));
+  db.exec(schema);
+  db.exec(metadataMigration);
+
+  try {
+    const repository = new LocalCuppingRepository(db);
+    const now = "2026-08-27T12:00:00+08:00";
+    const session = createSession({ sessionId: "finish-session", now });
+    const samples = buildSampleBatch(session.sessionId, [{ label: "A" }], now, () => "finish-sample-1");
+    await repository.createSessionWithSamples(session, samples);
+
+    const editor = new CuppingSessionController(
+      repository,
+      (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`
+    );
+    const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
+
+    await screen.initialize(session.sessionId);
+    await screen.select("finish-sample-1", "final", now);
+    await screen.completeStage("2026-08-27T12:01:00+08:00");
+    assert.equal(screen.canFinishSession(), false);
+    await assert.rejects(() => screen.finishSession("2026-08-27T12:02:00+08:00"), /ALL_SAMPLE_STAGES_REQUIRED/);
+
+    for (const stageId of ["preparation", "aroma", "high_temp", "mid_temp", "low_temp"] as const) {
+      await screen.select("finish-sample-1", stageId, "2026-08-27T12:03:00+08:00");
+      await screen.completeStage("2026-08-27T12:04:00+08:00");
+    }
+
+    assert.equal(screen.canFinishSession(), true);
+    const completed = await screen.finishSession("2026-08-27T12:05:00+08:00");
+    assert.equal(completed.sessionStatus, "completed");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
