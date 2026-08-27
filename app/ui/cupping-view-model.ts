@@ -43,14 +43,27 @@ const STAGE_META: Record<StageId, { label: string; tone: StageTone }> = {
   final: { label: "完成", tone: "neutral" }
 };
 
+const EXPECTED_STANDARD_FIELD_COUNT: Record<StageId, number> = {
+  preparation: 1,
+  aroma: 4,
+  high_temp: 6,
+  mid_temp: 7,
+  low_temp: 7,
+  final: 8
+};
+
+const NEAR_COMPLETE_THRESHOLD = 0.7;
+
 function progressKey(sampleId: string, stageId: StageId): string {
   return `${sampleId}:${stageId}`;
 }
 
-function indicatorState(progress: SampleStageProgress | undefined): StageIndicatorState {
+function indicatorState(stageId: StageId, progress: SampleStageProgress | undefined): StageIndicatorState {
   if (!progress || progress.status === "not_started") return "not_started";
   if (progress.status === "completed") return "completed";
-  return progress.observationCount > 0 ? "near_complete" : "active";
+  const expected = EXPECTED_STANDARD_FIELD_COUNT[stageId];
+  const coverage = expected > 0 ? Math.min(1, progress.observationCount / expected) : 0;
+  return coverage >= NEAR_COMPLETE_THRESHOLD ? "near_complete" : "active";
 }
 
 export function buildSampleRailViewState(
@@ -73,7 +86,7 @@ export function buildSampleRailViewState(
           label: STAGE_META[stageId].label,
           tone: STAGE_META[stageId].tone,
           status: stageProgress?.status ?? "not_started",
-          indicatorState: indicatorState(stageProgress)
+          indicatorState: indicatorState(stageId, stageProgress)
         };
       });
       const completedStageCount = stages.filter((stage) => stage.status === "completed").length;
