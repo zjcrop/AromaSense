@@ -18,13 +18,22 @@ interface RailGeometry {
   numberColor: string;
 }
 
-interface IndicatorState {
-  indicator: HTMLElement;
-  scrollContainer?: HTMLElement;
-  scrollHandler?: () => void;
+interface ActiveTabGeometry {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  visible: boolean;
 }
 
-const indicatorStates = new WeakMap<HTMLElement, IndicatorState>();
+interface ActiveTabState {
+  tab: HTMLElement;
+  scrollContainer?: HTMLElement;
+  scrollHandler?: () => void;
+  resizeHandler?: () => void;
+}
+
+const activeTabStates = new WeakMap<HTMLElement, ActiveTabState>();
 const ACTIVATION_EASING = "cubic-bezier(.45,0,.55,1)";
 
 function preferredStage(item: SampleRailItemViewState): StageId {
@@ -50,13 +59,18 @@ function shortLabel(item: SampleRailItemViewState): string {
   return raw.length > 18 ? `${raw.slice(0, 18)}…` : raw;
 }
 
+function progressLabel(item: SampleRailItemViewState): string {
+  const stage = currentStage(item);
+  return `${stage?.label ?? "准备"} · ${item.startedStageCount}/${item.totalStageCount}`;
+}
+
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
 function activationDuration(distance: number): number {
   if (prefersReducedMotion()) return 0;
-  return Math.min(500, 250 + Math.max(0, distance - 1) * 50);
+  return Math.min(520, 270 + Math.max(0, distance - 1) * 48);
 }
 
 function installActivationStyles(): void {
@@ -65,33 +79,48 @@ function installActivationStyles(): void {
   style.dataset.aromasenseSampleRailActivation = "true";
   style.textContent = `
     .cupping-layout__rail-list{overflow:visible!important}
-    .sample-rail{position:relative;overflow:visible}
+    .sample-rail{position:relative;overflow:visible!important}
     .sample-rail__item{
-      min-height:38px!important;
+      position:relative;
+      z-index:2;
+      min-height:40px!important;
       padding:5px 4px!important;
       transform:none!important;
       transform-origin:center;
+      background:transparent!important;
       will-change:transform;
     }
-    .sample-rail__item.is-expanded{min-height:58px!important}
+    .sample-rail__item.is-expanded{min-height:62px!important;padding-top:8px!important;padding-bottom:8px!important}
     .sample-rail__item.is-active{
-      min-height:56px!important;
-      padding:9px 4px!important;
       transform:none!important;
-      border-top-color:rgba(255,255,255,.22)!important;
-      border-right-color:rgba(255,255,255,.22)!important;
-      border-bottom-color:rgba(255,255,255,.22)!important;
-      background:#252421!important;
-      box-shadow:inset 0 0 0 1px rgba(255,255,255,.035),0 5px 16px rgba(0,0,0,.18)!important;
+      border-top-color:transparent!important;
+      border-right-color:transparent!important;
+      border-bottom-color:rgba(255,255,255,.05)!important;
+      background:transparent!important;
+      box-shadow:none!important;
     }
-    .sample-rail__item.is-active.is-expanded{min-height:66px!important}
+    .sample-rail__select{
+      position:relative;
+      z-index:21;
+      min-width:0;
+      width:100%;
+      display:grid;
+      grid-template-columns:auto minmax(0,1fr) auto;
+      gap:5px;
+      align-items:center;
+      border:0;
+      background:transparent;
+      color:inherit;
+      padding:2px 0;
+      text-align:left;
+    }
     .sample-rail__number{
       min-width:2.05em!important;
-      color:#b59a65!important;
-      font-size:clamp(17px,1.8vw,21px)!important;
-      font-weight:720!important;
+      color:#87837d!important;
+      font-size:clamp(16px,1.65vw,19px)!important;
+      font-weight:430!important;
       line-height:1!important;
-      letter-spacing:-.035em;
+      letter-spacing:-.025em;
       font-variant-numeric:tabular-nums;
       transform-origin:left center;
       transition:none!important;
@@ -99,37 +128,63 @@ function installActivationStyles(): void {
     }
     .sample-rail__item.is-active .sample-rail__number{
       color:#fff!important;
-      font-size:clamp(29px,3vw,35px)!important;
-      font-weight:900!important;
-      text-shadow:0 0 12px rgba(255,255,255,.10);
+      font-size:clamp(29px,3vw,34px)!important;
+      font-weight:820!important;
+      text-shadow:0 1px 8px rgba(0,0,0,.16);
+    }
+    .sample-rail__active-copy{
+      position:relative;
+      z-index:21;
+      min-width:0;
+      display:grid;
+      gap:2px;
     }
     .sample-rail__item:not(.is-active) .sample-rail__label,
-    .sample-rail__item:not(.is-active) .sample-rail__stage{opacity:.78}
-    .sample-rail__active-indicator{
+    .sample-rail__item:not(.is-active) .sample-rail__stage,
+    .sample-rail__item:not(.is-active) .sample-rail__progress{
+      color:#85817b!important;
+      font-weight:400!important;
+      opacity:.82;
+    }
+    .sample-rail__item.is-active .sample-rail__label,
+    .sample-rail__item.is-active .sample-rail__stage,
+    .sample-rail__item.is-active .sample-rail__progress{
+      color:#fff!important;
+    }
+    .sample-rail__label{font-size:9px!important;line-height:1.15!important}
+    .sample-rail__stage,.sample-rail__progress{font-size:8px!important;line-height:1.1!important}
+    .sample-rail__state-dot{position:relative;z-index:21}
+    .sample-rail__item.is-active .sample-rail__state-dot{background:#fff!important;box-shadow:none!important}
+    .sample-rail__actions{position:relative;z-index:22}
+    .sample-rail__active-tab{
       position:fixed;
-      z-index:40;
-      width:14px;
-      height:32px;
+      z-index:20;
       margin:0;
-      border:2px solid var(--as-gold,#b9995a);
+      border:1px solid rgba(214,173,99,.34);
       border-left:0;
-      border-radius:0 18px 18px 0;
-      background:rgba(185,153,90,.075);
-      box-shadow:0 0 12px rgba(185,153,90,.16),inset -2px 0 4px rgba(185,153,90,.10);
+      border-radius:0 999px 999px 0;
+      background:linear-gradient(90deg,rgba(104,78,39,.96),rgba(128,95,45,.96));
+      box-shadow:0 4px 14px rgba(0,0,0,.24),inset -1px 0 0 rgba(255,255,255,.08);
       opacity:0;
       pointer-events:none;
       transform:translate3d(0,0,0);
       transform-origin:left center;
-      will-change:transform,top,left,opacity;
+      will-change:left,top,width,height,opacity,transform;
     }
-    .sample-rail.is-compact .sample-rail__number{font-size:16px!important}
+    .sample-rail.is-compact .sample-rail__number{font-size:15px!important}
     .sample-rail.is-compact .sample-rail__item.is-active .sample-rail__number{font-size:27px!important}
+    .cupping-rail-tools{z-index:50!important}
     @media (max-width:720px){
-      .sample-rail__number{font-size:16px!important}
+      .sample-rail__item{min-height:40px!important;padding:5px 3px!important}
+      .sample-rail__item.is-expanded{min-height:64px!important;padding-top:7px!important;padding-bottom:7px!important}
+      .sample-rail__select{grid-template-columns:auto minmax(0,1fr);gap:3px;padding-right:15px}
+      .sample-rail__number{font-size:15px!important}
       .sample-rail__item.is-active .sample-rail__number{font-size:29px!important}
-      .sample-rail__item.is-active{min-height:54px!important}
-      .sample-rail__item.is-active.is-expanded{min-height:62px!important}
-      .sample-rail__active-indicator{width:13px;height:30px;border-radius:0 16px 16px 0}
+      .sample-rail__select .sample-rail__state-dot{grid-column:1 / -1;justify-self:center}
+      .sample-rail__active-copy{text-align:left}
+      .sample-rail__actions{position:absolute!important;right:1px!important;top:2px!important;display:grid!important;gap:1px!important}
+      .sample-rail__expand{display:grid!important;place-items:center;width:15px!important;min-height:15px!important;font-size:8px!important;opacity:.62}
+      .sample-rail__drag{width:15px!important;min-height:15px!important;font-size:7px!important}
     }
   `;
   document.head.append(style);
@@ -167,25 +222,28 @@ function cancelRailAnimations(root: HTMLElement): void {
   for (const card of directCards(root)) {
     card.getAnimations().forEach((animation) => animation.cancel());
     card.querySelector<HTMLElement>(".sample-rail__number")?.getAnimations().forEach((animation) => animation.cancel());
+    card.querySelector<HTMLElement>(".sample-rail__active-copy")?.getAnimations().forEach((animation) => animation.cancel());
   }
-  indicatorStates.get(root)?.indicator.getAnimations().forEach((animation) => animation.cancel());
+  activeTabStates.get(root)?.tab.getAnimations().forEach((animation) => animation.cancel());
 }
 
-function ensureIndicatorState(root: HTMLElement): IndicatorState {
-  const current = indicatorStates.get(root);
+function ensureActiveTabState(root: HTMLElement): ActiveTabState {
+  const current = activeTabStates.get(root);
   if (current) return current;
 
-  const indicator = element("span", "sample-rail__active-indicator");
-  indicator.setAttribute("aria-hidden", "true");
-  root.append(indicator);
+  const tab = element("span", "sample-rail__active-tab");
+  tab.setAttribute("aria-hidden", "true");
+  root.append(tab);
 
   const scrollContainer = root.closest<HTMLElement>(".cupping-layout__rail") ?? undefined;
-  const state: IndicatorState = { indicator, scrollContainer };
+  const state: ActiveTabState = { tab, scrollContainer };
   if (scrollContainer) {
-    state.scrollHandler = () => positionIndicator(root, false);
+    state.scrollHandler = () => positionActiveTab(root, false);
     scrollContainer.addEventListener("scroll", state.scrollHandler, { passive: true });
   }
-  indicatorStates.set(root, state);
+  state.resizeHandler = () => positionActiveTab(root, false);
+  window.addEventListener("resize", state.resizeHandler, { passive: true });
+  activeTabStates.set(root, state);
   return state;
 }
 
@@ -194,42 +252,63 @@ function activeCard(root: HTMLElement): HTMLElement | undefined {
   return directCards(root).find((card) => card.dataset.sampleId === activeSampleId);
 }
 
-function targetIndicatorPosition(root: HTMLElement): { top: number; left: number; visible: boolean } | undefined {
-  const state = ensureIndicatorState(root);
+function targetActiveTabGeometry(root: HTMLElement): ActiveTabGeometry | undefined {
+  const state = ensureActiveTabState(root);
   const card = activeCard(root);
+  const number = card?.querySelector<HTMLElement>(".sample-rail__number");
   const rail = state.scrollContainer;
-  if (!card || !rail) return undefined;
+  if (!card || !number || !rail) return undefined;
 
   const cardRect = card.getBoundingClientRect();
+  const numberRect = number.getBoundingClientRect();
   const railRect = rail.getBoundingClientRect();
-  const height = state.indicator.offsetHeight || 32;
+  const compact = root.classList.contains("is-compact");
+  const height = Math.ceil(Math.max(compact ? 33 : 36, numberRect.height + (compact ? 6 : 8)));
+  const protrusion = compact ? 12 : 16;
+  const left = Math.round(cardRect.left - 1);
   const visible = cardRect.bottom > railRect.top && cardRect.top < railRect.bottom;
+
   return {
-    top: cardRect.top + cardRect.height / 2 - height / 2,
-    left: railRect.right - 1,
+    top: Math.round(numberRect.top + numberRect.height / 2 - height / 2),
+    left,
+    width: Math.max(42, Math.round(railRect.right + protrusion - left)),
+    height,
     visible
   };
 }
 
-function positionIndicator(root: HTMLElement, animate: boolean, duration = 0, fromTop?: number): void {
-  const state = ensureIndicatorState(root);
-  const target = targetIndicatorPosition(root);
-  state.indicator.getAnimations().forEach((animation) => animation.cancel());
+function positionActiveTab(root: HTMLElement, animate: boolean, duration = 0, fromRect?: DOMRect): void {
+  const state = ensureActiveTabState(root);
+  const target = targetActiveTabGeometry(root);
+  state.tab.getAnimations().forEach((animation) => animation.cancel());
   if (!target) {
-    state.indicator.style.opacity = "0";
+    state.tab.style.opacity = "0";
     return;
   }
 
-  state.indicator.style.left = `${Math.round(target.left)}px`;
-  state.indicator.style.top = `${Math.round(target.top)}px`;
-  state.indicator.style.opacity = target.visible ? "1" : "0";
-  if (!target.visible || !animate || duration <= 0 || fromTop === undefined) return;
+  state.tab.style.left = `${target.left}px`;
+  state.tab.style.top = `${target.top}px`;
+  state.tab.style.width = `${target.width}px`;
+  state.tab.style.height = `${target.height}px`;
+  state.tab.style.opacity = target.visible ? "1" : "0";
+  if (!target.visible || !animate || duration <= 0 || !fromRect) return;
 
-  const deltaY = fromTop - target.top;
-  state.indicator.animate(
+  state.tab.animate(
     [
-      { transform: `translate3d(0,${deltaY}px,0)`, opacity: 1 },
-      { transform: "translate3d(0,0,0)", opacity: 1 }
+      {
+        left: `${Math.round(fromRect.left)}px`,
+        top: `${Math.round(fromRect.top)}px`,
+        width: `${Math.round(fromRect.width)}px`,
+        height: `${Math.round(fromRect.height)}px`,
+        opacity: 1
+      },
+      {
+        left: `${target.left}px`,
+        top: `${target.top}px`,
+        width: `${target.width}px`,
+        height: `${target.height}px`,
+        opacity: 1
+      }
     ],
     { duration, easing: ACTIVATION_EASING }
   );
@@ -249,13 +328,11 @@ function animateCardLayout(
     if (!previous || !card) continue;
     const dx = previous.card.left - next.card.left;
     const dy = previous.card.top - next.card.top;
-    const sx = next.card.width > 0 ? previous.card.width / next.card.width : 1;
-    const sy = next.card.height > 0 ? previous.card.height / next.card.height : 1;
-    if (Math.abs(dx) < .5 && Math.abs(dy) < .5 && Math.abs(sx - 1) < .01 && Math.abs(sy - 1) < .01) continue;
+    if (Math.abs(dx) < .5 && Math.abs(dy) < .5) continue;
     card.animate(
       [
-        { transform: `translate3d(${dx}px,${dy}px,0) scale(${sx},${sy})` },
-        { transform: "translate3d(0,0,0) scale(1,1)" }
+        { transform: `translate3d(${dx}px,${dy}px,0)` },
+        { transform: "translate3d(0,0,0)" }
       ],
       { duration, easing: ACTIVATION_EASING }
     );
@@ -285,21 +362,32 @@ function animateNumberTransition(
   );
 }
 
+function animateActiveCopy(root: HTMLElement, sampleId: string | undefined, duration: number, delay: number): void {
+  if (!sampleId || duration <= 0) return;
+  const copy = cardMap(root).get(sampleId)?.querySelector<HTMLElement>(".sample-rail__active-copy");
+  if (!copy) return;
+  copy.animate(
+    [
+      { opacity: .25, transform: "translate3d(-2px,0,0)" },
+      { opacity: 1, transform: "translate3d(0,0,0)" }
+    ],
+    { duration, delay, easing: ACTIVATION_EASING }
+  );
+}
+
 function updateCard(
   card: HTMLElement,
   item: SampleRailItemViewState,
   callbacks: SampleRailCallbacks,
   compact: boolean,
-  initialExpanded: boolean
+  expanded: boolean
 ): void {
-  if (card.dataset.userExpanded === undefined) {
-    card.dataset.userExpanded = String(initialExpanded && !item.active);
-  }
-  const expanded = !compact && card.dataset.userExpanded === "true";
+  const isExpanded = !compact && expanded;
   const stage = currentStage(item);
-  card.className = `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${expanded ? " is-expanded" : " is-collapsed"}`;
+  card.className = `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${isExpanded ? " is-expanded" : " is-collapsed"}`;
   card.dataset.sampleId = item.sampleId;
   card.dataset.displayNumber = String(item.displayNumber);
+  card.dataset.userExpanded = String(isExpanded);
 
   const existingNumber = card.querySelector<HTMLElement>(".sample-rail__number");
   const number = existingNumber ?? element("strong", "sample-rail__number");
@@ -313,11 +401,11 @@ function updateCard(
   select.onclick = () => void callbacks.select(item.sampleId, preferredStage(item));
   select.append(number);
 
-  if (expanded) {
+  if (isExpanded) {
     const text = element("span", "sample-rail__active-copy");
     text.append(
       element("span", "sample-rail__label", shortLabel(item)),
-      element("small", `sample-rail__stage sample-rail__stage--${stage?.tone ?? "neutral"}`, stage?.label ?? "准备")
+      element("small", `sample-rail__progress sample-rail__stage--${stage?.tone ?? "neutral"}`, progressLabel(item))
     );
     select.append(text);
   }
@@ -328,12 +416,9 @@ function updateCard(
 
   const actions = element("div", "sample-rail__actions");
   if (!compact) {
-    const expand = button("sample-rail__expand", expanded ? "‹" : "›", () => {
-      card.dataset.userExpanded = String(!expanded);
-      return callbacks.toggleExpanded(item.sampleId);
-    });
-    expand.setAttribute("aria-expanded", String(expanded));
-    expand.title = expanded ? "收起样品便签" : "展开样品便签";
+    const expand = button("sample-rail__expand", isExpanded ? "‹" : "›", () => callbacks.toggleExpanded(item.sampleId));
+    expand.setAttribute("aria-expanded", String(isExpanded));
+    expand.title = isExpanded ? "收起样品便签" : "展开样品便签";
     actions.append(expand);
 
     const drag = button("sample-rail__drag", "●", () => undefined);
@@ -355,15 +440,15 @@ export function renderSampleRail(
   options: SampleRailRenderOptions = {}
 ): void {
   installActivationStyles();
-  const indicatorState = ensureIndicatorState(root);
+  const activeTabState = ensureActiveTabState(root);
   const previousActiveSampleId = root.dataset.activeSampleId || undefined;
   const existingCards = cardMap(root);
   const previousDisplayNumber = previousActiveSampleId
     ? Number(existingCards.get(previousActiveSampleId)?.dataset.displayNumber)
     : undefined;
   const before = captureGeometry(root);
-  const indicatorBeforeTop = indicatorState.indicator.style.opacity === "1"
-    ? indicatorState.indicator.getBoundingClientRect().top
+  const tabBeforeRect = activeTabState.tab.style.opacity === "1"
+    ? activeTabState.tab.getBoundingClientRect()
     : undefined;
 
   cancelRailAnimations(root);
@@ -386,7 +471,7 @@ export function renderSampleRail(
     const sampleId = card.dataset.sampleId;
     if (!sampleId || !liveSampleIds.has(sampleId)) card.remove();
   }
-  root.append(indicatorState.indicator);
+  root.append(activeTabState.tab);
 
   const activeItem = items.find((item) => item.active);
   const nextActiveSampleId = activeItem?.sampleId;
@@ -402,8 +487,9 @@ export function renderSampleRail(
 
   if (activeChanged) {
     animateCardLayout(root, before, after, duration);
-    animateNumberTransition(root, previousActiveSampleId, before, after, Math.round(duration * .62), 0);
-    animateNumberTransition(root, nextActiveSampleId, before, after, Math.round(duration * .62), Math.round(duration * .38));
+    animateNumberTransition(root, previousActiveSampleId, before, after, Math.round(duration * .58), 0);
+    animateNumberTransition(root, nextActiveSampleId, before, after, Math.round(duration * .58), Math.round(duration * .34));
+    animateActiveCopy(root, nextActiveSampleId, Math.round(duration * .42), Math.round(duration * .58));
   }
-  positionIndicator(root, activeChanged, duration, indicatorBeforeTop);
+  positionActiveTab(root, activeChanged, duration, tabBeforeRect);
 }
