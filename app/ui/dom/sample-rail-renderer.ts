@@ -78,6 +78,26 @@ function installActivationStyles(): void {
   const style = document.createElement("style");
   style.dataset.aromasenseSampleRailActivation = "true";
   style.textContent = `
+    .cupping-layout{column-gap:18px!important}
+    .cupping-layout.is-rail-compact{column-gap:14px!important}
+    .cupping-layout__rail{overflow-x:visible!important;z-index:3}
+    .cupping-layout__main{
+      width:100%;
+      max-width:980px;
+      justify-self:center;
+      box-sizing:border-box;
+      padding-right:clamp(12px,2vw,28px);
+    }
+    .cupping-main__header,
+    .cupping-main__editor,
+    .cupping-main__stage-strip,
+    .cupping-main__footer{
+      width:100%;
+      max-width:920px;
+      margin-left:auto;
+      margin-right:auto;
+      box-sizing:border-box;
+    }
     .cupping-layout__rail-list{overflow:visible!important}
     .sample-rail{position:relative;overflow:visible!important}
     .sample-rail__item{
@@ -175,6 +195,13 @@ function installActivationStyles(): void {
     .sample-rail.is-compact .sample-rail__item.is-active .sample-rail__number{font-size:27px!important}
     .cupping-rail-tools{z-index:50!important}
     @media (max-width:720px){
+      .cupping-layout{column-gap:16px!important}
+      .cupping-layout.is-rail-compact{column-gap:12px!important}
+      .cupping-layout__main{max-width:100%;padding-right:max(10px,env(safe-area-inset-right))}
+      .cupping-main__header,
+      .cupping-main__editor,
+      .cupping-main__stage-strip,
+      .cupping-main__footer{max-width:100%}
       .sample-rail__item{min-height:40px!important;padding:5px 3px!important}
       .sample-rail__item.is-expanded{min-height:64px!important;padding-top:7px!important;padding-bottom:7px!important}
       .sample-rail__select{grid-template-columns:auto minmax(0,1fr);gap:3px;padding-right:15px}
