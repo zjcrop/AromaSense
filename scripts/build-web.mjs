@@ -16,7 +16,12 @@ const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/
 const coffeeKnowledgeManifestUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-knowledge/releases/latest.json";
 const entityResolutionModelKey = "catalog/entity_resolution_issues_v1.json";
 const requiredEntityResolutionIssueCount = 5;
-const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
+const requiredPipelineVersion = "1.24B-recognition-pipeline.2";
+const requiredEntitySafetyMarkers = [
+  "candidateCoreCode",
+  "manualConfirmationRequired",
+  "historicalCoreCompatibility"
+];
 const requiredBrowserOcrMarkers = [
   "@paddleocr/paddleocr-js@",
   "textDetUnclipRatio",
@@ -252,6 +257,11 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
   const coreSource = await readFile(resolve(out, "luckybean-recognition-core.js"), "utf8");
   if (!coreSource.includes(requiredPipelineVersion)) {
     throw new Error(`LuckyBean production recognition pipeline missing from artifact: ${requiredPipelineVersion}`);
+  }
+  for (const marker of requiredEntitySafetyMarkers) {
+    if (!coreSource.includes(marker)) {
+      throw new Error(`LuckyBean entity-resolution safety implementation missing from artifact: ${marker}`);
+    }
   }
   if (!coreSource.includes("preparePackageImage") || !coreSource.includes("recognizeCoffeeBag")) {
     throw new Error("LuckyBean production image/OCR pipeline missing from artifact");
