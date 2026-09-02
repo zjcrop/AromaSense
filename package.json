@@ -10,7 +10,7 @@
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "luckybean-static-app": "github:zjcrop/luckybean#4d5df7e1d66c9e23195da4cd54338b8f3d333428",
+    "luckybean-static-app": "github:zjcrop/luckybean#de500409687ca4253d5d9eb8812b7e953ff93815",
     "qrcode": "^1.5.4",
     "sql.js": "1.14.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

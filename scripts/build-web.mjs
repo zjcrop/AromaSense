@@ -14,9 +14,18 @@ const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
 const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
 const coffeeKnowledgeManifestUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-knowledge/releases/latest.json";
-const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
+const entityResolutionModelKey = "catalog/entity_resolution_issues_v1.json";
+const requiredEntityResolutionIssueCount = 5;
+const requiredPipelineVersion = "1.24B-recognition-pipeline.2";
+const requiredEntitySafetyMarkers = [
+  "candidateCoreCode",
+  "manualConfirmationRequired",
+  "historicalCoreCompatibility"
+];
 const requiredBrowserOcrMarkers = [
-  "@paddleocr/paddleocr-js@",
+  "PP-OCRv5-browser-",
+  "PP-OCRv5_mobile_det",
+  "PP-OCRv5_mobile_rec",
   "textDetUnclipRatio",
   "ENGINE_INIT_TIMEOUT_MS",
   "PREDICT_TIMEOUT_MS",
@@ -115,6 +124,40 @@ function usableKnowledgeAlias(record) {
     && String(record.reviewStatus ?? "").startsWith("pending");
 }
 
+function verifiedEntityResolutionIssues(knowledge, book) {
+  const model = knowledge?.supplementalModels?.[entityResolutionModelKey];
+  if (model?._format !== "coffee-entity-resolution-issues") {
+    throw new Error("Coffee Knowledge entity-resolution model is missing or has an unexpected format");
+  }
+  if (model?.policy?.coreMutation !== false || model?.policy?.qrIndexChanged !== false) {
+    throw new Error("Coffee Knowledge entity-resolution model violates frozen QR-core ownership");
+  }
+  if (model?.policy?.defaultConsumerAction !== "manual_confirmation_required") {
+    throw new Error("Coffee Knowledge entity-resolution model has an unsafe default consumer action");
+  }
+  const entityCodes = new Set((book.entities ?? []).map((row) => String(row?.[0] ?? "")));
+  const issues = (Array.isArray(model.issues) ? model.issues : [])
+    .filter((issue) => issue?.coreCode && issue?.blockAutomaticEntityResolution === true)
+    .map((issue) => structuredClone(issue));
+  if (issues.length !== requiredEntityResolutionIssueCount) {
+    throw new Error(`Expected ${requiredEntityResolutionIssueCount} blocked entity-resolution issues, received ${issues.length}`);
+  }
+  const seen = new Set();
+  for (const issue of issues) {
+    const code = String(issue.coreCode);
+    if (seen.has(code)) throw new Error(`Duplicate blocked entity-resolution coreCode: ${code}`);
+    seen.add(code);
+    if (!entityCodes.has(code)) throw new Error(`Blocked entity-resolution coreCode is absent from v6 entities: ${code}`);
+    if (!String(issue.issueClass ?? "") || !String(issue.resolutionStatus ?? "")) {
+      throw new Error(`Blocked entity-resolution issue lacks classification/status: ${code}`);
+    }
+    if (!Array.isArray(issue.requiredContext) || issue.requiredContext.length === 0) {
+      throw new Error(`Blocked entity-resolution issue lacks required context: ${code}`);
+    }
+  }
+  return issues;
+}
+
 function applyKnowledgeAliases(book, knowledge, manifest, hash) {
   const tableNames = ["countries", "regions", "entities", "varieties", "processes", "flavors"];
   const rowsByCode = new Map();
@@ -142,6 +185,9 @@ function applyKnowledgeAliases(book, knowledge, manifest, hash) {
     if (!exists) row.push(text);
     applied += 1;
   }
+
+  const entityResolutionIssues = verifiedEntityResolutionIssues(knowledge, book);
+  const blockedAutomaticEntityCodes = entityResolutionIssues.map((issue) => String(issue.coreCode));
   book.coffeeKnowledgeMeta = {
     contract: knowledge.contract,
     version: knowledge.version,
@@ -150,6 +196,17 @@ function applyKnowledgeAliases(book, knowledge, manifest, hash) {
     aliasesApplied: applied,
     canonicalEntityIdentityGroups: Number(knowledge?.counts?.canonicalEntityIdentityGroups ?? 0),
     canonicalGeoIdentityGroups: Number(knowledge?.counts?.canonicalGeoIdentityGroups ?? 0),
+    blockedAutomaticEntityResolutionCount: entityResolutionIssues.length,
+    qrIndexesChanged: false
+  };
+  // Keep only the consumer-facing safety subset instead of duplicating the full
+  // Coffee Knowledge bundle into AromaSense. LuckyBean's production recognition
+  // pipeline reads this exact client contract before accepting an entityCode.
+  book.coffeeKnowledgeClient = {
+    contract: knowledge.contract,
+    version: String(knowledge.version ?? ""),
+    entityResolutionIssues,
+    blockedAutomaticEntityCodes,
     qrIndexesChanged: false
   };
   return book;
@@ -202,6 +259,11 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
   const coreSource = await readFile(resolve(out, "luckybean-recognition-core.js"), "utf8");
   if (!coreSource.includes(requiredPipelineVersion)) {
     throw new Error(`LuckyBean production recognition pipeline missing from artifact: ${requiredPipelineVersion}`);
+  }
+  for (const marker of requiredEntitySafetyMarkers) {
+    if (!coreSource.includes(marker)) {
+      throw new Error(`LuckyBean entity-resolution safety implementation missing from artifact: ${marker}`);
+    }
   }
   if (!coreSource.includes("preparePackageImage") || !coreSource.includes("recognizeCoffeeBag")) {
     throw new Error("LuckyBean production image/OCR pipeline missing from artifact");

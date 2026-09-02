@@ -9,6 +9,13 @@ const outputs = [
   resolve(root, "mobile/android/app/src/main/assets/www/index.html")
 ];
 const tables = ["countries", "regions", "entities", "varieties", "processes", "flavors"];
+const expectedBlockedEntityCodes = [
+  "ST-CN-ZHU@深度研究",
+  "ST-CO-JOS@深度研究",
+  "ST-CO-MIR@深度研究",
+  "ST-CO-DIV@深度研究",
+  "ST-PE-HUA@深度研究"
+];
 
 async function fetchJson(url, timeoutMs = 12000) {
   const controller = new AbortController();
@@ -63,6 +70,41 @@ function assertAlias(book, table, code, alias, label) {
   }
 }
 
+function assertEntityResolutionSafety(book, label) {
+  const client = book?.coffeeKnowledgeClient;
+  if (client?.contract !== "coffee-knowledge/1.0" || client?.qrIndexesChanged !== false) {
+    throw new Error(`${label}: Coffee Knowledge client safety contract missing or incompatible`);
+  }
+  const issues = Array.isArray(client.entityResolutionIssues) ? client.entityResolutionIssues : [];
+  const blockedCodes = Array.isArray(client.blockedAutomaticEntityCodes)
+    ? client.blockedAutomaticEntityCodes.map(String)
+    : [];
+  if (issues.length !== expectedBlockedEntityCodes.length) {
+    throw new Error(`${label}: expected ${expectedBlockedEntityCodes.length} entity-resolution issues, found ${issues.length}`);
+  }
+  if (Number(book?.coffeeKnowledgeMeta?.blockedAutomaticEntityResolutionCount) !== expectedBlockedEntityCodes.length) {
+    throw new Error(`${label}: blocked entity-resolution count metadata is inconsistent`);
+  }
+  const uniqueBlocked = new Set(blockedCodes);
+  if (uniqueBlocked.size !== expectedBlockedEntityCodes.length) {
+    throw new Error(`${label}: blocked entity code list contains duplicates or omissions`);
+  }
+  for (const code of expectedBlockedEntityCodes) {
+    if (!uniqueBlocked.has(code)) throw new Error(`${label}: blocked entity coreCode missing: ${code}`);
+    if (!rowByCode(book, "entities", code)) throw new Error(`${label}: blocked entity is absent from v6 core: ${code}`);
+    const issue = issues.find((item) => String(item?.coreCode ?? "") === code);
+    if (!issue || issue.blockAutomaticEntityResolution !== true) {
+      throw new Error(`${label}: automatic entity resolution is not blocked for ${code}`);
+    }
+    if (!String(issue.issueClass ?? "") || !String(issue.resolutionStatus ?? "")) {
+      throw new Error(`${label}: blocked entity lacks issue classification/status: ${code}`);
+    }
+    if (!Array.isArray(issue.requiredContext) || issue.requiredContext.length === 0) {
+      throw new Error(`${label}: blocked entity lacks required disambiguation context: ${code}`);
+    }
+  }
+}
+
 const source = await fetchJson(codebookUrl);
 for (const output of outputs) {
   const html = await readFile(output, "utf8");
@@ -78,5 +120,6 @@ for (const output of outputs) {
   assertAlias(book, "varieties", "VA-GE", "ゲイシャ", label);
   assertAlias(book, "regions", "RG-EA-YIR", "예가체프", label);
   assertAlias(book, "processes", "PR-NA", "ナチュラル", label);
-  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; QR indexes unchanged`);
+  assertEntityResolutionSafety(book, label);
+  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; QR indexes unchanged`);
 }
