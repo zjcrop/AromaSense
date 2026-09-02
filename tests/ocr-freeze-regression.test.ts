@@ -4,17 +4,22 @@ import test from "node:test";
 
 const packageJson = readFileSync("package.json", "utf8");
 const commonEntry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
+const buildScript = readFileSync("scripts/build-web.mjs", "utf8");
 const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 
-test("AromaSense pins LuckyBean emergency Worker-only OCR release", () => {
-  assert.match(packageJson, /4d5df7e1d66c9e23195da4cd54338b8f3d333428/);
+test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", () => {
+  assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
+  assert.match(buildScript, /1\.24B-recognition-pipeline\.2/);
+  assert.match(buildScript, /candidateCoreCode/);
+  assert.match(buildScript, /manualConfirmationRequired/);
+  assert.match(buildScript, /historicalCoreCompatibility/);
 });
 
 test("recognition path never decodes or re-encodes full images on the UI thread", () => {
