@@ -23,7 +23,9 @@ const requiredEntitySafetyMarkers = [
   "historicalCoreCompatibility"
 ];
 const requiredBrowserOcrMarkers = [
-  "@paddleocr/paddleocr-js@",
+  "PP-OCRv5-browser-",
+  "PP-OCRv5_mobile_det",
+  "PP-OCRv5_mobile_rec",
   "textDetUnclipRatio",
   "ENGINE_INIT_TIMEOUT_MS",
   "PREDICT_TIMEOUT_MS",
