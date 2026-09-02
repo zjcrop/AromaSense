@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -12,6 +13,7 @@ const buildId = (process.env.GITHUB_SHA || process.env.AROMASENSE_BUILD_ID || "d
 const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
 const recognitionCodebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_label_lexicon_v1.json";
+const coffeeKnowledgeManifestUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-knowledge/releases/latest.json";
 const requiredPipelineVersion = "1.24B-recognition-pipeline.1";
 const requiredBrowserOcrMarkers = [
   "@paddleocr/paddleocr-js@",
@@ -43,6 +45,53 @@ async function fetchJson(url, timeoutMs = 12000) {
   }
 }
 
+async function fetchBytes(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function fetchVerifiedCoffeeKnowledge() {
+  const manifest = await fetchJson(coffeeKnowledgeManifestUrl);
+  if (manifest?._format !== "coffee-knowledge-release-manifest" || manifest?.provider !== "brewion") {
+    throw new Error("BrewIon Coffee Knowledge manifest identity is invalid");
+  }
+  if (manifest.contract !== "coffee-knowledge/1.0") {
+    throw new Error(`Unsupported Coffee Knowledge contract: ${manifest.contract ?? "missing"}`);
+  }
+  if (manifest?.compatibility?.qrIndexesChanged === true) {
+    throw new Error("Coffee Knowledge release illegally claims QR index ownership");
+  }
+  const artifact = manifest.artifact;
+  if (!artifact?.name || !artifact?.sha256 || !Number.isFinite(Number(artifact.bytes))) {
+    throw new Error("Coffee Knowledge release artifact metadata is incomplete");
+  }
+  const artifactUrl = new URL(artifact.name, coffeeKnowledgeManifestUrl).href;
+  const bytes = await fetchBytes(artifactUrl);
+  if (bytes.byteLength !== Number(artifact.bytes)) {
+    throw new Error(`Coffee Knowledge bytes mismatch: ${bytes.byteLength} != ${artifact.bytes}`);
+  }
+  const hash = sha256Hex(bytes);
+  if (hash.toLowerCase() !== String(artifact.sha256).toLowerCase()) {
+    throw new Error("Coffee Knowledge SHA-256 verification failed");
+  }
+  const knowledge = JSON.parse(new TextDecoder().decode(bytes));
+  if (knowledge?._format !== "coffee-knowledge-bundle" || knowledge?.contract !== "coffee-knowledge/1.0") {
+    throw new Error("Coffee Knowledge artifact contract is invalid");
+  }
+  return { manifest, knowledge, hash };
+}
+
 function validateRecognitionBook(book) {
   for (const table of ["countries", "regions", "entities", "varieties", "processes", "flavors"]) {
     if (!Array.isArray(book?.[table]) || book[table].length === 0) {
@@ -52,21 +101,76 @@ function validateRecognitionBook(book) {
   return book;
 }
 
+function localizedText(record) {
+  return String(record?.alias ?? record?.name ?? "").normalize("NFKC").trim();
+}
+
+function usableKnowledgeAlias(record) {
+  if (!record?.targetCode || !localizedText(record)) return false;
+  const confidence = Number(record.confidence ?? 0.5);
+  if (!Number.isFinite(confidence) || confidence < 0.65) return false;
+  const type = String(record.nameType ?? "");
+  if (["official", "canonical", "market_verified", "common"].includes(type)) return true;
+  return ["ai_translated", "ai_transliterated"].includes(type)
+    && String(record.reviewStatus ?? "").startsWith("pending");
+}
+
+function applyKnowledgeAliases(book, knowledge, manifest, hash) {
+  const tableNames = ["countries", "regions", "entities", "varieties", "processes", "flavors"];
+  const rowsByCode = new Map();
+  for (const table of tableNames) {
+    for (const row of book[table] ?? []) {
+      if (row?.[0]) rowsByCode.set(String(row[0]), row);
+    }
+  }
+  const records = [
+    ...(Array.isArray(knowledge.localizedNames) ? knowledge.localizedNames : []),
+    ...(Array.isArray(knowledge.localizedAliases) ? knowledge.localizedAliases : [])
+  ];
+  const seen = new Set();
+  let applied = 0;
+  for (const record of records) {
+    if (!usableKnowledgeAlias(record)) continue;
+    const row = rowsByCode.get(String(record.targetCode));
+    if (!row) continue;
+    const text = localizedText(record);
+    const key = `${record.targetCode}\u0000${text.toLocaleLowerCase("zh-CN")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const exists = row.some((value) => typeof value === "string"
+      && value.normalize("NFKC").trim().toLocaleLowerCase("zh-CN") === text.toLocaleLowerCase("zh-CN"));
+    if (!exists) row.push(text);
+    applied += 1;
+  }
+  book.coffeeKnowledgeMeta = {
+    contract: knowledge.contract,
+    version: knowledge.version,
+    manifestVersion: manifest.version,
+    sha256: hash,
+    aliasesApplied: applied,
+    canonicalEntityIdentityGroups: Number(knowledge?.counts?.canonicalEntityIdentityGroups ?? 0),
+    canonicalGeoIdentityGroups: Number(knowledge?.counts?.canonicalGeoIdentityGroups ?? 0),
+    qrIndexesChanged: false
+  };
+  return book;
+}
+
 async function buildRecognitionBootstrap() {
   try {
-    const [rawBook, rawLexicon] = await Promise.all([
+    const [rawBook, rawLexicon, verifiedKnowledge] = await Promise.all([
       fetchJson(recognitionCodebookUrl),
-      fetchJson(recognitionLexiconUrl)
+      fetchJson(recognitionLexiconUrl),
+      fetchVerifiedCoffeeKnowledge()
     ]);
     validateRecognitionBook(rawBook);
     const book = {
       version: rawBook.version,
-      countries: rawBook.countries,
-      regions: rawBook.regions,
-      entities: rawBook.entities,
-      varieties: rawBook.varieties,
-      processes: rawBook.processes,
-      flavors: rawBook.flavors,
+      countries: structuredClone(rawBook.countries),
+      regions: structuredClone(rawBook.regions),
+      entities: structuredClone(rawBook.entities),
+      varieties: structuredClone(rawBook.varieties),
+      processes: structuredClone(rawBook.processes),
+      flavors: structuredClone(rawBook.flavors),
       labelLexicon: {
         version: rawLexicon?.version,
         updatedAt: rawLexicon?.updatedAt ?? "",
@@ -77,6 +181,8 @@ async function buildRecognitionBootstrap() {
         numericRecognition: rawLexicon?.numericRecognition ?? {}
       }
     };
+    applyKnowledgeAliases(book, verifiedKnowledge.knowledge, verifiedKnowledge.manifest, verifiedKnowledge.hash);
+    validateRecognitionBook(book);
     const serialized = JSON.stringify(book);
     const literal = JSON.stringify(serialized)
       .replaceAll("<", "\\u003c")
