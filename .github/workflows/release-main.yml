@@ -1,0 +1,175 @@
+name: AromaSense verified signed release 0.1C
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-main.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: aromasense-verified-signed-release
+  cancel-in-progress: true
+
+env:
+  RELEASE_VERSION: 0.1C
+  RELEASE_TAG: v0.1C
+  ANDROID_VERSION_CODE: '10103'
+  AROMASENSE_CLOUD_URL: https://aromasense-api.zj-crop.workers.dev
+  AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
+  AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Bind release to already validated product source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_SHA=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = 'push' ]; then
+            PRODUCT_SHA=$(git rev-parse HEAD^)
+            git diff --quiet "$PRODUCT_SHA" "$RELEASE_SHA" -- . ':(exclude).github/workflows/release-main.yml'
+          else
+            PRODUCT_SHA="$RELEASE_SHA"
+          fi
+          current_main=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')
+          test "$current_main" = "$RELEASE_SHA"
+          ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&head_sha=$PRODUCT_SHA&per_page=10")
+          deploy=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-cloud.yml/runs?branch=main&head_sha=$PRODUCT_SHA&per_page=10")
+          test "$(printf '%s' "$ci" | jq -r --arg sha "$PRODUCT_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")][0].conclusion // "missing"')" = success
+          test "$(printf '%s' "$deploy" | jq -r --arg sha "$PRODUCT_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")][0].conclusion // "missing"')" = success
+          echo "RELEASE_SHA=$RELEASE_SHA" >> "$GITHUB_ENV"
+          echo "PRODUCT_SHA=$PRODUCT_SHA" >> "$GITHUB_ENV"
+
+      - name: Verify production Worker health
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const url = `${process.env.AROMASENSE_CLOUD_URL}/health`;
+          const response = await fetch(url, { cache: 'no-store' });
+          const body = await response.json();
+          console.log(body);
+          if (!response.ok || body.ok !== true || body.version !== '0.1C' || body.database !== 'configured' || body.authentication !== 'firebase-configured') {
+            throw new Error(`production Worker health contract mismatch: ${JSON.stringify(body)}`);
+          }
+          NODE
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Restore official signing key
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.AROMASENSE_KEYSTORE_B64 || secrets.LUCKYBEAN_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "${KEYSTORE_B64:-}"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/aromasense-release.jks"
+          chmod 600 "$RUNNER_TEMP/aromasense-release.jks"
+
+      - name: Build connected signed release APK
+        env:
+          AROMASENSE_KEYSTORE_FILE: ${{ runner.temp }}/aromasense-release.jks
+          AROMASENSE_STORE_PASSWORD: ${{ secrets.AROMASENSE_STORE_PASSWORD || secrets.LUCKYBEAN_STORE_PASSWORD }}
+          AROMASENSE_KEY_ALIAS: ${{ secrets.AROMASENSE_KEY_ALIAS || secrets.LUCKYBEAN_KEY_ALIAS }}
+          AROMASENSE_KEY_PASSWORD: ${{ secrets.AROMASENSE_KEY_PASSWORD || secrets.LUCKYBEAN_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AROMASENSE_STORE_PASSWORD"
+          test -n "$AROMASENSE_KEY_ALIAS"
+          test -n "$AROMASENSE_KEY_PASSWORD"
+          gradle --no-daemon -p mobile/android :app:assembleRelease
+
+      - name: Verify package, production configuration, pipeline and certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=mobile/android/app/build/outputs/apk/release/app-release.apk
+          test -f "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep -q "package: name='com.zjcrop.aromasense' versionCode='${ANDROID_VERSION_CODE}' versionName='${RELEASE_VERSION}'"
+          unzip -p "$apk" assets/www/index.html > /tmp/aromasense-index.html
+          unzip -p "$apk" assets/www/luckybean-recognition-core.js > /tmp/aromasense-recognition.js
+          grep -Fq "data-cloud-base-url=\"${AROMASENSE_CLOUD_URL}\"" /tmp/aromasense-index.html
+          grep -Fq 'application-version" content="0.1C"' /tmp/aromasense-index.html
+          grep -Fq '1.24P-recognition-pipeline.3' /tmp/aromasense-recognition.js
+          grep -Fq 'knowledgeOnlyVariety' /tmp/aromasense-recognition.js
+          expected_cert=$(tr -d '[:space:]:' < mobile/android/signing/CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')
+          actual_cert=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+          test -n "$actual_cert"
+          test "$actual_cert" = "$expected_cert"
+          echo "CERTIFICATE_SHA256=$actual_cert" >> "$GITHUB_ENV"
+
+      - name: Package formal release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          apk_name="AromaSense-${RELEASE_VERSION}-release.apk"
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "dist/$apk_name"
+          apk_sha=$(sha256sum "dist/$apk_name" | awk '{print $1}')
+          jq -n \
+            --arg release_sha "$RELEASE_SHA" \
+            --arg product_sha "$PRODUCT_SHA" \
+            --arg version "$RELEASE_VERSION" \
+            --arg version_code "$ANDROID_VERSION_CODE" \
+            --arg worker "$AROMASENSE_CLOUD_URL" \
+            --arg certificate "$CERTIFICATE_SHA256" \
+            --arg apk "$apk_name" \
+            --arg apk_sha256 "$apk_sha" \
+            '{release_sha:$release_sha,validated_product_sha:$product_sha,version:$version,version_code:($version_code|tonumber),worker:$worker,certificate_sha256:$certificate,certificate_verified:true,ci_verified:true,cloud_deploy_verified:true,knowledge_only_pipeline:"1.24P-recognition-pipeline.3",apk:$apk,apk_sha256:$apk_sha256}' \
+            > dist/BUILD_PROVENANCE.json
+          sha256sum "dist/$apk_name" > dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AromaSense-${{ env.RELEASE_VERSION }}-signed-${{ env.RELEASE_SHA }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk_name="AromaSense-${RELEASE_VERSION}-release.apk"
+          notes="AromaSense ${RELEASE_VERSION} signed Android release. Production Worker, D1/Firebase health, CI, connected web configuration, LuckyBean recognition-pipeline.3 and official signing certificate are verified before publication."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            git tag -f "$RELEASE_TAG" "$RELEASE_SHA"
+            git push --force origin "refs/tags/$RELEASE_TAG"
+            gh release upload "$RELEASE_TAG" "dist/$apk_name" dist/BUILD_PROVENANCE.json dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" "dist/$apk_name" dist/BUILD_PROVENANCE.json dist/SHA256SUMS.txt --target "$RELEASE_SHA" --title "AromaSense ${RELEASE_VERSION}" --notes "$notes"
+          fi
+          tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG" | awk '{print $1}')
+          test "$tag_sha" = "$RELEASE_SHA"
+          assets=$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name]')
+          printf '%s' "$assets" | jq -e --arg apk "$apk_name" 'index($apk) != null and index("BUILD_PROVENANCE.json") != null and index("SHA256SUMS.txt") != null' >/dev/null
