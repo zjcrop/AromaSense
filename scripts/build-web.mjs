@@ -2,6 +2,10 @@ import { build } from "esbuild";
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+  assertCoffeeKnowledgeConsumerSubset,
+  buildCoffeeKnowledgeConsumerSubset
+} from "./coffee-knowledge-consumer-subset.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const androidOut = resolve(root, "mobile/android/app/src/main/assets/www");
@@ -16,11 +20,17 @@ const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/
 const coffeeKnowledgeManifestUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-knowledge/releases/latest.json";
 const entityResolutionModelKey = "catalog/entity_resolution_issues_v1.json";
 const requiredEntityResolutionIssueCount = 5;
-const requiredPipelineVersion = "1.24B-recognition-pipeline.2";
+const requiredPipelineVersion = "1.24P-recognition-pipeline.3";
 const requiredEntitySafetyMarkers = [
   "candidateCoreCode",
   "manualConfirmationRequired",
   "historicalCoreCompatibility"
+];
+const requiredKnowledgeOnlyMarkers = [
+  "knowledgeOnlyVariety",
+  "knowledgeOnly",
+  "qrCoreCode",
+  "productionCoreApproved"
 ];
 const requiredBrowserOcrMarkers = [
   "PP-OCRv5-browser-",
@@ -188,6 +198,8 @@ function applyKnowledgeAliases(book, knowledge, manifest, hash) {
 
   const entityResolutionIssues = verifiedEntityResolutionIssues(knowledge, book);
   const blockedAutomaticEntityCodes = entityResolutionIssues.map((issue) => String(issue.coreCode));
+  const knowledgeConsumerSubset = buildCoffeeKnowledgeConsumerSubset(knowledge);
+  const knowledgeOnlyVarietyCount = assertCoffeeKnowledgeConsumerSubset(knowledgeConsumerSubset);
   book.coffeeKnowledgeMeta = {
     contract: knowledge.contract,
     version: knowledge.version,
@@ -197,11 +209,13 @@ function applyKnowledgeAliases(book, knowledge, manifest, hash) {
     canonicalEntityIdentityGroups: Number(knowledge?.counts?.canonicalEntityIdentityGroups ?? 0),
     canonicalGeoIdentityGroups: Number(knowledge?.counts?.canonicalGeoIdentityGroups ?? 0),
     blockedAutomaticEntityResolutionCount: entityResolutionIssues.length,
+    knowledgeOnlyVarietyCount,
     qrIndexesChanged: false
   };
-  // Keep only the consumer-facing safety subset instead of duplicating the full
-  // Coffee Knowledge bundle into AromaSense. LuckyBean's production recognition
-  // pipeline reads this exact client contract before accepting an entityCode.
+  // Keep only consumer-facing knowledge instead of duplicating the complete
+  // Coffee Knowledge artifact. Core-code aliases and entity safety remain in the
+  // client contract; unbound varieties are supplied only as sourced recognition
+  // candidates and can never acquire QR ownership in AromaSense.
   book.coffeeKnowledgeClient = {
     contract: knowledge.contract,
     version: String(knowledge.version ?? ""),
@@ -209,6 +223,7 @@ function applyKnowledgeAliases(book, knowledge, manifest, hash) {
     blockedAutomaticEntityCodes,
     qrIndexesChanged: false
   };
+  book.coffeeKnowledge = knowledgeConsumerSubset;
   return book;
 }
 
@@ -263,6 +278,11 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
   for (const marker of requiredEntitySafetyMarkers) {
     if (!coreSource.includes(marker)) {
       throw new Error(`LuckyBean entity-resolution safety implementation missing from artifact: ${marker}`);
+    }
+  }
+  for (const marker of requiredKnowledgeOnlyMarkers) {
+    if (!coreSource.includes(marker)) {
+      throw new Error(`LuckyBean knowledge-only variety safety implementation missing from artifact: ${marker}`);
     }
   }
   if (!coreSource.includes("preparePackageImage") || !coreSource.includes("recognizeCoffeeBag")) {
