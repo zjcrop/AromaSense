@@ -13,13 +13,17 @@ const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]can
 
 test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", () => {
   assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
+  assert.match(packageJson, /github:zjcrop\/luckybean#ae4486454e49d6f73e1e9b96c5cbe4077a199376/);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
-  assert.match(buildScript, /1\.24B-recognition-pipeline\.2/);
+  assert.match(buildScript, /1\.24P-recognition-pipeline\.3/);
   assert.match(buildScript, /candidateCoreCode/);
   assert.match(buildScript, /manualConfirmationRequired/);
   assert.match(buildScript, /historicalCoreCompatibility/);
+  assert.match(buildScript, /knowledgeOnlyVariety/);
+  assert.match(buildScript, /qrCoreCode/);
+  assert.match(buildScript, /productionCoreApproved/);
 });
 
 test("recognition path never decodes or re-encodes full images on the UI thread", () => {

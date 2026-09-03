@@ -1,5 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+  RECOGNITION_PIPELINE_VERSION,
+  analyzeRecognitionDocument,
+  recognitionDocumentFromText
+} from "luckybean-static-app/src/recognition-core.js";
 
 const root = resolve(import.meta.dirname, "..");
 const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
@@ -9,6 +14,8 @@ const outputs = [
   resolve(root, "mobile/android/app/src/main/assets/www/index.html")
 ];
 const tables = ["countries", "regions", "entities", "varieties", "processes", "flavors"];
+const requiredPipelineVersion = "1.24P-recognition-pipeline.3";
+const minimumKnowledgeOnlyVarietyCount = 16;
 const expectedBlockedEntityCodes = [
   "ST-CN-ZHU@深度研究",
   "ST-CO-JOS@深度研究",
@@ -34,8 +41,7 @@ function embeddedBook(html) {
   const regex = new RegExp(`localStorage\\.setItem\\(${JSON.stringify(recognitionCacheKey).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\)`);
   const match = html.match(regex);
   if (!match) throw new Error(`Recognition bootstrap for ${escapedKey} not found`);
-  const serialized = JSON.parse(match[1]);
-  return JSON.parse(serialized);
+  return JSON.parse(JSON.parse(match[1]));
 }
 
 function assertCoreUnchanged(source, bundled, label) {
@@ -50,8 +56,7 @@ function assertCoreUnchanged(source, bundled, label) {
       if (!bundledRow || bundledRow[0] !== row[0]) {
         throw new Error(`${label}: ${table}[${index}] QR code/index changed`);
       }
-      const prefix = bundledRow.slice(0, row.length);
-      if (JSON.stringify(prefix) !== JSON.stringify(row)) {
+      if (JSON.stringify(bundledRow.slice(0, row.length)) !== JSON.stringify(row)) {
         throw new Error(`${label}: ${table}[${index}] original fields changed for ${row[0]}`);
       }
     });
@@ -105,6 +110,62 @@ function assertEntityResolutionSafety(book, label) {
   }
 }
 
+function assertKnowledgeOnlySubset(book, label) {
+  const subset = book?.coffeeKnowledge;
+  if (subset?._format !== "coffee-knowledge-bundle" || subset?.contract !== "coffee-knowledge/1.0") {
+    throw new Error(`${label}: knowledge-only consumer subset is missing`);
+  }
+  if (subset?.compatibility?.qrIndexesChanged !== false) {
+    throw new Error(`${label}: knowledge-only consumer subset violates frozen QR indexes`);
+  }
+  const details = Array.isArray(subset?.unboundKnowledge?.varietyDetails)
+    ? subset.unboundKnowledge.varietyDetails
+    : [];
+  if (details.length < minimumKnowledgeOnlyVarietyCount) {
+    throw new Error(`${label}: expected at least ${minimumKnowledgeOnlyVarietyCount} knowledge-only varieties, found ${details.length}`);
+  }
+  if (Number(book?.coffeeKnowledgeMeta?.knowledgeOnlyVarietyCount) !== details.length) {
+    throw new Error(`${label}: knowledge-only variety count metadata is inconsistent`);
+  }
+  for (const id of ["WCR-HP-ANACAFE-14", "WCR-HP-CATIMOR-129"]) {
+    const detail = details.find((item) => String(item?.id ?? "") === id);
+    if (!detail || detail.coreCode || !detail.canonicalNameEn) {
+      throw new Error(`${label}: safe knowledge-only variety missing: ${id}`);
+    }
+    if (!Array.isArray(detail.sourceRefs) || detail.sourceRefs.length === 0) {
+      throw new Error(`${label}: knowledge-only variety lacks sources: ${id}`);
+    }
+  }
+}
+
+function assertKnowledgeOnlyRuntime(book, label) {
+  if (RECOGNITION_PIPELINE_VERSION !== requiredPipelineVersion) {
+    throw new Error(`${label}: installed LuckyBean pipeline is ${RECOGNITION_PIPELINE_VERSION}, expected ${requiredPipelineVersion}`);
+  }
+  const document = recognitionDocumentFromText("VARIETY: Anacafe 14");
+  const analysis = analyzeRecognitionDocument(document, book);
+  const candidate = analysis?.parsed?.parseMetadata?.knowledgeOnlyVariety;
+  const field = analysis?.fields?.find((item) => item.field === "varietyCode");
+  if (analysis?.parsed?.varietyCode) {
+    throw new Error(`${label}: knowledge-only variety fabricated QR/core code ${analysis.parsed.varietyCode}`);
+  }
+  if (candidate?.knowledgeId !== "WCR-HP-ANACAFE-14") {
+    throw new Error(`${label}: Anacafe 14 did not resolve to the expected knowledge-only identity`);
+  }
+  if (candidate?.qrCoreCode !== null || candidate?.qrEligible !== false || candidate?.productionCoreApproved !== false) {
+    throw new Error(`${label}: knowledge-only candidate incorrectly acquired QR/production eligibility`);
+  }
+  if (candidate?.manualConfirmationRequired !== true) {
+    throw new Error(`${label}: knowledge-only candidate does not require manual confirmation`);
+  }
+  if (!Array.isArray(candidate?.sourceRefs) || candidate.sourceRefs.length === 0) {
+    throw new Error(`${label}: knowledge-only runtime candidate lost source evidence`);
+  }
+  if (!field || field.resolved !== false || field.status !== "review") {
+    throw new Error(`${label}: knowledge-only variety did not remain in recognition review`);
+  }
+}
+
 const source = await fetchJson(codebookUrl);
 for (const output of outputs) {
   const html = await readFile(output, "utf8");
@@ -121,5 +182,7 @@ for (const output of outputs) {
   assertAlias(book, "regions", "RG-EA-YIR", "예가체프", label);
   assertAlias(book, "processes", "PR-NA", "ナチュラル", label);
   assertEntityResolutionSafety(book, label);
-  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; QR indexes unchanged`);
+  assertKnowledgeOnlySubset(book, label);
+  assertKnowledgeOnlyRuntime(book, label);
+  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; knowledgeOnlyVarieties=${book.coffeeKnowledgeMeta.knowledgeOnlyVarietyCount}; pipeline=${RECOGNITION_PIPELINE_VERSION}; QR indexes unchanged`);
 }
