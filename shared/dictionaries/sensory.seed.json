@@ -1,0 +1,13 @@
+{
+  "version":"1.0",
+  "items":[
+    {"id":"sensory-floral","name":{"zh":"花香","en":"Floral","ja":"","ko":""},"group":"aroma","aliases":["花香调","floral"]},
+    {"id":"sensory-fruity","name":{"zh":"果香","en":"Fruity","ja":"","ko":""},"group":"aroma","aliases":["水果香","fruity"]},
+    {"id":"sensory-citrus","name":{"zh":"柑橘","en":"Citrus","ja":"","ko":""},"group":"flavor","aliases":["柑橘类","citrus"]},
+    {"id":"sensory-berry","name":{"zh":"莓果","en":"Berry","ja":"","ko":""},"group":"flavor","aliases":["浆果","berry"]},
+    {"id":"sensory-chocolate","name":{"zh":"巧克力","en":"Chocolate","ja":"","ko":""},"group":"flavor","aliases":["可可","cocoa","chocolate"]},
+    {"id":"sensory-sweetness","name":{"zh":"甜感","en":"Sweetness","ja":"","ko":""},"group":"taste","aliases":["甜度","sweetness"]},
+    {"id":"sensory-acidity","name":{"zh":"酸质","en":"Acidity","ja":"","ko":""},"group":"taste","aliases":["酸度","acidity"]},
+    {"id":"sensory-body","name":{"zh":"醇厚度","en":"Body","ja":"","ko":""},"group":"mouthfeel","aliases":["口感厚度","body"]}
+  ]
+}
