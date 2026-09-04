@@ -118,6 +118,7 @@ export class AromaSenseDomApp {
       createSampleId: this.options.createSampleId,
       onCreated: (sessionId) => this.openSession(sessionId),
       onResume: (sessionId) => this.openSession(sessionId),
+      onOpenRecent: (sessionId, readOnly) => readOnly ? this.showReplay(sessionId) : this.openSession(sessionId),
       onOpenAccount: () => this.showAccount(),
       onOpenRecords: () => this.showRecords(),
       recentSessions,
