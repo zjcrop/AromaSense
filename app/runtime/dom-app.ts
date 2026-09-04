@@ -47,6 +47,12 @@ export interface AppPreloadState {
 
 type RootMode = "setup" | "cupping" | "account" | "records" | "replay" | "empty";
 
+interface HomeModalHandle {
+  overlay: HTMLElement;
+  content: HTMLElement;
+  close(): void;
+}
+
 export class AromaSenseDomApp {
   private screen?: CuppingScreenRenderer;
   private readonly preferences: UserPreferencesRepository;
@@ -58,6 +64,7 @@ export class AromaSenseDomApp {
   private readonly revisions: RevisionCheckpointService;
   private readonly recognizer = new SampleRecognitionService();
   private preloadPromise?: Promise<AppPreloadState>;
+  private homeModal?: HTMLElement;
 
   constructor(private readonly root: HTMLElement, private readonly db: SQLiteDriver, private readonly options: AromaSenseDomAppOptions) {
     this.preferences = new UserPreferencesRepository(db);
@@ -99,6 +106,7 @@ export class AromaSenseDomApp {
   async start(): Promise<void> { await this.preload(); await this.showSetup(); }
 
   async showAccount(returnSessionId?: string): Promise<void> {
+    this.closeHomeModal();
     this.screen?.dispose(); this.screen = undefined; this.setRootMode("account");
     await new AccountRenderer(this.root, this.authClient, {
       onAuthenticated: async () => { await this.syncPending(); if (returnSessionId) await this.openSession(returnSessionId); else await this.showSetup(); },
@@ -109,6 +117,7 @@ export class AromaSenseDomApp {
   }
 
   async showSetup(): Promise<void> {
+    this.closeHomeModal();
     this.screen?.dispose(); this.screen = undefined; this.setRootMode("setup");
     const localRepository = new LocalCuppingRepository(this.db);
     const recentSessions = await new RecentSessionReader(this.db).list(10);
@@ -119,8 +128,8 @@ export class AromaSenseDomApp {
       onCreated: (sessionId) => this.openSession(sessionId),
       onResume: (sessionId) => this.openSession(sessionId),
       onOpenRecent: (sessionId, readOnly) => readOnly ? this.showReplay(sessionId) : this.openSession(sessionId),
-      onOpenAccount: () => this.showAccount(),
-      onOpenRecords: () => this.showRecords(),
+      onOpenAccount: () => this.showHomeAccountModal(),
+      onOpenRecords: () => this.showHomeRecordsModal(),
       recentSessions,
       syncLabel: "账户",
       loadDraft: () => this.preferences.get<BatchSetupDraft>(BATCH_SETUP_DRAFT_KEY),
@@ -131,6 +140,7 @@ export class AromaSenseDomApp {
   }
 
   async openSession(sessionId: string): Promise<void> {
+    this.closeHomeModal();
     this.screen?.dispose(); this.screen = undefined; this.setRootMode("cupping");
     const repository = new LocalCuppingRepository(this.db);
     const editor = new CuppingSessionController(repository, this.options.observationIdFactory);
@@ -147,6 +157,7 @@ export class AromaSenseDomApp {
   }
 
   async showRecords(): Promise<void> {
+    this.closeHomeModal();
     this.screen?.dispose(); this.screen = undefined; this.setRootMode("records");
     const repository = new LocalCuppingRepository(this.db);
     const recordService = new SessionRecordService(repository, this.options.now);
@@ -173,6 +184,7 @@ export class AromaSenseDomApp {
   }
 
   async showReplay(sessionId: string): Promise<void> {
+    this.closeHomeModal();
     this.screen?.dispose(); this.screen = undefined; this.setRootMode("replay");
     const snapshot = await new SessionRecordService(new LocalCuppingRepository(this.db), this.options.now).snapshot(sessionId);
     new RecordReplayRenderer(this.root, snapshot, () => this.showRecords()).render();
@@ -186,7 +198,117 @@ export class AromaSenseDomApp {
 
   async syncCounts() { return this.syncQueue.counts(); }
 
-  dispose(): void { this.screen?.dispose(); this.screen = undefined; this.setRootMode("empty"); }
+  dispose(): void { this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("empty"); }
+
+  private installHomeModalStyles(): void {
+    if (document.head.querySelector("style[data-aromasense-home-modal]")) return;
+    const style = document.createElement("style");
+    style.dataset.aromasenseHomeModal = "true";
+    style.textContent = `
+      .home-modal{position:fixed;inset:0;z-index:2200;display:grid;place-items:center;padding:22px;background:rgba(0,0,0,.68);backdrop-filter:blur(9px)}
+      .home-modal__content{width:min(860px,calc(100vw - 32px));max-height:min(86dvh,820px);overflow:auto;border:1px solid rgba(214,173,99,.28);border-radius:16px;background:#151515;box-shadow:0 24px 70px rgba(0,0,0,.52)}
+      .home-modal__content.account-screen{min-height:0;padding:1px 0 24px}
+      .home-modal__content .account-card{margin:28px auto 18px}
+      .home-modal__content.session-records{min-height:0!important;max-width:none!important;margin:0!important;padding:18px!important}
+      .home-modal__content .session-records__version{display:none!important}
+      @media(max-width:620px){.home-modal{padding:10px}.home-modal__content{width:calc(100vw - 20px);max-height:92dvh;border-radius:12px}.home-modal__content.session-records{padding:12px!important}}
+    `;
+    document.head.append(style);
+  }
+
+  private createHomeModal(label: string): HomeModalHandle {
+    this.closeHomeModal();
+    this.installHomeModalStyles();
+    const overlay = document.createElement("div");
+    overlay.className = "home-modal";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", label);
+    const content = document.createElement("div");
+    content.className = "home-modal__content";
+    overlay.append(content);
+    const close = (): void => {
+      if (this.homeModal === overlay) this.homeModal = undefined;
+      overlay.remove();
+    };
+    overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) close(); });
+    overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+    document.body.append(overlay);
+    this.homeModal = overlay;
+    return { overlay, content, close };
+  }
+
+  private closeHomeModal(): void {
+    this.homeModal?.remove();
+    this.homeModal = undefined;
+  }
+
+  private async showHomeAccountModal(): Promise<void> {
+    const modal = this.createHomeModal("账户");
+    modal.content.classList.add("account-screen");
+    await new AccountRenderer(modal.content, this.authClient, {
+      onAuthenticated: async () => {
+        await this.syncPending();
+        modal.close();
+        await this.showSetup();
+      },
+      onSkip: () => modal.close(),
+      onSync: async () => { await this.syncPending(); },
+      getSyncSummary: () => this.syncQueue.counts()
+    }).render();
+  }
+
+  private async showHomeRecordsModal(): Promise<void> {
+    const modal = this.createHomeModal("杯测记录");
+    modal.content.classList.add("session-records");
+    const repository = new LocalCuppingRepository(this.db);
+    const recordService = new SessionRecordService(repository, this.options.now);
+    const records = await new SessionRecordsReader(this.db).list(300);
+    const shareClient = this.hasCloudAuthConfiguration()
+      ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token)
+      : undefined;
+    const renderer = new SessionRecordsRenderer(modal.content, {
+      records,
+      onBack: () => modal.close(),
+      onOpen: async (sessionId, readOnly) => {
+        modal.close();
+        if (readOnly) await this.showReplay(sessionId);
+        else await this.openSession(sessionId);
+      },
+      onDelete: async (sessionIds) => {
+        for (const sessionId of sessionIds) await recordService.delete(sessionId);
+        modal.close();
+        await this.showHomeRecordsModal();
+      },
+      onSync: async (sessionIds) => {
+        await this.syncPending(sessionIds);
+        modal.close();
+        await this.showHomeRecordsModal();
+      },
+      onShare: async (sessionId) => {
+        if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接");
+        const snapshot = await recordService.snapshot(sessionId);
+        return (await shareClient.create(snapshot)).shareUrl;
+      },
+      onExport: async (sessionId) => { this.downloadRecord(await recordService.snapshot(sessionId)); },
+      loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY),
+      saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
+    });
+    await renderer.render();
+
+    const toolbar = modal.content.querySelector<HTMLElement>(".session-records__toolbar");
+    if (toolbar) {
+      const importButton = document.createElement("button");
+      importButton.type = "button";
+      importButton.className = "session-records__tool";
+      importButton.textContent = "导入";
+      importButton.addEventListener("click", () => {
+        modal.close();
+        queueMicrotask(() => this.root.querySelector<HTMLButtonElement>(".batch-setup__import-inline")?.click());
+      });
+      toolbar.prepend(importButton);
+    }
+  }
 
   private downloadRecord(snapshot: unknown): void {
     const body = JSON.stringify(snapshot, null, 2);
