@@ -22,7 +22,7 @@ function fixture() {
   return { dir, db, repository: new LocalCuppingRepository(db) };
 }
 
-test("sample rail exposes progress without loading observations", async () => {
+test("sample rail derives progress from persisted sensory edits rather than visited pages", async () => {
   const f = fixture();
   try {
     const now = "2026-08-24T20:30:00+08:00";
@@ -34,8 +34,26 @@ test("sample rail exposes progress without loading observations", async () => {
       (index) => `sample-${index + 1}`
     );
     await f.repository.createSessionWithSamples(session, samples);
-    await f.repository.setStageState(session.sessionId, "sample-1", "preparation", "completed", now, now, now);
-    await f.repository.setStageState(session.sessionId, "sample-1", "high_temp", "active", now, now);
+    await f.repository.saveObservation({
+      observationId: "prep-dry",
+      sessionId: session.sessionId,
+      sampleId: "sample-1",
+      stageId: "preparation",
+      fieldKey: "dry_fragrance_intensity",
+      value: 6,
+      dictionaryVersion: "sensory-dictionary/1.2",
+      updatedAt: now
+    });
+    await f.repository.saveObservation({
+      observationId: "high-acidity",
+      sessionId: session.sessionId,
+      sampleId: "sample-1",
+      stageId: "high_temp",
+      fieldKey: "acidity_intensity",
+      value: 7,
+      dictionaryVersion: "sensory-dictionary/1.2",
+      updatedAt: now
+    });
 
     const progress = await new StageProgressReader(f.db).listForSession(session.sessionId);
     const rail = buildSampleRailViewState(samples, progress, "sample-1");
@@ -43,7 +61,7 @@ test("sample rail exposes progress without loading observations", async () => {
     assert.equal(rail[0]?.active, true);
     assert.equal(rail[0]?.completedStageCount, 1);
     assert.equal(rail[0]?.startedStageCount, 2);
-    assert.equal(rail[0]?.stages.find((stage) => stage.stageId === "high_temp")?.tone, "pink");
+    assert.equal(rail[0]?.stages.find((stage) => stage.stageId === "high_temp")?.status, "active");
     assert.equal(rail[1]?.startedStageCount, 0);
   } finally {
     f.db.close();
