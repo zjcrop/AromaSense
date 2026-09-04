@@ -53,7 +53,7 @@ function installInlineFieldStyles(): void {
       font:inherit;font-size:12px;cursor:pointer;
       pointer-events:auto!important;touch-action:manipulation;
     }
-    .batch-setup__target-choice+ .batch-setup__target-choice{border-left:1px solid rgba(214,173,99,.10)}
+    .batch-setup__target-choice+.batch-setup__target-choice{border-left:1px solid rgba(214,173,99,.10)}
     .batch-setup__target-choice.is-selected,
     .batch-setup__target-choice[aria-pressed="true"]{
       color:#f4f1eb;font-weight:800;background:rgba(214,173,99,.08)
@@ -64,133 +64,135 @@ function installInlineFieldStyles(): void {
 }
 
 function installHomeStyles(): void {
-  if (document.head.querySelector("style[data-aromasense-home-chrome]")) return;
+  const previous = document.head.querySelector("style[data-aromasense-home-chrome]");
+  previous?.remove();
   const style = document.createElement("style");
   style.dataset.aromasenseHomeChrome = "true";
   style.textContent = `
+    .batch-setup{max-width:760px!important;padding-top:28px!important}
     .batch-setup__header{
       display:grid!important;
-      grid-template-columns:minmax(150px,1fr) auto!important;
+      justify-items:center!important;
       align-items:center!important;
-      gap:18px!important;
-      margin-bottom:22px!important;
+      gap:13px!important;
+      margin:0 0 30px!important;
+      padding:8px 0 2px!important;
+      text-align:center!important;
     }
-    .batch-setup__header-copy{
-      width:172px;
-      min-width:0;
-      justify-self:start;
-      text-align:center;
-    }
-    .batch-setup__brand{display:grid;gap:7px;justify-items:center}
-    .batch-setup__brand-en{
-      margin:0;
-      color:#f5f1e8;
-      font-size:22px;
-      line-height:1;
-      font-weight:690;
-      letter-spacing:.015em;
-    }
+    .batch-setup__header-copy{width:auto!important;justify-self:center!important;text-align:center!important}
+    .batch-setup__brand{display:grid;gap:8px;justify-items:center}
     .batch-setup__brand-zh{
+      order:1;
+      margin:0;
       color:#d6ad63;
       font-family:"Noto Serif SC","Songti SC",STSong,serif;
-      font-size:15px;
+      font-size:34px;
+      line-height:1.08;
+      font-weight:580;
+      letter-spacing:.30em;
+      text-indent:.30em;
+    }
+    .batch-setup__brand-en{
+      order:2;
+      margin:0;
+      color:#f4f1eb;
+      font-size:17px;
       line-height:1;
-      font-weight:560;
-      letter-spacing:.34em;
-      text-indent:.34em;
+      font-weight:640;
+      letter-spacing:.09em;
     }
     .batch-setup__header-actions{
       display:flex!important;
-      align-items:center;
-      justify-content:flex-end;
-      gap:20px!important;
-      min-width:0;
+      align-items:center!important;
+      justify-content:center!important;
+      gap:26px!important;
+      min-width:0!important;
     }
     .batch-setup__header-actions button{
-      min-width:0!important;
-      min-height:34px!important;
-      margin:0!important;
-      padding:4px 0!important;
-      border:0!important;
-      border-radius:0!important;
-      background:transparent!important;
-      box-shadow:none!important;
+      min-width:0!important;min-height:26px!important;margin:0!important;padding:3px 1px!important;
+      border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;
+      color:#969087!important;font-size:11px!important;font-weight:560!important;letter-spacing:.08em!important;
+      white-space:nowrap!important;
+    }
+    .batch-setup__header-actions button:hover,.batch-setup__header-actions button:focus-visible{color:#d6ad63!important;outline:none}
+    .batch-setup__home-section{margin:0 0 30px}
+    .batch-setup__home-section-title,
+    .batch-setup__session-meta-title{
+      margin:0 0 16px!important;
       color:#d6ad63!important;
-      font-size:13px!important;
-      font-weight:700!important;
-      white-space:nowrap;
+      text-align:center!important;
+      font-family:"Noto Serif SC","Songti SC",STSong,serif!important;
+      font-size:16px!important;
+      line-height:1.2!important;
+      font-weight:560!important;
+      letter-spacing:.16em!important;
     }
-    .batch-setup__history{
-      margin-top:24px;
-      padding-top:6px;
-      border-top:1px solid rgba(255,255,255,.06);
+    .batch-setup__session-meta{margin:0 0 30px!important;padding:0!important;border:0!important;background:transparent!important}
+    .batch-setup__session-meta-grid{gap:13px 18px!important}
+    .batch-setup__session-meta-field[data-session-field="日期"],
+    .batch-setup__session-meta-field[data-session-field="时间"],
+    .batch-setup__session-meta-field[data-session-field="组织方"],
+    .batch-setup__session-meta-field[data-session-field="参与对象"]{
+      font-size:15px!important;
     }
+    .batch-setup__session-meta-input{
+      min-height:45px!important;
+      font-size:15px!important;
+      border-radius:0!important;
+      border-width:0 0 1px!important;
+      border-color:rgba(214,173,99,.24)!important;
+      background:transparent!important;
+      padding:8px 2px!important;
+    }
+    .batch-setup__samples-section{margin:0 0 28px}
+    .batch-setup__capture-actions{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important;margin:0 0 14px!important}
+    .batch-setup__capture-actions button{
+      min-height:40px!important;border-radius:8px!important;background:#1b1b1b!important;
+    }
+    .batch-setup__import-inline{border-color:rgba(185,153,90,.38)!important;color:#c9bea4!important}
+    .batch-setup__rows{margin-top:4px}
+    .batch-setup__footer-section{
+      margin:10px 0 0;
+      padding:22px 0 0;
+      border-top:1px solid rgba(255,255,255,.065);
+    }
+    .batch-setup__footer-section .batch-setup__start{
+      margin:0!important;min-height:48px!important;border-radius:9px!important;
+      font-size:14px!important;letter-spacing:.08em!important;
+    }
+    .batch-setup__history{margin-top:20px;padding-top:3px;border-top:0}
     .batch-setup__history-group{border-bottom:1px solid rgba(255,255,255,.055)}
     .batch-setup__history-toggle{
-      width:100%;
-      min-height:44px;
-      display:grid;
-      grid-template-columns:minmax(0,1fr) auto;
-      align-items:center;
-      gap:12px;
-      margin:0;
-      padding:10px 0;
-      border:0;
-      background:transparent;
-      color:#b9b3a9;
-      text-align:left;
-      font:inherit;
-      font-size:13px;
-      font-weight:650;
+      width:100%;min-height:42px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;
+      margin:0;padding:9px 0;border:0;background:transparent;color:#9a958d;text-align:left;font:inherit;font-size:12px;font-weight:590;
     }
-    .batch-setup__history-toggle::after{
-      content:'+';
-      color:#8b867e;
-      font-size:16px;
-      font-weight:400;
-      transition:transform 160ms ease,color 160ms ease;
-    }
+    .batch-setup__history-toggle::after{content:'+';color:#77726b;font-size:16px;font-weight:400;transition:transform 160ms ease,color 160ms ease}
     .batch-setup__history-group.is-open .batch-setup__history-toggle{color:#d6ad63}
-    .batch-setup__history-group.is-open .batch-setup__history-toggle::after{
-      transform:rotate(45deg);
-      color:#d6ad63;
-    }
+    .batch-setup__history-group.is-open .batch-setup__history-toggle::after{transform:rotate(45deg);color:#d6ad63}
     .batch-setup__history-list{display:grid;gap:1px;padding:0 0 8px}
     .batch-setup__history-list[hidden]{display:none!important}
     .batch-setup__history-item{
-      width:100%;
-      min-width:0;
-      display:grid;
-      grid-template-columns:minmax(0,1fr) auto;
-      align-items:center;
-      gap:12px;
-      margin:0;
-      padding:9px 0;
-      border:0;
-      background:transparent;
-      color:#eee9df;
-      text-align:left;
-      font:inherit;
+      width:100%;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;
+      margin:0;padding:9px 0;border:0;background:transparent;color:#eee9df;text-align:left;font:inherit;
     }
     .batch-setup__history-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:560}
     .batch-setup__history-meta{color:#858078;font-size:10px;white-space:nowrap}
+    .batch-setup__file-input{display:none!important}
     @media(max-width:620px){
-      .batch-setup__header{grid-template-columns:minmax(128px,1fr) auto!important;gap:12px!important}
-      .batch-setup__header-copy{width:142px}
-      .batch-setup__brand-en{font-size:19px}
-      .batch-setup__brand-zh{font-size:13px}
-      .batch-setup__header-actions{gap:13px!important}
-      .batch-setup__header-actions button{font-size:12px!important}
+      .batch-setup{padding-top:20px!important}
+      .batch-setup__header{margin-bottom:26px!important}
+      .batch-setup__brand-zh{font-size:29px}
+      .batch-setup__brand-en{font-size:15px}
+      .batch-setup__session-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:11px 12px!important}
+      .batch-setup__capture-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
       .batch-setup__history-item{grid-template-columns:1fr;gap:2px}
       .batch-setup__history-meta{white-space:normal}
     }
     @media(max-width:390px){
-      .batch-setup__header{grid-template-columns:minmax(112px,1fr) auto!important;gap:9px!important}
-      .batch-setup__header-copy{width:124px}
-      .batch-setup__brand-en{font-size:17px}
-      .batch-setup__brand-zh{font-size:12px}
-      .batch-setup__header-actions{gap:10px!important}
-      .batch-setup__header-actions button{font-size:11px!important}
+      .batch-setup__brand-zh{font-size:27px}
+      .batch-setup__brand-en{font-size:14px}
+      .batch-setup__header-actions{gap:22px!important}
+      .batch-setup__session-meta-grid{grid-template-columns:1fr!important}
     }
   `;
   document.head.append(style);
@@ -223,7 +225,7 @@ export class BatchSetupRenderer {
     this.flattenSessionMetadataFields();
     this.installDirectCuppingTarget();
     this.rebuildHomeHeader();
-    this.rebuildRecentSessions();
+    this.rebuildHomeLayout();
   }
 
   private rebuildHomeHeader(): void {
@@ -235,36 +237,90 @@ export class BatchSetupRenderer {
     copy.replaceChildren();
     const brand = document.createElement("div");
     brand.className = "batch-setup__brand";
-    brand.setAttribute("aria-label", "AromaSense 香迹");
+    brand.setAttribute("aria-label", "香迹 AromaSense");
     brand.append(
-      Object.assign(document.createElement("h1"), { className: "batch-setup__brand-en", textContent: "AromaSense" }),
-      Object.assign(document.createElement("div"), { className: "batch-setup__brand-zh", textContent: "香  迹" })
+      Object.assign(document.createElement("h1"), { className: "batch-setup__brand-zh", textContent: "香迹" }),
+      Object.assign(document.createElement("div"), { className: "batch-setup__brand-en", textContent: "AromaSense" })
     );
     copy.append(brand);
 
     const actionButtons = [...actions.querySelectorAll<HTMLButtonElement>("button")];
-    if (actionButtons[0]) actionButtons[0].textContent = "账户";
-    if (actionButtons[1]) actionButtons[1].textContent = "导入";
-    if (actionButtons[2]) actionButtons[2].textContent = "记录";
+    const account = actionButtons[0];
+    const importButton = actionButtons[1];
+    const records = actionButtons[2];
+    actions.replaceChildren();
+    if (account) {
+      account.textContent = "账户";
+      actions.append(account);
+    }
+    if (records) {
+      records.textContent = "记录";
+      actions.append(records);
+    }
+    const captureActions = this.root.querySelector<HTMLElement>(".batch-setup__capture-actions");
+    if (importButton && captureActions) {
+      importButton.textContent = "导入数据";
+      importButton.className = "batch-setup__capture batch-setup__import-inline";
+      captureActions.append(importButton);
+    }
   }
 
-  private rebuildRecentSessions(): void {
+  private sectionTitle(text: string): HTMLElement {
+    const title = document.createElement("h2");
+    title.className = "batch-setup__home-section-title";
+    title.textContent = text;
+    return title;
+  }
+
+  private rebuildHomeLayout(): void {
     this.root.querySelector(".batch-setup__recent")?.remove();
     this.root.querySelector(".batch-setup__history")?.remove();
 
+    const header = this.root.querySelector<HTMLElement>(".batch-setup__header");
+    const metadata = this.root.querySelector<HTMLElement>(".batch-setup__session-meta");
+    const captureActions = this.root.querySelector<HTMLElement>(".batch-setup__capture-actions");
+    const blindNote = this.root.querySelector<HTMLElement>(".batch-setup__blind-entry-note");
+    const rows = this.root.querySelector<HTMLElement>(".batch-setup__rows");
+    const status = this.root.querySelector<HTMLElement>(".batch-setup__status");
+    const start = this.root.querySelector<HTMLButtonElement>(".batch-setup__start");
+    if (!header || !metadata || !captureActions || !blindNote || !rows || !status || !start) return;
+
+    metadata.classList.add("batch-setup__home-section");
+    const metadataTitle = metadata.querySelector<HTMLElement>(".batch-setup__session-meta-title");
+    if (metadataTitle) metadataTitle.textContent = "杯测信息";
+
+    const samples = document.createElement("section");
+    samples.className = "batch-setup__home-section batch-setup__samples-section";
+    samples.setAttribute("aria-labelledby", "batch-setup-samples-title");
+    const samplesTitle = this.sectionTitle("杯测列表");
+    samplesTitle.id = "batch-setup-samples-title";
+    samples.append(samplesTitle, captureActions, blindNote, rows, status);
+
+    const footer = document.createElement("section");
+    footer.className = "batch-setup__footer-section";
+    footer.setAttribute("aria-label", "开始杯测与记录");
+    footer.append(start);
+    const history = this.buildRecentSessions();
+    if (history) footer.append(history);
+
+    const hiddenInputs = [...this.root.querySelectorAll<HTMLInputElement>(".batch-setup__file-input")];
+    this.root.replaceChildren(header, metadata, samples, ...hiddenInputs, footer);
+  }
+
+  private buildRecentSessions(): HTMLElement | undefined {
     const sessions = this.options.recentSessions ?? [];
     const unfinished = sessions.filter((item) => item.status === "draft" || item.status === "active");
     const completed = sessions.filter((item) => item.status === "completed" || item.status === "archived");
-    if (!unfinished.length && !completed.length) return;
+    if (!unfinished.length && !completed.length) return undefined;
 
     const history = document.createElement("section");
     history.className = "batch-setup__history";
-    history.setAttribute("aria-label", "最近杯测记录");
+    history.setAttribute("aria-label", "杯测记录");
     history.append(
       this.historyGroup("unfinished", "未完成记录", unfinished),
       this.historyGroup("completed", "已完成记录", completed)
     );
-    this.root.append(history);
+    return history;
   }
 
   private historyGroup(
