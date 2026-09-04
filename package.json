@@ -5,12 +5,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "bundle:web": "node scripts/build-web.mjs && node scripts/harden-recognition-bootstrap.mjs && node scripts/verify-coffee-knowledge-output.mjs",
+    "bundle:web": "node scripts/build-web.mjs && node scripts/harden-recognition-runtime.mjs && node scripts/harden-recognition-bootstrap.mjs && node scripts/verify-coffee-knowledge-output.mjs",
     "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "luckybean-static-app": "github:zjcrop/luckybean#ae4486454e49d6f73e1e9b96c5cbe4077a199376",
+    "luckybean-static-app": "github:zjcrop/luckybean#fc02304d4872d889ae33e0ed06b48f71bd38ea52",
     "qrcode": "^1.5.4",
     "sql.js": "1.14.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
