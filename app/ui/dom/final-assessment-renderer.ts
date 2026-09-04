@@ -1,4 +1,9 @@
 import type { SensoryObservation } from "../../../shared/protocol/aromasense-v1";
+import {
+  deriveFinalPhaseStatus,
+  FINAL_PHASE_COMPLETION_HINTS,
+  type FinalAssessmentPhase
+} from "../../core/cupping-progress-policy";
 import { scoreProfileForMode, type CuppingScoreProfile } from "../../core/cupping-score-profile";
 import type { FlavorGroupPreferences } from "../flavor-group-preferences";
 import type { RadarAxisValue } from "../sample-summary-model";
@@ -6,7 +11,7 @@ import { button, clearElement, element, setPressed } from "./dom-helpers";
 import { renderRadarSummary } from "./radar-renderer";
 import { renderSensoryEditor } from "./sensory-editor-renderer";
 
-export type FinalAssessmentPhase = "flavor" | "overall" | "score";
+export type { FinalAssessmentPhase } from "../../core/cupping-progress-policy";
 
 export interface FinalAssessmentCallbacks {
   saveField(fieldKey: string, value: unknown): void | Promise<void>;
@@ -216,6 +221,17 @@ function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
   if (map.get("off_flavor_present") === true) penalties.append(element("span", "final-assessment__penalty", "异味 −3"));
   if (!penalties.childElementCount) penalties.append(element("span", "final-assessment__penalty is-none", "无缺陷扣分"));
   root.append(penalties);
+
+  const confirmed = map.get("final_score_confirmed") === true;
+  const confirm = button(
+    `final-assessment__next final-assessment__score-confirm${confirmed ? " is-confirmed" : ""}`,
+    confirmed ? "评分已确认" : "确认评分",
+    () => void input.callbacks.saveField("final_score_confirmed", true)
+  );
+  confirm.disabled = confirmed;
+  confirm.setAttribute("aria-pressed", String(confirmed));
+  confirm.title = confirmed ? "评分已确认；若修改影响分数的综评或缺陷字段，将自动要求重新确认" : FINAL_PHASE_COMPLETION_HINTS.score;
+  root.append(confirm);
 }
 
 export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentInput): void {
@@ -224,8 +240,10 @@ export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentI
   const nav = element("nav", "final-assessment__phase-nav");
   const phaseSpec: Array<[FinalAssessmentPhase, string]> = [["flavor", "风味描述"], ["overall", "综评"], ["score", "评分"]];
   for (const [id, label] of phaseSpec) {
-    const item = button(`final-assessment__phase${phase === id ? " is-current" : ""}`, label, () => void input.callbacks.saveField("final_phase", id));
+    const status = deriveFinalPhaseStatus(id, input.observations);
+    const item = button(`final-assessment__phase is-${status}${phase === id ? " is-current" : ""}`, label, () => void input.callbacks.saveField("final_phase", id));
     item.setAttribute("aria-current", phase === id ? "step" : "false");
+    item.title = `${status === "completed" ? "已完成" : status === "active" ? "已开始" : "未开始"}；完成标准：${FINAL_PHASE_COMPLETION_HINTS[id]}`;
     nav.append(item);
   }
   root.append(nav);

@@ -1,4 +1,10 @@
 import { STAGE_IDS, type StageId } from "../../shared/protocol/aromasense-v1";
+import {
+  FINAL_ASSESSMENT_PHASES,
+  FINAL_PHASE_COMPLETION_HINTS,
+  stageCompletionHint,
+  type FinalAssessmentPhase
+} from "../core/cupping-progress-policy";
 import { visibleSampleLabel, visibleSampleMetadata } from "../core/blind-session";
 import type { StageStatus } from "../core/cupping-state-machine";
 import type { SampleRecord } from "../core/sample-batch-service";
@@ -7,7 +13,16 @@ import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { SampleStageProgress } from "../storage/stage-progress-reader";
 
 export type StageTone = "orange" | "pink" | "blue" | "white" | "neutral";
-export type StageIndicatorState = "not_started" | "active" | "near_complete" | "completed";
+/** near_complete is retained only for source compatibility with older renderers; new progress policy never emits it. */
+export type StageIndicatorState = StageStatus | "near_complete";
+
+export interface FinalPhaseViewState {
+  phase: FinalAssessmentPhase;
+  label: string;
+  status: StageStatus;
+  indicatorState: StageIndicatorState;
+  completionHint: string;
+}
 
 export interface StageViewState {
   stageId: StageId;
@@ -15,6 +30,8 @@ export interface StageViewState {
   tone: StageTone;
   status: StageStatus;
   indicatorState: StageIndicatorState;
+  completionHint: string;
+  finalPhases?: readonly FinalPhaseViewState[];
 }
 
 export interface SampleRailItemViewState {
@@ -40,30 +57,32 @@ const STAGE_META: Record<StageId, { label: string; tone: StageTone }> = {
   high_temp: { label: "高温", tone: "pink" },
   mid_temp: { label: "中温", tone: "blue" },
   low_temp: { label: "低温", tone: "white" },
-  final: { label: "完成", tone: "neutral" }
+  final: { label: "终评", tone: "neutral" }
 };
 
-const EXPECTED_STANDARD_FIELD_COUNT: Record<StageId, number> = {
-  preparation: 1,
-  aroma: 4,
-  high_temp: 6,
-  mid_temp: 7,
-  low_temp: 7,
-  final: 8
+const FINAL_PHASE_LABELS: Readonly<Record<FinalAssessmentPhase, string>> = {
+  flavor: "风味描述",
+  overall: "综评",
+  score: "评分"
 };
-
-const NEAR_COMPLETE_THRESHOLD = 0.7;
 
 function progressKey(sampleId: string, stageId: StageId): string {
   return `${sampleId}:${stageId}`;
 }
 
-function indicatorState(stageId: StageId, progress: SampleStageProgress | undefined): StageIndicatorState {
-  if (!progress || progress.status === "not_started") return "not_started";
-  if (progress.status === "completed") return "completed";
-  const expected = EXPECTED_STANDARD_FIELD_COUNT[stageId];
-  const coverage = expected > 0 ? Math.min(1, progress.observationCount / expected) : 0;
-  return coverage >= NEAR_COMPLETE_THRESHOLD ? "near_complete" : "active";
+function finalPhases(progress: SampleStageProgress | undefined): readonly FinalPhaseViewState[] {
+  const byPhase = new Map((progress?.finalPhases ?? []).map((item) => [item.phase, item] as const));
+  return FINAL_ASSESSMENT_PHASES.map((phase) => {
+    const item = byPhase.get(phase);
+    const status = item?.status ?? "not_started";
+    return {
+      phase,
+      label: FINAL_PHASE_LABELS[phase],
+      status,
+      indicatorState: status,
+      completionHint: item?.completionHint ?? FINAL_PHASE_COMPLETION_HINTS[phase]
+    };
+  });
 }
 
 export function buildSampleRailViewState(
@@ -81,12 +100,15 @@ export function buildSampleRailViewState(
     .map((sample) => {
       const stages = STAGE_IDS.map((stageId): StageViewState => {
         const stageProgress = progressByKey.get(progressKey(sample.sampleId, stageId));
+        const status = stageProgress?.status ?? "not_started";
         return {
           stageId,
           label: STAGE_META[stageId].label,
           tone: STAGE_META[stageId].tone,
-          status: stageProgress?.status ?? "not_started",
-          indicatorState: indicatorState(stageId, stageProgress)
+          status,
+          indicatorState: status,
+          completionHint: stageCompletionHint(stageId),
+          finalPhases: stageId === "final" ? finalPhases(stageProgress) : undefined
         };
       });
       const completedStageCount = stages.filter((stage) => stage.status === "completed").length;
@@ -112,16 +134,12 @@ export function buildSampleRailViewState(
 
 export function nextStage(stageId: StageId): StageId | undefined {
   const index = STAGE_IDS.indexOf(stageId);
-  if (index < 0 || index >= STAGE_IDS.length - 1) {
-    return undefined;
-  }
+  if (index < 0 || index >= STAGE_IDS.length - 1) return undefined;
   return STAGE_IDS[index + 1];
 }
 
 export function previousStage(stageId: StageId): StageId | undefined {
   const index = STAGE_IDS.indexOf(stageId);
-  if (index <= 0) {
-    return undefined;
-  }
+  if (index <= 0) return undefined;
   return STAGE_IDS[index - 1];
 }

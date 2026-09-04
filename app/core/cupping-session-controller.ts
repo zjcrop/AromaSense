@@ -1,4 +1,8 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
+import {
+  deriveStageStatus,
+  scoreAffectingField
+} from "./cupping-progress-policy";
 import { sensoryFieldDefinition, SENSORY_DICTIONARY_VERSION } from "./sensory-dictionary-v1";
 import type { EditingContext } from "./cupping-state-machine";
 import type { EditingSlice, LocalCuppingRepository } from "../storage/local-cupping-repository";
@@ -16,6 +20,16 @@ function isFinalExtensionField(stageId: StageId, fieldKey: string): boolean {
   return stageId === "final" && FINAL_FIELD_PREFIXES.some((prefix) => fieldKey.startsWith(prefix));
 }
 
+function replaceObservation(
+  observations: readonly SensoryObservation[],
+  next: SensoryObservation
+): readonly SensoryObservation[] {
+  return [
+    ...observations.filter((item) => item.fieldKey !== next.fieldKey),
+    next
+  ].sort((a, b) => a.fieldKey.localeCompare(b.fieldKey));
+}
+
 export class CuppingSessionController {
   private active?: ActiveEditingState;
   private writeTail: Promise<void> = Promise.resolve();
@@ -27,11 +41,13 @@ export class CuppingSessionController {
 
   current(): ActiveEditingState | undefined { return this.active; }
 
-  async open(context: EditingContext, now: string): Promise<ActiveEditingState> {
+  async open(context: EditingContext, _now: string): Promise<ActiveEditingState> {
     await this.flush();
-    await this.repository.setStageState(context.sessionId, context.sampleId, context.stageId, "active", now, now);
     const slice = await this.repository.loadEditingSlice(context.sessionId, context.sampleId, context.stageId);
-    this.active = { context, slice };
+    this.active = {
+      context,
+      slice: { ...slice, stageStatus: deriveStageStatus(context.stageId, slice.observations) }
+    };
     return this.active;
   }
 
@@ -59,17 +75,52 @@ export class CuppingSessionController {
 
     return this.enqueueWrite(async () => {
       await this.repository.saveObservation(observation);
+      let observations = replaceObservation(this.active?.slice.observations ?? active.slice.observations, observation);
+
       if (
-        this.active?.context.sessionId === observation.sessionId &&
-        this.active.context.sampleId === observation.sampleId &&
-        this.active.context.stageId === observation.stageId
+        observation.stageId === "final"
+        && fieldKey !== "final_score_confirmed"
+        && scoreAffectingField(fieldKey)
       ) {
-        const previous = this.active.slice.observations.filter((item) => item.fieldKey !== observation.fieldKey);
+        const scoreConfirmation = observations.find((item) => item.fieldKey === "final_score_confirmed");
+        if (scoreConfirmation?.value === true) {
+          const invalidated: SensoryObservation = {
+            observationId: this.observationIdFactory(active.context, "final_score_confirmed"),
+            sessionId: active.context.sessionId,
+            sampleId: active.context.sampleId,
+            stageId: "final",
+            fieldKey: "final_score_confirmed",
+            value: false,
+            dictionaryVersion: "sensory-0.1C",
+            updatedAt: now
+          };
+          await this.repository.saveObservation(invalidated);
+          observations = replaceObservation(observations, invalidated);
+        }
+      }
+
+      const status = deriveStageStatus(observation.stageId, observations);
+      await this.repository.setStageState(
+        observation.sessionId,
+        observation.sampleId,
+        observation.stageId,
+        status,
+        now,
+        status === "not_started" ? undefined : now,
+        status === "completed" ? now : undefined
+      );
+
+      if (
+        this.active?.context.sessionId === observation.sessionId
+        && this.active.context.sampleId === observation.sampleId
+        && this.active.context.stageId === observation.stageId
+      ) {
         this.active = {
           ...this.active,
           slice: {
             ...this.active.slice,
-            observations: [...previous, observation].sort((a, b) => a.fieldKey.localeCompare(b.fieldKey))
+            stageStatus: status,
+            observations
           }
         };
       }
@@ -80,9 +131,12 @@ export class CuppingSessionController {
     const active = this.active;
     if (!active) throw new Error("NO_ACTIVE_EDITING_CONTEXT");
     await this.flush();
-    await this.repository.setStageState(active.context.sessionId, active.context.sampleId, active.context.stageId, "completed", now, undefined, now);
     const slice = await this.repository.loadEditingSlice(active.context.sessionId, active.context.sampleId, active.context.stageId);
-    this.active = { context: active.context, slice };
+    const status = deriveStageStatus(active.context.stageId, slice.observations);
+    if (status !== "completed") throw new Error(`STAGE_INCOMPLETE:${active.context.stageId}`);
+    await this.repository.setStageState(active.context.sessionId, active.context.sampleId, active.context.stageId, "completed", now, now, now);
+    const completedSlice = await this.repository.loadEditingSlice(active.context.sessionId, active.context.sampleId, active.context.stageId);
+    this.active = { context: active.context, slice: { ...completedSlice, stageStatus: "completed" } };
     return this.active;
   }
 
@@ -91,7 +145,10 @@ export class CuppingSessionController {
     if (!active) throw new Error("NO_ACTIVE_EDITING_CONTEXT");
     await this.flush();
     const slice = await this.repository.loadEditingSlice(active.context.sessionId, active.context.sampleId, active.context.stageId);
-    this.active = { context: active.context, slice };
+    this.active = {
+      context: active.context,
+      slice: { ...slice, stageStatus: deriveStageStatus(active.context.stageId, slice.observations) }
+    };
     return this.active;
   }
 

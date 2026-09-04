@@ -8,6 +8,7 @@ import {
 
 const root = resolve(import.meta.dirname, "..");
 const recognitionCacheKey = "aromasense.luckybean-recognition-book.v1";
+const recognitionRuntimeKey = "__AROMASENSE_RECOGNITION_BOOK__";
 const codebookUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-qr-codebook/coffee_qr_codebook_v6.json";
 const outputs = [
   resolve(root, "site/index.html"),
@@ -37,11 +38,32 @@ async function fetchJson(url, timeoutMs = 12000) {
 }
 
 function embeddedBook(html) {
-  const escapedKey = recognitionCacheKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`localStorage\\.setItem\\(${JSON.stringify(recognitionCacheKey).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\)`);
-  const match = html.match(regex);
-  if (!match) throw new Error(`Recognition bootstrap for ${escapedKey} not found`);
-  return JSON.parse(JSON.parse(match[1]));
+  const encodedJsonString = '("(?:\\\\.|[^"\\\\])*")';
+  const runtimeRegex = new RegExp(
+    `const\\s+raw\\s*=\\s*${encodedJsonString}\\s*;\\s*try\\{globalThis\\.${recognitionRuntimeKey}=JSON\\.parse\\(raw\\)`
+  );
+  const runtimeMatch = html.match(runtimeRegex);
+  if (runtimeMatch) return JSON.parse(JSON.parse(runtimeMatch[1]));
+
+  // Retain a legacy parser only to make failures diagnostic when an old build
+  // accidentally bypasses the hardening step. The loop below still requires
+  // the runtime-memory marker, so a legacy-only artifact cannot pass CI.
+  const legacyRegex = new RegExp(
+    `localStorage\\.setItem\\(${JSON.stringify(recognitionCacheKey).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,\\s*${encodedJsonString}\\)`
+  );
+  const legacyMatch = html.match(legacyRegex);
+  if (legacyMatch) return JSON.parse(JSON.parse(legacyMatch[1]));
+
+  throw new Error(`Recognition bootstrap for ${recognitionCacheKey} not found`);
+}
+
+function assertHardenedBootstrap(html, label) {
+  if (!html.includes(`globalThis.${recognitionRuntimeKey}=JSON.parse(raw)`)) {
+    throw new Error(`${label}: in-memory recognition book bootstrap is missing`);
+  }
+  if (!html.includes(`localStorage.setItem(${JSON.stringify(recognitionCacheKey)},raw)`)) {
+    throw new Error(`${label}: durable recognition book cache fallback is missing`);
+  }
 }
 
 function assertCoreUnchanged(source, bundled, label) {
@@ -169,8 +191,9 @@ function assertKnowledgeOnlyRuntime(book, label) {
 const source = await fetchJson(codebookUrl);
 for (const output of outputs) {
   const html = await readFile(output, "utf8");
-  const book = embeddedBook(html);
   const label = output.replace(`${root}/`, "");
+  assertHardenedBootstrap(html, label);
+  const book = embeddedBook(html);
   if (book?.coffeeKnowledgeMeta?.qrIndexesChanged !== false) {
     throw new Error(`${label}: Coffee Knowledge compatibility marker missing`);
   }
@@ -184,5 +207,5 @@ for (const output of outputs) {
   assertEntityResolutionSafety(book, label);
   assertKnowledgeOnlySubset(book, label);
   assertKnowledgeOnlyRuntime(book, label);
-  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; knowledgeOnlyVarieties=${book.coffeeKnowledgeMeta.knowledgeOnlyVarietyCount}; pipeline=${RECOGNITION_PIPELINE_VERSION}; QR indexes unchanged`);
+  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; knowledgeOnlyVarieties=${book.coffeeKnowledgeMeta.knowledgeOnlyVarietyCount}; pipeline=${RECOGNITION_PIPELINE_VERSION}; runtimeMemory=true; localCacheFallback=true; QR indexes unchanged`);
 }
