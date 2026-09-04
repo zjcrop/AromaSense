@@ -1,4 +1,5 @@
 const RECOGNITION_CACHE_KEY = "aromasense.luckybean-recognition-book.v1";
+const RECOGNITION_RUNTIME_KEY = "__AROMASENSE_RECOGNITION_BOOK__";
 
 export interface LuckyBeanRecognitionBook {
   version?: unknown;
@@ -135,8 +136,17 @@ export interface LuckyBeanRecognitionCore {
   ): LuckyBeanRecognitionAnalysis;
 }
 
+type RecognitionRuntime = typeof globalThis & {
+  LuckyBeanRecognitionCore?: LuckyBeanRecognitionCore;
+  __AROMASENSE_RECOGNITION_BOOK__?: unknown;
+};
+
+function runtime(): RecognitionRuntime {
+  return globalThis as RecognitionRuntime;
+}
+
 function runtimeCore(): LuckyBeanRecognitionCore | undefined {
-  return (globalThis as typeof globalThis & { LuckyBeanRecognitionCore?: LuckyBeanRecognitionCore }).LuckyBeanRecognitionCore;
+  return runtime().LuckyBeanRecognitionCore;
 }
 
 export function requireLuckyBeanRecognitionCore(): LuckyBeanRecognitionCore {
@@ -159,14 +169,25 @@ function validBook(value: unknown): value is LuckyBeanRecognitionBook {
     .every((key) => Array.isArray(book[key]) && (book[key] as unknown[]).length > 0);
 }
 
+function rememberBook(book: LuckyBeanRecognitionBook): LuckyBeanRecognitionBook {
+  runtime().__AROMASENSE_RECOGNITION_BOOK__ = book;
+  return book;
+}
+
 export function loadBundledLuckyBeanRecognitionBook(): LuckyBeanRecognitionBook {
+  const inMemory = runtime().__AROMASENSE_RECOGNITION_BOOK__;
+  if (validBook(inMemory)) return inMemory;
+
   let raw = "";
   try {
     raw = globalThis.localStorage?.getItem(RECOGNITION_CACHE_KEY) ?? "";
   } catch {
     raw = "";
   }
-  if (!raw) throw new Error("LuckyBean 完整识别编码表未随当前构建加载");
+  if (!raw) {
+    throw new Error("LuckyBean 完整识别编码表未随当前构建加载；内存副本与本地缓存均不可用");
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -174,7 +195,7 @@ export function loadBundledLuckyBeanRecognitionBook(): LuckyBeanRecognitionBook 
     throw new Error("LuckyBean 识别编码表缓存损坏，请重新加载应用");
   }
   if (!validBook(parsed)) throw new Error("LuckyBean 识别编码表不完整，请重新构建或重新加载应用");
-  return parsed;
+  return rememberBook(parsed);
 }
 
 export function luckyBeanCoreVersion(): string {
