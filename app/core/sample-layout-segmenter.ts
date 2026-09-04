@@ -3,6 +3,13 @@ import { medianLineHeight, type OCRBox, type OCRLayoutDocument, type OCRLayoutLi
 
 export type SampleLayoutType = "single" | "row-list" | "vertical-block-list" | "grid" | "table" | "mixed";
 
+export interface SampleLayoutHints {
+  profile?: string;
+  sourceTitle?: string;
+  sourceCode?: string;
+  sourceFields?: Readonly<Record<string, string>>;
+}
+
 export interface SampleLayoutSegment {
   id: string;
   index: number;
@@ -10,6 +17,7 @@ export interface SampleLayoutSegment {
   box: OCRBox;
   lines: readonly OCRLayoutLine[];
   text: string;
+  hints?: SampleLayoutHints;
 }
 
 export interface SampleLayoutResult {
@@ -33,10 +41,24 @@ interface CatalogCard {
   detail: OCRRow;
 }
 
+type TableRole = "code" | "name" | "process" | "origin" | "variety" | "roast" | "flavor" | "price";
+
+interface TableColumn {
+  role: TableRole;
+  centerX: number;
+}
+
+interface TableRecord {
+  code: string;
+  rows: OCRRow[];
+}
+
 const IDENTITY_FIELDS = new Set(["country", "origin", "region", "farm", "producer", "station", "cooperative"]);
-const PROCESS_SIGNAL = /(?:水洗|日晒|日曬|厌氧|厭氧|蜜处理|蜜處理|蜜處理|湿刨|濕刨|酵素|發酵|发酵|washed|natural|anaerobic|honey\s*process|wet\s*hulled|semi[-\s]?washed|carbonic|ナチュラル|ウォッシュド|ハニー|嫌気|워시드|내추럴|허니|무산소)/iu;
+const PROCESS_SIGNAL = /(?:水洗|日晒|日曬|厌氧|厭氧|蜜处理|蜜處理|湿刨|濕刨|酵素|發酵|发酵|washed|natural|anaerobic|honey\s*process|wet\s*hulled|semi[-\s]?washed|carbonic|ナチュラル|ウォッシュド|ハニー|嫌気|워시드|내추럴|허니|무산소)/iu;
 const GRADE_SIGNAL = /(?:^|[\s·|｜,，、-])(?:G\s*[1-4]|AA\+?|AAA|AB|PB|SHB|SHG|EP|TOP)(?:$|[\s·|｜,，、-])/iu;
 const ROAST_SECTION_SIGNAL = /^(?:(?:淺中|浅中|中淺|中浅|淺|浅|中|中深|深|極深|极深)(?:度)?(?:焙|培|烘焙)?|(?:light|medium\s*light|medium|medium\s*dark|dark)\s*roast|(?:浅煎り|中浅煎り|中煎り|中深煎り|深煎り)|(?:약배전|중약배전|중배전|중강배전|강배전))$/iu;
+const ROAST_INLINE_SIGNAL = /(?:淺中焙|浅中焙|中淺焙|中浅焙|淺焙|浅焙|中焙|中深焙|深焙|極深焙|极深焙|light\s*roast|medium\s*light|medium\s*roast|medium\s*dark|dark\s*roast|浅煎り|中浅煎り|中煎り|中深煎り|深煎り|약배전|중약배전|중배전|중강배전|강배전)/iu;
+const CATALOG_CODE_SIGNAL = /(?:^|\s)([A-Z]{2,8}[-_ ]?\d{1,4})(?=\s|$|[【\[])/iu;
 
 function unionBox(lines: readonly OCRLayoutLine[]): OCRBox {
   const boxes = lines.map((line) => line.normalizedBox);
@@ -99,37 +121,161 @@ function buildRows(document: OCRLayoutDocument): OCRRow[] {
   return rows;
 }
 
-function segmentFromLines(document: OCRLayoutDocument, index: number, lines: readonly OCRLayoutLine[], confidence: number): SampleLayoutSegment {
+function segmentFromLines(
+  document: OCRLayoutDocument,
+  index: number,
+  lines: readonly OCRLayoutLine[],
+  confidence: number,
+  hints?: SampleLayoutHints
+): SampleLayoutSegment {
   return {
     id: `${document.imageId}-sample-${index + 1}`,
     index,
     confidence: Math.max(0, Math.min(1, confidence)),
     box: unionBox(lines),
     lines,
-    text: lines.map((line) => line.text).join("\n")
+    text: lines.map((line) => line.text).join("\n"),
+    ...(hints ? { hints } : {})
+  };
+}
+
+function compactText(value: string): string {
+  return value.normalize("NFKC").replace(/[\s【】\[\]<>《》「」『』()（）:：|｜·•・]/g, "").trim();
+}
+
+function tableHeaderRole(value: string): TableRole | undefined {
+  const text = compactText(value).toLowerCase();
+  if (/^(?:編號|编号|代號|代号|代碼|代码|code|no\.?)/iu.test(text)) return "code";
+  if (/(?:咖啡豆單品|咖啡豆单品|咖啡豆品名|豆名|品名|coffeebean|coffeename)/iu.test(text)) return "name";
+  if (/(?:處理法|处理法|process)/iu.test(text)) return "process";
+  if (/(?:產地|产地|origin)/iu.test(text)) return "origin";
+  if (/(?:品種|品种|variety)/iu.test(text)) return "variety";
+  if (/(?:焙度|烘焙|roast)/iu.test(text)) return "roast";
+  if (/(?:風味|风味|flavo?r|tastingnote|cuppingnote)/iu.test(text)) return "flavor";
+  if (/(?:售價|售价|price)/iu.test(text)) return "price";
+  return undefined;
+}
+
+function tableColumns(header: OCRRow): TableColumn[] {
+  return header.lines
+    .map((line) => {
+      const role = tableHeaderRole(line.text);
+      return role ? { role, centerX: line.normalizedBox.centerX } : undefined;
+    })
+    .filter((value): value is TableColumn => Boolean(value));
+}
+
+function nearestTableRole(line: OCRLayoutLine, columns: readonly TableColumn[]): TableRole | undefined {
+  let best: TableColumn | undefined;
+  let bestDistance = Infinity;
+  for (const column of columns) {
+    const distance = Math.abs(line.normalizedBox.centerX - column.centerX);
+    if (distance < bestDistance) {
+      best = column;
+      bestDistance = distance;
+    }
+  }
+  return best && bestDistance <= 0.18 ? best.role : undefined;
+}
+
+function tableFieldText(rows: readonly OCRRow[], columns: readonly TableColumn[], role: TableRole): string {
+  const values = rows
+    .flatMap((row) => row.lines)
+    .filter((line) => nearestTableRole(line, columns) === role)
+    .map((line) => line.text.trim())
+    .filter(Boolean);
+  return [...new Set(values)].join(" ").trim();
+}
+
+function tableCodeFromRow(row: OCRRow, columns: readonly TableColumn[]): string | undefined {
+  const codeLine = row.lines.find((line) => nearestTableRole(line, columns) === "code");
+  if (!codeLine) return undefined;
+  const value = codeLine.text.normalize("NFKC").trim();
+  if (/^(?:[A-Z]|\d{1,3}|[A-Z]{1,8}[-_ ]?\d{1,4})$/iu.test(value)) return value;
+  return undefined;
+}
+
+function isTableSchemaBreak(row: OCRRow): boolean {
+  const text = compactText(row.text);
+  return /(?:掛耳式咖啡|挂耳式咖啡|內容物|内容物|環保方案|环保方案|網購及外送|网购及外送|現場開放時間|现场开放时间|轉帳資訊|转账资讯)/iu.test(text);
+}
+
+function coffeeTableRecords(body: readonly OCRRow[], columns: readonly TableColumn[]): TableRecord[] {
+  const records: TableRecord[] = [];
+  let current: TableRecord | undefined;
+  for (const row of body) {
+    if (isTableSchemaBreak(row) && records.length >= 2) break;
+    const code = tableCodeFromRow(row, columns);
+    if (code) {
+      if (current) records.push(current);
+      current = { code, rows: [row] };
+      continue;
+    }
+    if (current) current.rows.push(row);
+  }
+  if (current) records.push(current);
+  return records;
+}
+
+function coffeeTableHints(record: TableRecord, columns: readonly TableColumn[]): SampleLayoutHints | undefined {
+  const sourceTitle = tableFieldText(record.rows, columns, "name");
+  const process = tableFieldText(record.rows, columns, "process");
+  const origin = tableFieldText(record.rows, columns, "origin");
+  const variety = tableFieldText(record.rows, columns, "variety");
+  const roastRaw = tableFieldText(record.rows, columns, "roast");
+  const roast = roastRaw.match(ROAST_INLINE_SIGNAL)?.[0] ?? "";
+  const flavorNotes = tableFieldText(record.rows, columns, "flavor");
+  if (!sourceTitle || !PROCESS_SIGNAL.test(process || record.rows.map((row) => row.text).join(" "))) return undefined;
+  const sourceFields: Record<string, string> = {};
+  if (process) sourceFields.process = process;
+  if (origin) sourceFields.origin = origin;
+  if (variety) sourceFields.variety = variety;
+  if (roast) sourceFields.roast = roast;
+  if (flavorNotes) sourceFields.flavorNotes = flavorNotes;
+  return {
+    profile: "coffee-table-v1",
+    sourceTitle,
+    sourceCode: record.code,
+    sourceFields
   };
 }
 
 function tableSegments(document: OCRLayoutDocument, rows: readonly OCRRow[]): SampleLayoutResult | undefined {
-  const headerIndex = rows.findIndex((row, index) => index < 3 && row.lines.length >= 2 && (row.fieldAnchors.size >= 2 || fieldAliasCount(row.text) >= 2));
+  const headerIndex = rows.findIndex((row, index) => {
+    if (index >= 6 || row.lines.length < 2) return false;
+    const roleCount = row.lines.map((line) => tableHeaderRole(line.text)).filter(Boolean).length;
+    return roleCount >= 2 || row.fieldAnchors.size >= 2 || fieldAliasCount(row.text) >= 2;
+  });
   if (headerIndex < 0 || rows.length - headerIndex < 3) return undefined;
   const header = rows[headerIndex];
   const body = rows.slice(headerIndex + 1).filter((row) => row.text.trim());
   if (body.length < 2) return undefined;
 
-  // A real table has multiple OCR cells on most body rows. A normal coffee bag often
-  // has a wide heading followed by unrelated single text lines; the previous rule
-  // incorrectly treated those lines as separate samples.
+  const columns = tableColumns(header);
+  const hasCoffeeSchema = columns.some((column) => column.role === "code") &&
+    columns.some((column) => column.role === "name") &&
+    columns.some((column) => column.role === "process");
+  if (hasCoffeeSchema) {
+    const records = coffeeTableRecords(body, columns);
+    const recognized = records
+      .map((record) => ({ record, hints: coffeeTableHints(record, columns) }))
+      .filter((item): item is { record: TableRecord; hints: SampleLayoutHints } => Boolean(item.hints));
+    if (recognized.length >= 2) {
+      const confidence = recognized.length >= 3 ? 0.96 : 0.93;
+      const segments = recognized.map((item, index) =>
+        segmentFromLines(document, index, item.record.rows.flatMap((row) => row.lines), confidence, item.hints)
+      );
+      return { layoutType: "table", confidence, requiresReview: false, segments };
+    }
+  }
+
+  // Generic table fallback retained for non-catalog tables that use semantic field
+  // headings but do not carry a dedicated sample-code/name column.
   const minimumCells = Math.max(2, Math.min(3, header.lines.length - 1));
   const tabularRows = body.filter((row) => row.lines.length >= minimumCells && row.box.width >= 0.28).length;
   if (tabularRows / body.length < 0.75) return undefined;
-
-  const segments = body.map((row, index) => segmentFromLines(document, index, row.lines, 0.9));
+  const segments = body.map((row, index) => segmentFromLines(document, index, row.lines, 0.9, { profile: "generic-table" }));
   return { layoutType: "table", confidence: 0.9, requiresReview: false, segments };
-}
-
-function compactText(value: string): string {
-  return value.normalize("NFKC").replace(/[\s【】\[\]<>《》「」『』()（）:：|｜·•・]/g, "").trim();
 }
 
 function isRoastSectionHeader(row: OCRRow): boolean {
@@ -141,12 +287,63 @@ function isFlavorDetailRow(row: OCRRow): boolean {
   return row.fieldAnchors.has("flavor");
 }
 
+function flavorValueFromRows(rows: readonly OCRRow[]): string {
+  return rows
+    .map((row) => row.text)
+    .join(" ")
+    .replace(/^.*?(?:風味描述|风味描述|風味|风味)\s*[|｜:：]?\s*/iu, "")
+    .trim();
+}
+
+function sourceCodeFromText(text: string): string | undefined {
+  return text.match(CATALOG_CODE_SIGNAL)?.[1]?.replace(/[_ ]/g, "-");
+}
+
+function codedCatalogSegments(document: OCRLayoutDocument, rows: readonly OCRRow[]): SampleLayoutResult | undefined {
+  const anchors = rows
+    .map((row, index) => ({ row, index, code: sourceCodeFromText(row.text) }))
+    .filter((item): item is { row: OCRRow; index: number; code: string } => Boolean(item.code));
+  if (anchors.length < 2) return undefined;
+  const lefts = anchors.map((item) => item.row.box.left);
+  if (Math.max(...lefts) - Math.min(...lefts) > 0.18) return undefined;
+
+  const segments: SampleLayoutSegment[] = [];
+  for (let anchorIndex = 0; anchorIndex < anchors.length; anchorIndex += 1) {
+    const anchor = anchors[anchorIndex];
+    const nextIndex = anchors[anchorIndex + 1]?.index ?? rows.length;
+    const groupRows = rows.slice(anchor.index, nextIndex).filter((row) => !isRoastSectionHeader(row));
+    const flavorIndex = groupRows.findIndex(isFlavorDetailRow);
+    const titleRows = (flavorIndex >= 0 ? groupRows.slice(0, flavorIndex) : groupRows.slice(0, 2)).slice(0, 3);
+    const sourceTitle = titleRows.map((row) => row.text).join(" ").trim();
+    if (!sourceTitle) continue;
+    const sourceFields: Record<string, string> = {};
+    if (flavorIndex >= 0) {
+      const flavorRows = groupRows.slice(flavorIndex, Math.min(groupRows.length, flavorIndex + 3));
+      const flavorNotes = flavorValueFromRows(flavorRows);
+      if (flavorNotes) sourceFields.flavorNotes = flavorNotes;
+    }
+    const lines = groupRows.flatMap((row) => row.lines);
+    if (!lines.length) continue;
+    segments.push(segmentFromLines(document, segments.length, lines, 0.96, {
+      profile: "coded-catalog-card-v1",
+      sourceTitle,
+      sourceCode: anchor.code,
+      sourceFields
+    }));
+  }
+  if (segments.length < 2) return undefined;
+  return { layoutType: "vertical-block-list", confidence: 0.96, requiresReview: false, segments };
+}
+
 function titleLooksCoffeeLike(rows: readonly OCRRow[]): boolean {
   const text = rows.map((row) => row.text).join(" ");
   return PROCESS_SIGNAL.test(text) || GRADE_SIGNAL.test(text);
 }
 
 function catalogCardSegments(document: OCRLayoutDocument, rows: readonly OCRRow[]): SampleLayoutResult | undefined {
+  const coded = codedCatalogSegments(document, rows);
+  if (coded) return coded;
+
   const flavorRows = rows.filter(isFlavorDetailRow);
   if (flavorRows.length < 2) return undefined;
 
@@ -161,7 +358,11 @@ function catalogCardSegments(document: OCRLayoutDocument, rows: readonly OCRRow[
       continue;
     }
     if (isFlavorDetailRow(row)) {
+      const coffeeLike = pending.filter((candidate) => titleLooksCoffeeLike([candidate]));
+      const anchorRow = coffeeLike.at(-1);
+      const anchorIndex = anchorRow ? pending.lastIndexOf(anchorRow) : Math.max(0, pending.length - 1);
       const titleRows = pending
+        .slice(Math.max(0, anchorIndex - 1))
         .filter((candidate) => !isRoastSectionHeader(candidate) && !isFlavorDetailRow(candidate))
         .slice(-3);
       if (titleRows.length) cards.push({ section: activeSection, titleRows, detail: row });
@@ -186,12 +387,6 @@ function catalogCardSegments(document: OCRLayoutDocument, rows: readonly OCRRow[
   const detailSpread = Math.max(...detailLefts) - Math.min(...detailLefts);
   const aligned = titleSpread <= 0.16 && detailSpread <= 0.16;
 
-  // Repeated "title + flavor description" cards are a common coffee-menu/list
-  // layout. They intentionally omit labels such as "产地:" or "处理法:", so the
-  // generic field-anchor block splitter cannot see record boundaries. Three or
-  // more repeated cards are strong structural evidence on their own; for only two
-  // cards we additionally require coffee/process/grade signals and alignment to
-  // avoid splitting a normal bag that happens to mention flavor twice.
   const strongRepeatedStructure = structuredCards.length >= 3 && aligned;
   const strongTwoCardStructure = structuredCards.length === 2 && aligned && processRatio >= 0.5;
   if (!strongRepeatedStructure && !strongTwoCardStructure) return undefined;
@@ -199,12 +394,22 @@ function catalogCardSegments(document: OCRLayoutDocument, rows: readonly OCRRow[
 
   const confidence = processRatio >= 0.6 && aligned ? 0.92 : 0.86;
   const segments = structuredCards.map((card, index) => {
+    const sourceTitle = card.titleRows.map((row) => row.text).join(" ").trim();
+    const sourceFields: Record<string, string> = {};
+    const flavorNotes = flavorValueFromRows([card.detail]);
+    if (flavorNotes) sourceFields.flavorNotes = flavorNotes;
+    if (card.section) sourceFields.roast = card.section.text.trim();
     const lines = [
       ...(card.section ? card.section.lines : []),
       ...card.titleRows.flatMap((row) => row.lines),
       ...card.detail.lines
     ];
-    return segmentFromLines(document, index, lines, confidence);
+    return segmentFromLines(document, index, lines, confidence, {
+      profile: "flavor-catalog-card-v1",
+      sourceTitle,
+      sourceCode: sourceCodeFromText(sourceTitle),
+      sourceFields
+    });
   });
 
   return {
@@ -268,8 +473,6 @@ function splitColumnIntoBlocks(rows: readonly OCRRow[], medianHeight: number): O
     const semanticBreak = repeatedAnchor && previousFieldCount >= 2;
     const anchorRestart = currentStartsRecord && previousFieldCount >= 3 && gapRatio >= 0.45;
 
-    // Whitespace alone is not enough to declare a new sample. Coffee packaging often
-    // separates origin, roast and tasting-note sections with large visual gaps.
     if ((visualBreak && (currentStartsRecord || repeatedAnchor)) || semanticBreak || anchorRestart) {
       blocks.push([current]);
       seenFields = new Set(current.fieldAnchors);
@@ -297,7 +500,7 @@ function rowListSegments(document: OCRLayoutDocument, rows: readonly OCRRow[], m
   const gaps = rows.slice(1).map((row, index) => Math.max(0, row.box.top - rows[index].box.bottom) / Math.max(0.008, medianHeight));
   const regularGaps = gaps.filter((gap) => gap <= 1.35).length;
   if (gaps.length && regularGaps / gaps.length < 0.65) return undefined;
-  const segments = rows.map((row, index) => segmentFromLines(document, index, row.lines, 0.82));
+  const segments = rows.map((row, index) => segmentFromLines(document, index, row.lines, 0.82, { profile: "row-list" }));
   return { layoutType: "row-list", confidence: 0.82, requiresReview: true, segments };
 }
 
@@ -325,8 +528,6 @@ export function segmentSamples(document: OCRLayoutDocument): SampleLayoutResult 
     return { layoutType: "single", confidence: 0.9, requiresReview: false, segments: [segmentFromLines(document, 0, document.lines, 0.9)] };
   }
 
-  // Only auto-split when at least two blocks independently look like complete coffee
-  // records. A two-column label/value design must remain one sample.
   const recordBlocks = meaningful.filter(blockLooksLikeRecord);
   if (recordBlocks.length < 2) {
     return { layoutType: "single", confidence: 0.9, requiresReview: false, segments: [segmentFromLines(document, 0, document.lines, 0.9)] };
@@ -344,7 +545,7 @@ export function segmentSamples(document: OCRLayoutDocument): SampleLayoutResult 
   const layoutType: SampleLayoutType = multiColumn ? "grid" : "vertical-block-list";
   const baseConfidence = multiColumn ? 0.86 : 0.84;
   const segments = orderedBlocks.map((block, index) =>
-    segmentFromLines(document, index, block.flatMap((row) => row.lines), baseConfidence)
+    segmentFromLines(document, index, block.flatMap((row) => row.lines), baseConfidence, { profile: multiColumn ? "grid-fields" : "vertical-fields" })
   );
   const confidence = Math.min(...segments.map((segment) => segment.confidence));
   return {

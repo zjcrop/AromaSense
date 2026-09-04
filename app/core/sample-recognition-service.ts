@@ -288,11 +288,38 @@ function analysisConfidence(analysis: LuckyBeanRecognitionAnalysis, fallback: nu
   return values.length ? Math.max(...values) : fallback;
 }
 
-function likelyLabel(fields: Record<string, string>, sampleIndex: number): string {
+function merchantLabel(segment: SampleLayoutSegment): string | undefined {
+  const sourceTitle = cleanText(segment.hints?.sourceTitle);
+  if (!sourceTitle) return undefined;
+  let value = sourceTitle.replace(/\s*\|\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+  const code = cleanText(segment.hints?.sourceCode);
+  if (code) {
+    const normalizedCode = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    value = value.replace(new RegExp(`^\\s*${normalizedCode}\\s*`, "iu"), "");
+  } else {
+    value = value.replace(/^\s*[A-Z]{2,8}[-_ ]?\d{1,4}\s*/iu, "");
+  }
+  value = value.replace(/^\s*[【\[][^】\]]{1,16}[】\]]\s*/u, "").trim();
+  return value ? value.slice(0, 80) : undefined;
+}
+
+function likelyLabel(fields: Record<string, string>, segment: SampleLayoutSegment, sampleIndex: number): string {
+  const source = merchantLabel(segment);
+  if (source) return source;
   const parts = [fields.farm, fields.station, fields.region, fields.origin, fields.variety, fields.country]
     .filter((value): value is string => Boolean(value));
   if (parts.length) return [...new Set(parts)].slice(0, 2).join(" · ").slice(0, 80);
   return `待确认样品 ${String(sampleIndex + 1).padStart(2, "0")}`;
+}
+
+function mergeLayoutFields(fields: Record<string, string>, segment: SampleLayoutSegment): Record<string, string> {
+  const merged = { ...fields };
+  for (const [key, rawValue] of Object.entries(segment.hints?.sourceFields ?? {})) {
+    const value = cleanText(rawValue);
+    if (!value || merged[key]) continue;
+    if (["process", "origin", "variety", "roast", "flavorNotes"].includes(key)) merged[key] = value;
+  }
+  return merged;
 }
 
 function luckyBeanBlocks(segment: SampleLayoutSegment, imageId: string) {
@@ -379,33 +406,48 @@ export class SampleRecognitionService {
     const engine = result.engine ?? "OCR";
     const samples = layout.segments.map((segment, sampleIndex) => {
       const analysis = analyzeWithLuckyBean(segment, id, engine);
-      const fields = analysisFields(analysis);
+      const fields = mergeLayoutFields(analysisFields(analysis), segment);
       const review = analysisReview(analysis);
       const semanticConfidence = analysisConfidence(analysis, Number(result.confidence ?? 0.55));
       const confidence = Math.min(segment.confidence, semanticConfidence);
-      const requiresReview = layout.requiresReview || Number(analysis.reviewCount ?? 0) > 0 || !Object.keys(fields).length;
+      const hasSourceIdentity = Boolean(cleanText(segment.hints?.sourceTitle));
+      const requiresReview = layout.requiresReview || Number(analysis.reviewCount ?? 0) > 0 || (!Object.keys(fields).length && !hasSourceIdentity);
       const upstreamDocument = analysis.document ?? {};
+      const sourceName = cleanText(segment.hints?.sourceTitle);
+      const sourceCode = cleanText(segment.hints?.sourceCode);
+      const sourceFields = Object.fromEntries(
+        Object.entries(segment.hints?.sourceFields ?? {}).map(([key, value]) => [key, cleanText(value)]).filter(([, value]) => Boolean(value))
+      );
       return {
-        label: likelyLabel(fields, sampleIndex),
+        label: likelyLabel(fields, segment, sampleIndex),
         rawText: segment.text,
         engine: `${engine}+${String(analysis.pipelineVersion ?? luckyBeanCoreVersion())}`,
         confidence,
         requiresReview,
         metadata: {
           ...fields,
+          ...(sourceName ? { sourceName } : {}),
+          ...(sourceCode ? { sourceCode } : {}),
+          ...(Object.keys(sourceFields).length ? { sourceFields } : {}),
           recognition: {
-            schemaVersion: "aromasense-recognition/3.1",
+            schemaVersion: "aromasense-recognition/3.2",
             source: "photo",
             fileName: file.name,
             mimeType: file.type,
             engine,
             imageQuality: result.imageQuality,
             pageLayout: layout.layoutType,
+            layoutProfile: segment.hints?.profile,
             segmentationConfidence: segment.confidence,
             segmentationRequiresReview: layout.requiresReview,
             segmentId: segment.id,
             segmentBox: segment.box,
             rawText: segment.text,
+            sourceIdentity: {
+              ...(sourceName ? { name: sourceName } : {}),
+              ...(sourceCode ? { code: sourceCode } : {}),
+              ...(Object.keys(sourceFields).length ? { fields: sourceFields } : {})
+            },
             review,
             luckyBeanUpstream: {
               pipelineVersion: analysis.pipelineVersion,
