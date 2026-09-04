@@ -13,7 +13,8 @@ import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { SampleStageProgress } from "../storage/stage-progress-reader";
 
 export type StageTone = "orange" | "pink" | "blue" | "white" | "neutral";
-export type StageIndicatorState = StageStatus;
+/** near_complete is retained only for source compatibility with older renderers; new progress policy never emits it. */
+export type StageIndicatorState = StageStatus | "near_complete";
 
 export interface FinalPhaseViewState {
   phase: FinalAssessmentPhase;
