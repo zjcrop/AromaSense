@@ -1,0 +1,18 @@
+{
+  "contract":"coffee-dictionary/1.0",
+  "defaultLocale":"zh",
+  "fallbackLocale":"en",
+  "supportedLocales":["zh","en","ja","ko"],
+  "files":{
+    "core":"coffee-core-dictionary.json",
+    "sensory":"sensory.seed.json",
+    "defect":"defect.seed.json"
+  },
+  "rules":{
+    "stableIdRequired":true,
+    "preferBilingual":true,
+    "preserveSessionData":true,
+    "sensoryLabelsMayExtendCore":true,
+    "defectLabelsMustRemainSeparate":true
+  }
+}
