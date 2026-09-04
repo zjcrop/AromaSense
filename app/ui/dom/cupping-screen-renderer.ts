@@ -15,6 +15,7 @@ import type { FlavorGroupPreferenceService, FlavorGroupPreferences } from "../fl
 import { attachDragReorder } from "./drag-reorder";
 import { button, clearElement, element } from "./dom-helpers";
 import { finalAssessmentPhase, renderFinalAssessment } from "./final-assessment-renderer";
+import { openSampleIdentityDialog } from "./sample-identity-dialog";
 import { renderSampleRail } from "./sample-rail-renderer";
 import { renderSensoryEditor } from "./sensory-editor-renderer";
 
@@ -36,9 +37,13 @@ function ensureBlindStatusStyles(): void {
   const style = document.createElement("style");
   style.dataset.aromasenseBlindStatus = "true";
   style.textContent = `
-    .cupping-main__blind-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:7px 10px;border:1px solid rgba(185,153,90,.25);border-radius:9px;background:rgba(185,153,90,.07)}
+    .cupping-main__blind-status{width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:7px 10px;border:1px solid rgba(185,153,90,.25);border-radius:9px;background:rgba(185,153,90,.07);color:inherit;text-align:left;font:inherit}
+    button.cupping-main__blind-status{cursor:pointer;transition:border-color 180ms ease,background 180ms ease}
+    button.cupping-main__blind-status:hover,button.cupping-main__blind-status:focus-visible{border-color:rgba(214,173,99,.58);background:rgba(185,153,90,.12);outline:none}
+    .cupping-main__blind-status:disabled{cursor:default;opacity:.72}
     .cupping-main__blind-mode{color:#d4bc82;font-size:12px}
     .cupping-main__blind-copy{color:#9c968c;font-size:10px;line-height:1.45}
+    .cupping-main__blind-edit{margin-left:auto;color:#d6ad63;font-size:10px;font-weight:700;white-space:nowrap}
   `;
   document.head.append(style);
 }
@@ -174,6 +179,39 @@ export class CuppingScreenRenderer {
     this.statusRoot.hidden = text.length === 0;
   }
 
+  private async saveActiveSampleIdentity(
+    sampleId: string,
+    label: string | undefined,
+    metadataPatch: Readonly<Record<string, unknown>>
+  ): Promise<void> {
+    this.setBusy(true);
+    try {
+      this.state = await this.controller.saveSampleIdentity(sampleId, label, metadataPatch, this.options.now());
+      this.setStatus("豆子信息已保存；盲测流程中继续隐藏真实身份。");
+      await this.render();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setStatus(`豆子信息保存失败：${message}`, true);
+      throw error;
+    } finally {
+      this.setBusy(false);
+    }
+  }
+
+  private openActiveSampleIdentity(state: CuppingScreenState): void {
+    const active = state.active;
+    if (!active) return;
+    const mode = cuppingModeFromMetadata(state.sessionMetadata);
+    if (mode === "open" || isBlindSessionRevealed(state.sessionMetadata, state.sessionStatus)) return;
+    openSampleIdentityDialog({
+      displayNumber: active.slice.sample.displayNumber,
+      label: active.slice.sample.label,
+      metadata: active.slice.sample.metadata,
+      modeLabel: blindModeLabel(mode),
+      onSave: (label, metadataPatch) => this.saveActiveSampleIdentity(active.context.sampleId, label, metadataPatch)
+    });
+  }
+
   private async leaveSession(): Promise<void> {
     const state = this.state; if (!state) return;
     if (!window.confirm("退出当前杯测？已输入内容会保留在本地，下次可继续。")) return;
@@ -300,13 +338,23 @@ export class CuppingScreenRenderer {
     const mode = cuppingModeFromMetadata(state.sessionMetadata);
     if (mode === "open") return undefined;
     const revealed = isBlindSessionRevealed(state.sessionMetadata, state.sessionStatus);
-    const banner = element("div", `cupping-main__blind-status is-${mode}${revealed ? " is-revealed" : ""}`);
+    const editable = !revealed && state.sessionStatus !== "completed" && state.sessionStatus !== "archived";
+    const banner = editable
+      ? button(`cupping-main__blind-status is-${mode} is-editable`, "", () => this.openActiveSampleIdentity(state))
+      : element("div", `cupping-main__blind-status is-${mode}${revealed ? " is-revealed" : ""}`);
     banner.append(element("strong", "cupping-main__blind-mode", blindModeLabel(mode)));
     if (revealed) {
       const revealedAt = state.sessionMetadata.revealedAt?.trim();
       banner.append(element("span", "cupping-main__blind-copy", revealedAt ? `已统一揭盲 · ${revealedAt}` : "已统一揭盲"));
+    } else if (state.active) {
+      banner.append(
+        element("span", "cupping-main__blind-copy", "当前样品真实资料可随时填写，杯测过程中仍保持隐藏"),
+        element("span", "cupping-main__blind-edit", "填写豆子信息")
+      );
+      banner.title = "点击填写或修改当前样品豆子信息";
     } else {
-      banner.append(element("span", "cupping-main__blind-copy", blindModeDescription(mode)));
+      banner.append(element("span", "cupping-main__blind-copy", `${blindModeDescription(mode)} · 先选择样品后即可填写真实豆子信息`));
+      if (banner instanceof HTMLButtonElement) banner.disabled = true;
     }
     return banner;
   }
