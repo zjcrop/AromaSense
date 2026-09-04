@@ -47,10 +47,17 @@ test("full offline session remains local then synchronizes after network recover
 
     const editor = new CuppingSessionController(repository, (context, field) => `${context.sampleId}:${context.stageId}:${field}`);
     await editor.open({ sessionId: session.sessionId, sampleId: "sample-a", stageId: "high_temp" }, "2026-08-24T22:01:00+08:00");
+    await editor.saveField("flavor_tags", ["jasmine"], "2026-08-24T22:01:05+08:00");
     await editor.saveField("acidity_intensity", 8.5, "2026-08-24T22:01:10+08:00");
+    await editor.saveField("sweetness_intensity", 8, "2026-08-24T22:01:15+08:00");
+    await editor.saveField("bitterness_intensity", 2, "2026-08-24T22:01:20+08:00");
+    await editor.saveField("mouthfeel_intensity", 7, "2026-08-24T22:01:25+08:00");
     await editor.completeActiveStage("2026-08-24T22:02:00+08:00");
     await revisions.checkpointStage(session.sessionId, "sample-a", "high_temp", "2026-08-24T22:02:00+08:00");
 
+    // This test is about durable offline revision/sync behavior rather than the
+    // UI finish gate. Keep the existing direct final-state fixture so the
+    // network recovery path remains isolated from the end-to-end workflow test.
     await repository.setStageState(session.sessionId, "sample-a", "final", "completed", "2026-08-24T22:03:00+08:00", "2026-08-24T22:03:00+08:00", "2026-08-24T22:03:00+08:00");
     session = completeSession(session, "2026-08-24T22:04:00+08:00");
     await repository.saveSession(session);
