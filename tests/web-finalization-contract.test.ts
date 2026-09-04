@@ -20,10 +20,37 @@ test("Web startup is brand plus five equal readiness gates and auto-enters after
   assert.match(template, /<title>AromaSense · 香迹<\/title>/);
 });
 
-test("Web home keeps brand actions and mutually exclusive unfinished/completed history groups", () => {
-  assert.match(home, /textContent = "账户"/);
-  assert.match(home, /textContent = "导入"/);
-  assert.match(home, /textContent = "记录"/);
+test("Web homepage is a real four-section layout instead of legacy DOM with cosmetic overrides", () => {
+  assert.match(home, /className: "batch-setup__brand-zh", textContent: "香迹"/);
+  assert.match(home, /className: "batch-setup__brand-en", textContent: "AromaSense"/);
+  assert.ok(home.indexOf('className: "batch-setup__brand-zh"') < home.indexOf('className: "batch-setup__brand-en"'));
+  assert.match(home, /metadataTitle\.textContent = "杯测信息"/);
+  assert.match(home, /this\.sectionTitle\("杯测列表"\)/);
+  assert.match(home, /footer\.className = "batch-setup__footer-section"/);
+  assert.match(home, /this\.root\.replaceChildren\(header, metadata, samples, \.\.\.hiddenInputs, footer\)/);
+  assert.match(home, /importButton\.textContent = "导入数据"/);
+  assert.match(home, /actions\.replaceChildren\(\)/);
+});
+
+test("Homepage header only keeps account and records while import moves into the cupping list", () => {
+  assert.match(home, /account\.textContent = "账户"/);
+  assert.match(home, /records\.textContent = "记录"/);
+  assert.match(home, /captureActions\.append\(importButton\)/);
+  assert.match(home, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+});
+
+test("Homepage account and records stay in centered blurred modals", () => {
+  assert.match(app, /onOpenAccount: \(\) => this\.showHomeAccountModal\(\)/);
+  assert.match(app, /onOpenRecords: \(\) => this\.showHomeRecordsModal\(\)/);
+  assert.match(app, /\.home-modal\{position:fixed;inset:0;z-index:2200;display:grid;place-items:center/);
+  assert.match(app, /backdrop-filter:blur\(9px\)/);
+  assert.match(app, /if \(event\.target === overlay\) close\(\)/);
+  assert.match(app, /if \(event\.key === "Escape"\) close\(\)/);
+  assert.match(app, /importButton\.textContent = "导入"/);
+  assert.match(app, /session-records__tool/);
+});
+
+test("Web home keeps mutually exclusive unfinished and completed history groups", () => {
   assert.match(home, /"unfinished", "未完成记录"/);
   assert.match(home, /"completed", "已完成记录"/);
   assert.match(home, /this\.openHistoryGroup = opening \? key : undefined/);
