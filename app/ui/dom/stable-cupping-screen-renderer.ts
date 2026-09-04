@@ -14,7 +14,7 @@ const BLIND_IDENTITY_FIELDS: readonly [string, string, string][] = [
   ["variety", "品种", "例如 Heirloom"],
   ["process", "处理法", "例如 Washed / Natural"],
   ["roast", "烘焙度", "例如 浅烘"],
-  ["roastDate", "烘焙日期", "YYYY-MM-DD"],
+  ["roastDate", "烘焙日期", "例如 2026-07-15 / 七月十五日 / 15 Jul 2026"],
   ["altitude", "海拔", "例如 1950–2100 m"],
   ["flavorNotes", "风味信息", "包装或已知风味信息"]
 ];
@@ -62,7 +62,7 @@ export class CuppingScreenRenderer {
 
   private readonly handleBlindStatusClick = (event: Event): void => {
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>(".cupping-main__blind-status") : null;
-    if (!target) return;
+    if (!target?.classList.contains("is-editable")) return;
     event.preventDefault();
     void this.openBlindIdentityEditor();
   };
@@ -70,7 +70,7 @@ export class CuppingScreenRenderer {
   private readonly handleBlindStatusKeydown = (event: KeyboardEvent): void => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>(".cupping-main__blind-status") : null;
-    if (!target) return;
+    if (!target?.classList.contains("is-editable")) return;
     event.preventDefault();
     void this.openBlindIdentityEditor();
   };
@@ -148,10 +148,19 @@ export class CuppingScreenRenderer {
   private enhanceBlindStatus(): void {
     const status = this.root.querySelector<HTMLElement>(".cupping-main__blind-status");
     if (!status) return;
+    const state = this.controller.current();
+    const editable = Boolean(state && state.sessionStatus !== "completed" && state.sessionStatus !== "archived");
+    status.classList.toggle("is-editable", editable);
+    if (!editable) {
+      status.removeAttribute("role");
+      status.removeAttribute("tabindex");
+      status.removeAttribute("title");
+      status.querySelector(".cupping-main__blind-edit-hint")?.remove();
+      return;
+    }
     status.setAttribute("role", "button");
     status.tabIndex = 0;
     status.title = "点击补录或修改盲测样品信息";
-    status.classList.add("is-editable");
     if (!status.querySelector(".cupping-main__blind-edit-hint")) {
       const hint = document.createElement("span");
       hint.className = "cupping-main__blind-edit-hint";
@@ -260,7 +269,7 @@ export class CuppingScreenRenderer {
       caption.textContent = label;
       const input = document.createElement("input");
       input.className = "blind-identity-editor__input";
-      input.type = key === "roastDate" ? "date" : "text";
+      input.type = "text";
       input.placeholder = placeholder;
       field.append(caption, input);
       inputs.set(key, input);
@@ -302,8 +311,8 @@ export class CuppingScreenRenderer {
         const patch: Record<string, unknown> = {};
         for (const [key, input] of inputs) patch[key] = input.value;
         await this.controller.saveSampleIdentity(sample.sampleId, nameInput.value, patch, this.options.now());
-        status.textContent = "已保存";
-        setTimeout(dismiss, 180);
+        status.textContent = "已保存，盲测仍保持隐藏";
+        setTimeout(dismiss, 220);
       } catch (error) {
         status.textContent = `保存失败：${error instanceof Error ? error.message : String(error)}`;
         status.classList.add("is-error");
