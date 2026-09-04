@@ -5,7 +5,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "bundle:web": "node scripts/build-web.mjs && node scripts/harden-recognition-bootstrap.mjs && node scripts/verify-coffee-knowledge-output.mjs",
+    "bundle:web": "node scripts/build-web.mjs && node scripts/harden-recognition-runtime.mjs && node scripts/harden-recognition-bootstrap.mjs && node scripts/verify-coffee-knowledge-output.mjs",
     "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
     "check": "npm run typecheck && npm test"
   },
