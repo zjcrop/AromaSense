@@ -5,7 +5,6 @@ import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
-import { PRODUCT_VERSION } from "../version";
 import { AromaSenseDomApp } from "./dom-app";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
@@ -21,9 +20,6 @@ async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
 async function main(): Promise<void> {
   const root = document.getElementById("app");
   if (!root) throw new Error("APP_ROOT_NOT_FOUND");
-
-  const version = document.getElementById("version");
-  if (version) version.textContent = PRODUCT_VERSION;
 
   let app: AromaSenseDomApp | undefined;
   const startup = new StartupRenderer(root, {
