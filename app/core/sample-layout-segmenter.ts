@@ -27,7 +27,16 @@ interface OCRRow {
   fieldAnchors: Set<string>;
 }
 
+interface CatalogCard {
+  section?: OCRRow;
+  titleRows: OCRRow[];
+  detail: OCRRow;
+}
+
 const IDENTITY_FIELDS = new Set(["country", "origin", "region", "farm", "producer", "station", "cooperative"]);
+const PROCESS_SIGNAL = /(?:水洗|日晒|日曬|厌氧|厭氧|蜜处理|蜜處理|蜜處理|湿刨|濕刨|酵素|發酵|发酵|washed|natural|anaerobic|honey\s*process|wet\s*hulled|semi[-\s]?washed|carbonic|ナチュラル|ウォッシュド|ハニー|嫌気|워시드|내추럴|허니|무산소)/iu;
+const GRADE_SIGNAL = /(?:^|[\s·|｜,，、-])(?:G\s*[1-4]|AA\+?|AAA|AB|PB|SHB|SHG|EP|TOP)(?:$|[\s·|｜,，、-])/iu;
+const ROAST_SECTION_SIGNAL = /^(?:(?:淺中|浅中|中淺|中浅|淺|浅|中|中深|深|極深|极深)(?:度)?(?:焙|培|烘焙)?|(?:light|medium\s*light|medium|medium\s*dark|dark)\s*roast|(?:浅煎り|中浅煎り|中煎り|中深煎り|深煎り)|(?:약배전|중약배전|중배전|중강배전|강배전))$/iu;
 
 function unionBox(lines: readonly OCRLayoutLine[]): OCRBox {
   const boxes = lines.map((line) => line.normalizedBox);
@@ -117,6 +126,93 @@ function tableSegments(document: OCRLayoutDocument, rows: readonly OCRRow[]): Sa
 
   const segments = body.map((row, index) => segmentFromLines(document, index, row.lines, 0.9));
   return { layoutType: "table", confidence: 0.9, requiresReview: false, segments };
+}
+
+function compactText(value: string): string {
+  return value.normalize("NFKC").replace(/[\s【】\[\]<>《》「」『』()（）:：|｜·•・]/g, "").trim();
+}
+
+function isRoastSectionHeader(row: OCRRow): boolean {
+  const text = compactText(row.text);
+  return text.length >= 2 && text.length <= 18 && ROAST_SECTION_SIGNAL.test(text);
+}
+
+function isFlavorDetailRow(row: OCRRow): boolean {
+  return row.fieldAnchors.has("flavor");
+}
+
+function titleLooksCoffeeLike(rows: readonly OCRRow[]): boolean {
+  const text = rows.map((row) => row.text).join(" ");
+  return PROCESS_SIGNAL.test(text) || GRADE_SIGNAL.test(text);
+}
+
+function catalogCardSegments(document: OCRLayoutDocument, rows: readonly OCRRow[]): SampleLayoutResult | undefined {
+  const flavorRows = rows.filter(isFlavorDetailRow);
+  if (flavorRows.length < 2) return undefined;
+
+  const cards: CatalogCard[] = [];
+  let activeSection: OCRRow | undefined;
+  let pending: OCRRow[] = [];
+
+  for (const row of rows) {
+    if (isRoastSectionHeader(row)) {
+      activeSection = row;
+      pending = [];
+      continue;
+    }
+    if (isFlavorDetailRow(row)) {
+      const titleRows = pending
+        .filter((candidate) => !isRoastSectionHeader(candidate) && !isFlavorDetailRow(candidate))
+        .slice(-3);
+      if (titleRows.length) cards.push({ section: activeSection, titleRows, detail: row });
+      pending = [];
+      continue;
+    }
+    if (row.text.trim().length >= 2) pending.push(row);
+  }
+
+  if (cards.length < 2) return undefined;
+
+  const structuredCards = cards.filter((card) =>
+    card.titleRows.some((row) => row.box.width >= 0.18 && row.text.trim().length >= 3)
+  );
+  if (structuredCards.length < 2 || structuredCards.length / cards.length < 0.75) return undefined;
+
+  const processLikeCount = structuredCards.filter((card) => titleLooksCoffeeLike(card.titleRows)).length;
+  const processRatio = processLikeCount / structuredCards.length;
+  const titleLefts = structuredCards.map((card) => card.titleRows[0]?.box.left ?? 0);
+  const detailLefts = structuredCards.map((card) => card.detail.box.left);
+  const titleSpread = Math.max(...titleLefts) - Math.min(...titleLefts);
+  const detailSpread = Math.max(...detailLefts) - Math.min(...detailLefts);
+  const aligned = titleSpread <= 0.16 && detailSpread <= 0.16;
+
+  // Repeated "title + flavor description" cards are a common coffee-menu/list
+  // layout. They intentionally omit labels such as "产地:" or "处理法:", so the
+  // generic field-anchor block splitter cannot see record boundaries. Three or
+  // more repeated cards are strong structural evidence on their own; for only two
+  // cards we additionally require coffee/process/grade signals and alignment to
+  // avoid splitting a normal bag that happens to mention flavor twice.
+  const strongRepeatedStructure = structuredCards.length >= 3 && aligned;
+  const strongTwoCardStructure = structuredCards.length === 2 && aligned && processRatio >= 0.5;
+  if (!strongRepeatedStructure && !strongTwoCardStructure) return undefined;
+  if (structuredCards.length >= 3 && processRatio < 0.34 && !structuredCards.some((card) => card.section)) return undefined;
+
+  const confidence = processRatio >= 0.6 && aligned ? 0.92 : 0.86;
+  const segments = structuredCards.map((card, index) => {
+    const lines = [
+      ...(card.section ? card.section.lines : []),
+      ...card.titleRows.flatMap((row) => row.lines),
+      ...card.detail.lines
+    ];
+    return segmentFromLines(document, index, lines, confidence);
+  });
+
+  return {
+    layoutType: "vertical-block-list",
+    confidence,
+    requiresReview: confidence < 0.9,
+    segments
+  };
 }
 
 function columnClusters(rows: readonly OCRRow[], medianHeight: number): OCRRow[][] {
@@ -214,6 +310,9 @@ export function segmentSamples(document: OCRLayoutDocument): SampleLayoutResult 
 
   const table = tableSegments(document, rows);
   if (table) return table;
+
+  const catalogCards = catalogCardSegments(document, rows);
+  if (catalogCards) return catalogCards;
 
   const medianHeight = medianLineHeight(document);
   const rowList = rowListSegments(document, rows, medianHeight);
