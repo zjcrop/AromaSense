@@ -1,10 +1,12 @@
 import vm from "node:vm";
 import { cp, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const pagesOut = resolve(root, "site");
-const foundationOcrSource = resolve(root, "node_modules/luckybean-static-app/public/vendor/paddleocr");
+const foundationPackage = resolve(root, "node_modules/luckybean-static-app");
+const foundationOcrSource = resolve(foundationPackage, "public/vendor/paddleocr");
 const pagesOcrOut = resolve(pagesOut, "vendor/paddleocr");
 
 const REQUIRED_ASSETS = [
@@ -18,6 +20,34 @@ const REQUIRED_ASSETS = [
   ["ort/ort-wasm-simd-threaded.jsep.wasm", 5_000_000]
 ];
 
+async function existsFile(path) {
+  try {
+    const info = await stat(path);
+    return info.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function ensureFoundationRuntimePrepared() {
+  const manifestPath = resolve(foundationOcrSource, "manifest.json");
+  if (await existsFile(manifestPath)) return;
+
+  // npm 11 may deliberately suppress git-dependency lifecycle scripts unless
+  // they are explicitly approved. Do not rely on LuckyBean's postinstall for a
+  // production-critical OCR runtime: execute the pinned Foundation preparer as
+  // an explicit AromaSense build step when the generated assets are absent.
+  const preparer = resolve(foundationPackage, "scripts/prepare-paddleocr-vendor.mjs");
+  if (!(await existsFile(preparer))) {
+    throw new Error("Pinned LuckyBean package does not contain the Foundation PP-OCR vendor preparer");
+  }
+  console.log("Foundation OCR assets absent after npm install; preparing pinned same-origin runtime explicitly...");
+  await import(`${pathToFileURL(preparer).href}?aromasense=${Date.now()}`);
+  if (!(await existsFile(manifestPath))) {
+    throw new Error("LuckyBean Foundation OCR vendor preparer completed without manifest.json");
+  }
+}
+
 async function assertAsset(relativePath, minimumBytes) {
   const info = await stat(resolve(pagesOcrOut, relativePath));
   if (!info.isFile() || info.size < minimumBytes) {
@@ -26,8 +56,7 @@ async function assertAsset(relativePath, minimumBytes) {
 }
 
 async function installPagesRuntime() {
-  const sourceManifest = await stat(resolve(foundationOcrSource, "manifest.json"));
-  if (!sourceManifest.isFile()) throw new Error("LuckyBean Foundation OCR vendor runtime was not prepared by dependency postinstall");
+  await ensureFoundationRuntimePrepared();
   await cp(foundationOcrSource, pagesOcrOut, { recursive: true, force: true });
   await Promise.all(REQUIRED_ASSETS.map(([relativePath, minimumBytes]) => assertAsset(relativePath, minimumBytes)));
 }
