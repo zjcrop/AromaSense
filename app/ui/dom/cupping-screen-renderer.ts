@@ -1,4 +1,5 @@
 import type { StageId } from "../../../shared/protocol/aromasense-v1";
+import type { FinalAssessmentPhase } from "../../core/cupping-progress-policy";
 import { scoreProfileForMetadata } from "../../core/cupping-score-profile";
 import {
   blindModeDescription,
@@ -61,6 +62,10 @@ function renderSampleDetails(metadata: Record<string, unknown>): HTMLElement | u
     details.append(chip);
   }
   return details;
+}
+
+function statusLabel(status: "not_started" | "active" | "completed"): string {
+  return status === "completed" ? "已完成" : status === "active" ? "已开始" : "未开始";
 }
 
 export class CuppingScreenRenderer {
@@ -146,6 +151,15 @@ export class CuppingScreenRenderer {
     await this.run(async () => { this.state = await this.controller.select(sampleId, stageId, this.options.now()); });
   }
 
+  private async selectFinalPhase(sampleId: string, phase: FinalAssessmentPhase): Promise<void> {
+    this.expandedSampleIds.add(sampleId);
+    await this.run(async () => {
+      const now = this.options.now();
+      this.state = await this.controller.select(sampleId, "final", now);
+      this.state = await this.controller.saveField("final_phase", phase, now);
+    });
+  }
+
   private async run(work: () => Promise<void>): Promise<void> {
     this.setBusy(true);
     try { await work(); this.setStatus(""); await this.render(); }
@@ -194,6 +208,22 @@ export class CuppingScreenRenderer {
     return toggle;
   }
 
+  private renderProgressLegend(): HTMLElement {
+    const legend = element("div", "cupping-progress-legend");
+    legend.setAttribute("aria-label", "进度颜色说明");
+    const items: ReadonlyArray<[string, string]> = [
+      ["not-started", "灰色 未开始"],
+      ["active", "浅蓝 已开始"],
+      ["completed", "绿色 已完成"]
+    ];
+    for (const [state, label] of items) {
+      const item = element("span", "cupping-progress-legend__item");
+      item.append(element("i", `cupping-progress-legend__dot is-${state}`), element("span", "cupping-progress-legend__label", label));
+      legend.append(item);
+    }
+    return legend;
+  }
+
   private renderRail(state: CuppingScreenState): void {
     clearElement(this.railRoot);
     this.layoutRoot.classList.toggle("is-rail-compact", this.railCompact);
@@ -228,6 +258,7 @@ export class CuppingScreenRenderer {
       : "所有样品的全部杯测流程完成后才可结束整场杯测";
     actions.append(exit, finish);
     controls.append(actions);
+    if (!this.railCompact) controls.append(this.renderProgressLegend());
     this.railRoot.append(controls);
     this.updateRailToggleLabels();
   }
@@ -237,13 +268,31 @@ export class CuppingScreenRenderer {
     if (!sampleId || !activeStageId) { this.stageStripRoot.hidden = true; return; }
     const sample = state.rail.find((item) => item.sampleId === sampleId);
     if (!sample) { this.stageStripRoot.hidden = true; return; }
+    const activeFinalPhase = activeStageId === "final" && state.active?.context.sampleId === sampleId
+      ? finalAssessmentPhase(state.active.slice.observations)
+      : undefined;
     this.stageStripRoot.hidden = false;
+
     for (const stage of sample.stages) {
-      const active = stage.stageId === activeStageId;
-      const step = button(`cupping-stage-step cupping-stage-step--${stage.tone} is-${stage.status}${active ? " is-current" : ""}`, stage.label, () => this.select(sampleId, stage.stageId));
-      step.dataset.stageId = stage.stageId;
-      step.setAttribute("aria-current", active ? "step" : "false");
-      this.stageStripRoot.append(step);
+      if (stage.stageId !== "final") {
+        const active = stage.stageId === activeStageId;
+        const step = button(`cupping-stage-step is-${stage.status}${active ? " is-current" : ""}`, stage.label, () => this.select(sampleId, stage.stageId));
+        step.dataset.stageId = stage.stageId;
+        step.setAttribute("aria-current", active ? "step" : "false");
+        step.title = `${statusLabel(stage.status)}；完成标准：${stage.completionHint}`;
+        this.stageStripRoot.append(step);
+        continue;
+      }
+
+      for (const phase of stage.finalPhases ?? []) {
+        const active = activeStageId === "final" && activeFinalPhase === phase.phase;
+        const step = button(`cupping-stage-step cupping-stage-step--final is-${phase.status}${active ? " is-current" : ""}`, phase.label, () => this.selectFinalPhase(sampleId, phase.phase));
+        step.dataset.stageId = "final";
+        step.dataset.finalPhase = phase.phase;
+        step.setAttribute("aria-current", active ? "step" : "false");
+        step.title = `${statusLabel(phase.status)}；完成标准：${phase.completionHint}`;
+        this.stageStripRoot.append(step);
+      }
     }
   }
 
@@ -317,8 +366,12 @@ export class CuppingScreenRenderer {
     );
     const visibleMetadata = visibleSampleMetadata(active.slice.sample.metadata, state.sessionMetadata, state.sessionStatus);
     const stage = state.rail.find((item) => item.sampleId === active.context.sampleId)?.stages.find((item) => item.stageId === active.context.stageId);
+    const finalPhase = active.context.stageId === "final" ? finalAssessmentPhase(active.slice.observations) : undefined;
+    const stageLabel = finalPhase
+      ? stage?.finalPhases?.find((item) => item.phase === finalPhase)?.label ?? stage?.label
+      : stage?.label;
     const titleBlock = element("div", "cupping-main__titles");
-    titleBlock.append(element("h1", "cupping-main__sample-title", sampleTitle), element("p", `cupping-main__stage cupping-main__stage--${stage?.tone ?? "neutral"}`, stage?.label ?? active.context.stageId));
+    titleBlock.append(element("h1", "cupping-main__sample-title", sampleTitle), element("p", `cupping-main__stage cupping-main__stage--${stage?.tone ?? "neutral"}`, stageLabel ?? active.context.stageId));
     const details = renderSampleDetails(visibleMetadata); if (details) titleBlock.append(details);
     this.headerRoot.append(element("div", "cupping-main__sample-number", String(active.slice.sample.displayNumber).padStart(2, "0")), titleBlock);
 
@@ -358,15 +411,25 @@ export class CuppingScreenRenderer {
     }
     this.attachTagStackDrag();
 
-    const previous = button("cupping-nav cupping-nav--previous", "上一步", () => this.run(async () => { this.state = await this.controller.goPrevious(this.options.now()); }));
-    const finalPhase = active.context.stageId === "final" ? finalAssessmentPhase(active.slice.observations) : undefined;
-    const next = button("cupping-nav cupping-nav--next", active.context.stageId === "final" ? "完成本样品" : "下一步", () =>
-      this.run(async () => { this.state = await this.controller.goNext(this.options.now()); })
-    );
-    if (active.context.stageId === "final" && finalPhase !== "score") {
-      next.disabled = true;
-      next.title = "请依次完成风味描述、综评和评分";
-    }
+    const previousAction = (): Promise<void> => {
+      if (active.context.stageId === "final" && finalPhase === "score") return this.selectFinalPhase(active.context.sampleId, "overall");
+      if (active.context.stageId === "final" && finalPhase === "overall") return this.selectFinalPhase(active.context.sampleId, "flavor");
+      return this.run(async () => { this.state = await this.controller.goPrevious(this.options.now()); });
+    };
+    const nextAction = (): Promise<void> => {
+      if (active.context.stageId === "final" && finalPhase === "flavor") return this.selectFinalPhase(active.context.sampleId, "overall");
+      if (active.context.stageId === "final" && finalPhase === "overall") return this.selectFinalPhase(active.context.sampleId, "score");
+      return this.run(async () => { this.state = await this.controller.goNext(this.options.now()); });
+    };
+
+    const currentPhaseState = finalPhase ? stage?.finalPhases?.find((item) => item.phase === finalPhase) : undefined;
+    const stepCompleted = finalPhase ? currentPhaseState?.status === "completed" : active.slice.stageStatus === "completed";
+    const completionHint = finalPhase ? currentPhaseState?.completionHint : stage?.completionHint;
+    const previous = button("cupping-nav cupping-nav--previous", "上一步", previousAction);
+    const nextLabel = active.context.stageId === "final" && finalPhase === "score" ? "完成本样品" : "下一步";
+    const next = button("cupping-nav cupping-nav--next", nextLabel, nextAction);
+    next.disabled = !stepCompleted;
+    if (!stepCompleted) next.title = `达到完成标准后可继续${completionHint ? `：${completionHint}` : ""}`;
     this.footerRoot.classList.add("is-two-action");
     this.footerRoot.append(previous, next);
   }
