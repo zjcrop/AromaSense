@@ -1,0 +1,54 @@
+name: AromaSense browser refresh acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  browser-refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify live Pages entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://zjcrop.github.io/AromaSense/'
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 2 "${base}" -o /tmp/aromasense-live-index.html
+          grep -Fq '<title>AromaSense · 香迹</title>' /tmp/aromasense-live-index.html
+          grep -Fq 'data-cloud-base-url="https://aromasense-api.zj-crop.workers.dev"' /tmp/aromasense-live-index.html
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 2 "${base}app.js" -o /tmp/aromasense-live-app.js
+          test -s /tmp/aromasense-live-app.js
+          echo "Live Pages entrypoint and app.js are reachable"
+      - name: Diagnose live Pages startup in Chrome
+        env:
+          AROMASENSE_ACCEPTANCE_DEBUG: '1'
+        run: node scripts/live-pages-smoke.mjs
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build browser application
+        run: npm run bundle:web
+      - name: Run hard-refresh recovery acceptance
+        env:
+          AROMASENSE_ACCEPTANCE_DEBUG: '1'
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          node scripts/browser-refresh-acceptance.mjs 2>&1 | tee /tmp/aromasense-browser-refresh.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Fq 'AromaSense browser refresh acceptance: PASS' /tmp/aromasense-browser-refresh.log; then
+            exit 0
+          fi
+          exit "$status"
