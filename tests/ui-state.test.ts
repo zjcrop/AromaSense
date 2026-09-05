@@ -35,12 +35,22 @@ test("sample rail derives progress from persisted sensory edits rather than visi
     );
     await f.repository.createSessionWithSamples(session, samples);
     await f.repository.saveObservation({
-      observationId: "prep-dry",
+      observationId: "aroma-wet",
       sessionId: session.sessionId,
       sampleId: "sample-1",
-      stageId: "preparation",
-      fieldKey: "dry_fragrance_intensity",
-      value: 6,
+      stageId: "aroma",
+      fieldKey: "wet_aroma_intensity",
+      value: 7,
+      dictionaryVersion: "sensory-dictionary/1.2",
+      updatedAt: now
+    });
+    await f.repository.saveObservation({
+      observationId: "aroma-flavor",
+      sessionId: session.sessionId,
+      sampleId: "sample-1",
+      stageId: "aroma",
+      fieldKey: "flavor_tags",
+      value: ["jasmine"],
       dictionaryVersion: "sensory-dictionary/1.2",
       updatedAt: now
     });

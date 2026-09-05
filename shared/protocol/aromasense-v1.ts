@@ -1,16 +1,27 @@
 export const PROTOCOL_VERSION = "aromasense-sync/1.0" as const;
-export const TAXONOMY_VERSION = "sensory-stage/1.0" as const;
+export const TAXONOMY_VERSION = "sensory-flow/2.0" as const;
 
 export const STAGE_IDS = [
-  "preparation",
   "aroma",
   "high_temp",
   "mid_temp",
   "low_temp",
-  "final"
+  "flavor",
+  "overall",
+  "scoring"
 ] as const;
 
-export type StageId = (typeof STAGE_IDS)[number];
+export const LEGACY_STAGE_IDS = ["preparation", "final"] as const;
+export type FlowStepId = (typeof STAGE_IDS)[number];
+export type LegacyStageId = (typeof LEGACY_STAGE_IDS)[number];
+export type StageId = FlowStepId | LegacyStageId;
+
+export function normalizeFlowStep(stageId: string): FlowStepId {
+  if (stageId === "preparation") return "aroma";
+  if (stageId === "final") return "flavor";
+  if ((STAGE_IDS as readonly string[]).includes(stageId)) return stageId as FlowStepId;
+  throw new Error(`UNKNOWN_FLOW_STEP:${stageId}`);
+}
 export type RevisionKind = "checkpoint" | "final";
 
 export interface SensoryObservation {

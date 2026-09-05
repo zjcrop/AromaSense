@@ -1,10 +1,17 @@
 {
-  "version":"1.0",
+  "schemaVersion":"coffee-defect-dictionary/1.0",
+  "foundationRelease":"coffee-foundation-1.0.4",
+  "defaultLocale":"zh-Hans",
+  "fallbackLocale":"en",
   "items":[
-    {"id":"defect-ferment","name":{"zh":"过度发酵","en":"Over-fermented","ja":"","ko":""},"aliases":["发酵味","ferment","over fermented"]},
-    {"id":"defect-mold","name":{"zh":"霉味","en":"Moldy","ja":"","ko":""},"aliases":["霉变","mold","moldy"]},
-    {"id":"defect-earthy","name":{"zh":"土味","en":"Earthy","ja":"","ko":""},"aliases":["泥土味","earthy"]},
-    {"id":"defect-phenolic","name":{"zh":"酚类异味","en":"Phenolic","ja":"","ko":""},"aliases":["药味","phenolic"]},
-    {"id":"defect-rubbery","name":{"zh":"橡胶味","en":"Rubbery","ja":"","ko":""},"aliases":["橡胶","rubbery"]}
+    {"id":"defect-ferment","category":"off-flavor","severity":"overt","names":{"zh-Hans":"过度发酵","en":"Over-fermented","ja":"過発酵","ko":"과발효"},"aliases":["发酵味","坏发酵","ferment","over fermented"]},
+    {"id":"defect-mold","category":"off-flavor","severity":"overt","names":{"zh-Hans":"霉味","en":"Moldy","ja":"かび臭","ko":"곰팡이 냄새"},"aliases":["霉变","霉腐","mold","moldy","musty"]},
+    {"id":"defect-earthy","category":"off-flavor","severity":"overt","names":{"zh-Hans":"土味","en":"Earthy","ja":"土臭","ko":"흙내"},"aliases":["泥土味","earthy"]},
+    {"id":"defect-phenolic","category":"off-flavor","severity":"overt","names":{"zh-Hans":"酚类异味","en":"Phenolic","ja":"フェノール臭","ko":"페놀 향"},"aliases":["药味","phenolic","medicinal"]},
+    {"id":"defect-rubbery","category":"off-flavor","severity":"overt","names":{"zh-Hans":"橡胶味","en":"Rubbery","ja":"ゴム臭","ko":"고무 냄새"},"aliases":["橡胶","rubbery"]},
+    {"id":"defect-papery","category":"off-flavor","severity":"latent","names":{"zh-Hans":"纸板味","en":"Papery/Cardboard","ja":"紙・段ボール臭","ko":"종이·판지 향"},"aliases":["纸味","cardboard","papery"]},
+    {"id":"defect-woody","category":"off-flavor","severity":"latent","names":{"zh-Hans":"木质陈味","en":"Woody/Stale","ja":"木質・古い香り","ko":"나무·묵은 향"},"aliases":["木味","陈味","woody","stale"]},
+    {"id":"defect-burnt","category":"off-flavor","severity":"overt","names":{"zh-Hans":"焦糊味","en":"Burnt","ja":"焦げ臭","ko":"탄 맛"},"aliases":["焦味","burnt","ashy"]},
+    {"id":"defect-astringent","category":"tactile","severity":"latent","names":{"zh-Hans":"明显涩感","en":"Astringent","ja":"強い渋味","ko":"강한 떫은맛"},"aliases":["轻微涩","涩味","astringent"]}
   ]
 }

@@ -2,7 +2,7 @@
   min-height: 100dvh;
   max-width: 920px;
   margin: 0 auto;
-  padding: 20px 18px max(24px, env(safe-area-inset-bottom));
+  padding: max(20px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
   background: #151515;
   color: #f4efe4;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -138,7 +138,7 @@
   background: transparent;
   color: #b7ad99;
 }
-.batch-review__figure { margin: 0; padding: 16px 18px 0; }
+.batch-review__figure { margin: 10px 0 0; padding: 0; }
 .batch-review__image {
   width: 100%;
   max-height: 280px;
@@ -149,39 +149,46 @@
   background: #0d0d0d;
 }
 .batch-review__image-caption { margin-top: 7px; color: #858078; font-size: 10px; line-height: 1.45; }
-.batch-review__form { padding: 16px 18px 104px; }
+.batch-review__form { padding: 12px 18px 92px; }
 .batch-review__section {
-  margin: 0 0 13px;
-  padding: 12px;
+  margin: 0 0 9px;
+  padding: 9px 10px;
   border: 1px solid rgba(185,153,90,.18);
   border-radius: 12px;
   background: #1b1b1b;
 }
 .batch-review__section-title { padding: 0 6px; color: #c4ab72; font-size: 12px; font-weight: 700; letter-spacing: .06em; }
-.batch-review__grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px 12px; }
+.batch-review__grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 7px 11px; }
+.batch-review__grid--core { grid-template-columns: repeat(3, minmax(0,1fr)); }
 .batch-review__field { min-width: 0; display: grid; gap: 5px; }
-.batch-review__field--name { margin-bottom: 14px; }
+.batch-review__field--wide { grid-column: 1 / -1; }
+.batch-review__field--name { margin-bottom: 9px; }
 .batch-review__field.is-review { margin: -4px; padding: 4px; border-radius: 9px; background: rgba(232,154,85,.07); }
 .batch-review__label { color: #a8a198; font-size: 10px; font-weight: 600; }
 .batch-review__field.is-review .batch-review__label { color: #e7aa73; }
 .batch-review__control {
   width: 100%;
   min-width: 0;
-  min-height: 42px;
+  min-height: 37px;
   border: 1px solid rgba(185,153,90,.34);
   border-radius: 9px;
-  padding: 8px 10px;
+  padding: 6px 9px;
   background: #242424;
   color: #f4efe4;
   font: inherit;
   font-size: 13px;
   outline: none;
 }
-textarea.batch-review__control { min-height: 80px; resize: vertical; line-height: 1.5; }
-.batch-review__control--name { min-height: 48px; border-color: rgba(185,153,90,.65); font-size: 15px; font-weight: 650; }
+textarea.batch-review__control { min-height: 58px; resize: vertical; line-height: 1.45; }
+.batch-review__control--name { min-height: 42px; border-color: rgba(185,153,90,.65); font-size: 15px; font-weight: 650; }
 .batch-review__control:focus { border-color: #b9995a; box-shadow: 0 0 0 2px rgba(185,153,90,.12); }
 .batch-review__field.is-review .batch-review__control { border-color: rgba(232,154,85,.58); }
-.batch-review__field-hint { color: #9a8c7d; font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
+.batch-review__details,
+.batch-review__source { margin-top: 9px; border-top: 1px solid rgba(255,255,255,.07); }
+.batch-review__details-title { padding: 11px 0 8px; color: #c4ab72; font-size: 11px; font-weight: 700; cursor: pointer; }
+.batch-review__details > .batch-review__section { margin-left: 0; margin-right: 0; }
+.batch-review__evidence-list { margin: 8px 0 0; padding: 0 0 0 18px; color: #9a8c7d; font-size: 9px; line-height: 1.55; }
+.batch-review__evidence-item + .batch-review__evidence-item { margin-top: 3px; }
 .batch-review__raw { margin-top: 14px; border: 1px solid rgba(255,255,255,.07); border-radius: 10px; background: #171717; }
 .batch-review__raw-title { padding: 10px 12px; color: #9b958c; font-size: 11px; cursor: pointer; }
 .batch-review__raw-text { margin: 0; padding: 0 12px 12px; color: #aaa49a; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -215,7 +222,7 @@ textarea.batch-review__control { min-height: 80px; resize: vertical; line-height
 }
 
 @media (max-width: 620px) {
-  .batch-setup { padding-left: 12px; padding-right: 12px; }
+  .batch-setup { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
   .batch-setup__header { align-items: center; }
   .batch-setup__heading { font-size: 21px; }
   .batch-setup__capture-actions { grid-template-columns: 1fr 1fr; }
@@ -228,10 +235,11 @@ textarea.batch-review__control { min-height: 80px; resize: vertical; line-height
   .batch-setup__remove { min-width: 56px; }
   .batch-setup__recent-item { align-items: flex-start; flex-direction: column; gap: 3px; }
   .batch-review__header { padding-left: 13px; padding-right: 13px; }
-  .batch-review__figure { padding: 12px 13px 0; }
   .batch-review__image { max-height: 210px; }
-  .batch-review__form { padding: 13px 13px 96px; }
-  .batch-review__section { padding: 10px; }
-  .batch-review__grid { grid-template-columns: 1fr; gap: 9px; }
+  .batch-review__form { padding: 10px max(14px, env(safe-area-inset-right)) 88px max(14px, env(safe-area-inset-left)); }
+  .batch-review__section { padding: 8px 0; }
+  .batch-review__grid,
+  .batch-review__grid--core { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px 10px; }
+  .batch-review__field--wide { grid-column: 1 / -1; }
   .batch-review__footer { padding-left: 13px; padding-right: 13px; grid-template-columns: .4fr 1fr; }
 }

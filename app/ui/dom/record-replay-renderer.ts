@@ -5,6 +5,13 @@ import { scoreProfileForMetadata } from "../../core/cupping-score-profile";
 import { calculateCuppingScore } from "./final-assessment-renderer";
 import { renderRadarSummary } from "./radar-renderer";
 import { button, clearElement, element } from "./dom-helpers";
+import { comparisonFields, normalizeComparisonBundle, type ComparisonBundle, type ComparisonMapping } from "../../core/comparison-bundle";
+
+export interface RecordReplayComparisonOptions {
+  initial?: { bundle: ComparisonBundle; mapping: ComparisonMapping };
+  onImport(bundle: ComparisonBundle): Promise<{ bundle: ComparisonBundle; mapping: ComparisonMapping }>;
+  onClear(): void | Promise<void>;
+}
 
 const PROFILE_AXES = [
   ["profile_floral", "花香"], ["profile_fruit", "果香"], ["profile_tea", "茶感"],
@@ -28,11 +35,13 @@ function readable(value: unknown): string {
 }
 
 export class RecordReplayRenderer {
+  private comparison?: { bundle: ComparisonBundle; mapping: ComparisonMapping };
   constructor(
     private readonly root: HTMLElement,
     private readonly snapshot: CuppingRecordSnapshot,
-    private readonly onBack: () => void | Promise<void>
-  ) {}
+    private readonly onBack: () => void | Promise<void>,
+    private readonly comparisonOptions?: RecordReplayComparisonOptions
+  ) { this.comparison = comparisonOptions?.initial; }
 
   render(): void {
     clearElement(this.root);
@@ -41,7 +50,12 @@ export class RecordReplayRenderer {
     const mode = cuppingModeFromMetadata(session.metadata);
     const scoreProfile = scoreProfileForMetadata(session.metadata);
     const header = element("header", "record-replay__header");
-    header.append(button("record-replay__back", "返回记录", () => this.onBack()), element("h1", "record-replay__title", session.metadata.eventName || session.title || "杯测复盘"), element("span", "record-replay__readonly", "只读"));
+    const compareInput = element("input", "record-replay__compare-input"); compareInput.type = "file"; compareInput.accept = ".json,application/json"; compareInput.hidden = true;
+    compareInput.addEventListener("change", () => { const file = compareInput.files?.[0]; compareInput.value = ""; if (file) void this.importComparison(file); });
+    const tools = element("div", "record-replay__tools");
+    tools.append(button("record-replay__compare", this.comparison ? "更换对比" : "加载对比", () => compareInput.click()));
+    if (this.comparison) tools.append(button("record-replay__compare", "清除对比", () => void this.clearComparison()));
+    header.append(button("record-replay__back", "返回记录", () => this.onBack()), element("h1", "record-replay__title", session.metadata.eventName || session.title || "杯测复盘"), tools, compareInput);
     this.root.append(header);
 
     const meta = element("section", "record-replay__meta");
@@ -70,14 +84,41 @@ export class RecordReplayRenderer {
       section.append(element("div", "record-replay__score", `${scoreProfile.scoreLabel} ${score.toFixed(1)}`));
 
       const fields = element("dl", "record-replay__fields");
+      const comparison = this.comparison ? new Map(comparisonFields(this.snapshot, this.comparison.bundle, this.comparison.mapping, sample.sampleId).map((item) => [item.fieldKey, item] as const)) : new Map();
       for (const observation of observations) {
         if (observation.fieldKey === "final_phase" || observation.fieldKey.startsWith("blind_guess_")) continue;
         const dt = element("dt", "record-replay__field-key", observation.fieldKey);
-        const dd = element("dd", "record-replay__field-value", readable(observation.value));
+        const compared = comparison.get(observation.fieldKey);
+        const dd = element("dd", "record-replay__field-value");
+        if (Array.isArray(observation.value)) {
+          for (const value of observation.value) dd.append(element("span", `record-replay__own-tag${compared?.overlappingTags?.includes(String(value)) ? " is-overlap" : ""}`, String(value)));
+          for (const value of compared?.peerOnlyTags ?? []) dd.append(element("span", "record-replay__peer-tag", value));
+        } else {
+          dd.append(document.createTextNode(readable(observation.value)));
+          if (compared?.peer !== undefined) dd.append(element("small", `record-replay__peer-value ${typeof compared.peer === "number" ? "is-numeric" : "is-text"}`, typeof compared.peer === "number" ? `对方 ${compared.peer}` : readable(compared.peer)));
+        }
         fields.append(dt, dd);
+      }
+      for (const field of comparison.values()) {
+        if (observations.some((item) => item.fieldKey === field.fieldKey) || field.peer === undefined) continue;
+        fields.append(element("dt", "record-replay__field-key", field.fieldKey), element("dd", "record-replay__field-value is-peer-only", readable(field.peer)));
       }
       section.append(fields);
       this.root.append(section);
     }
+  }
+
+  private async importComparison(file: File): Promise<void> {
+    if (!this.comparisonOptions) return;
+    try {
+      const bundle = normalizeComparisonBundle(JSON.parse(await file.text()));
+      if (!bundle) throw new Error("不支持的 Comparison/Submission Bundle");
+      this.comparison = await this.comparisonOptions.onImport(bundle);
+      this.render();
+    } catch (error) { window.alert(`加载对比失败：${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  private async clearComparison(): Promise<void> {
+    await this.comparisonOptions?.onClear(); this.comparison = undefined; this.render();
   }
 }

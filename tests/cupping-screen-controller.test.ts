@@ -17,7 +17,7 @@ const metadataMigration = readFileSync("app/storage/0002_session_metadata.sql", 
 
 async function fillRequiredStage(screen: CuppingScreenController, sampleId: string, stageId: StageId, now: string): Promise<void> {
   await screen.select(sampleId, stageId, now);
-  const fields: Record<Exclude<StageId, "final">, ReadonlyArray<[string, unknown]>> = {
+  const fields: Record<StageId, ReadonlyArray<[string, unknown]>> = {
     preparation: [["dry_fragrance_intensity", 6]],
     aroma: [["wet_aroma_intensity", 7], ["flavor_tags", ["jasmine"]]],
     high_temp: [
@@ -31,22 +31,25 @@ async function fillRequiredStage(screen: CuppingScreenController, sampleId: stri
     low_temp: [
       ["flavor_tags", ["jasmine"]], ["acidity_intensity", 6], ["sweetness_intensity", 7],
       ["bitterness_intensity", 2], ["mouthfeel_intensity", 6], ["finish_intensity", 7]
+    ],
+    flavor: [["flavor_tags", ["jasmine"]]],
+    overall: [
+      ["quality_flavor", 8], ["quality_aftertaste", 8], ["quality_acidity", 8], ["quality_sweetness", 8],
+      ["quality_body", 8], ["quality_clean", 8], ["quality_uniformity", 8], ["quality_balance", 8]
+    ],
+    scoring: [["score_confirmed", true]],
+    final: [
+      ["flavor_tags", ["jasmine"]],
+      ["quality_flavor", 8], ["quality_aftertaste", 8], ["quality_acidity", 8], ["quality_sweetness", 8],
+      ["quality_body", 8], ["quality_clean", 8], ["quality_uniformity", 8], ["quality_balance", 8],
+      ["final_score_confirmed", true]
     ]
   };
 
-  if (stageId === "final") {
-    await screen.saveField("flavor_tags", ["jasmine"], now);
-    for (const key of [
-      "quality_flavor", "quality_aftertaste", "quality_acidity", "quality_sweetness",
-      "quality_body", "quality_clean", "quality_uniformity", "quality_balance"
-    ]) await screen.saveField(key, 8, now);
-    await screen.saveField("final_score_confirmed", true, now);
-  } else {
-    for (const [fieldKey, value] of fields[stageId]) await screen.saveField(fieldKey, value, now);
-  }
+  for (const [fieldKey, value] of fields[stageId]) await screen.saveField(fieldKey, value, now);
 }
 
-test("opening a stage does not start it; meaningful input completes preparation before next", async () => {
+test("browsing does not start a step; real input does, and next requires completion", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aromasense-screen-"));
   const db = NodeSQLiteDriver.open(join(dir, "screen.sqlite"));
   db.exec(schema);
@@ -63,17 +66,19 @@ test("opening a stage does not start it; meaningful input completes preparation 
     const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
 
     await screen.initialize(session.sessionId);
-    const browsed = await screen.select("sample-1", "preparation", now);
-    assert.equal(browsed.rail[0]?.stages.find((stage) => stage.stageId === "preparation")?.status, "not_started");
-    await assert.rejects(() => screen.goNext("2026-08-24T20:40:30+08:00"), /STAGE_INCOMPLETE:preparation/);
-
-    const entered = await screen.saveField("dry_fragrance_intensity", 6, "2026-08-24T20:40:40+08:00");
-    assert.equal(entered.rail[0]?.stages.find((stage) => stage.stageId === "preparation")?.status, "completed");
-
+    await screen.select("sample-1", "aroma", now);
+    assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "not_started");
+    await screen.saveField("wet_aroma_intensity", 7, "2026-08-24T20:40:30+08:00");
+    assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "active");
+    await assert.rejects(() => screen.goNext("2026-08-24T20:40:40+08:00"), /STAGE_INCOMPLETE:aroma/);
+    await screen.saveField("flavor_tags", ["jasmine"], "2026-08-24T20:40:50+08:00");
     const afterNext = await screen.goNext("2026-08-24T20:41:00+08:00");
-    assert.equal(afterNext.active?.context.stageId, "aroma");
-    assert.equal(afterNext.rail[0]?.stages.find((stage) => stage.stageId === "preparation")?.status, "completed");
-    assert.equal(afterNext.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "not_started");
+
+    assert.equal(afterNext.active?.context.stageId, "high_temp");
+    const aroma = afterNext.rail[0]?.stages.find((stage) => stage.stageId === "aroma");
+    const high = afterNext.rail[0]?.stages.find((stage) => stage.stageId === "high_temp");
+    assert.equal(aroma?.status, "completed");
+    assert.equal(high?.status, "not_started");
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
@@ -142,16 +147,20 @@ test("session finish requires all sensory criteria including explicit score conf
     const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
 
     await screen.initialize(session.sessionId);
-    await fillRequiredStage(screen, "finish-sample-1", "final", now);
+    await fillRequiredStage(screen, "finish-sample-1", "scoring", now);
     await screen.completeStage("2026-08-27T12:01:00+08:00");
     assert.equal(screen.canFinishSession(), false);
     await assert.rejects(() => screen.finishSession("2026-08-27T12:02:00+08:00"), /ALL_SAMPLE_STAGES_REQUIRED/);
 
-    for (const stageId of ["preparation", "aroma", "high_temp", "mid_temp", "low_temp"] as const) {
+    for (const stageId of ["aroma", "high_temp", "mid_temp", "low_temp", "flavor", "overall"] as const) {
       await fillRequiredStage(screen, "finish-sample-1", stageId, "2026-08-27T12:03:00+08:00");
       await screen.completeStage("2026-08-27T12:04:00+08:00");
     }
 
+    assert.equal(screen.canFinishSession(), false);
+    assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "scoring")?.status, "active");
+    await fillRequiredStage(screen, "finish-sample-1", "scoring", "2026-08-27T12:04:30+08:00");
+    await screen.completeStage("2026-08-27T12:04:45+08:00");
     assert.equal(screen.canFinishSession(), true);
     const completed = await screen.finishSession("2026-08-27T12:05:00+08:00");
     assert.equal(completed.sessionStatus, "completed");

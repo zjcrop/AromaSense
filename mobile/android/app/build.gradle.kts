@@ -21,8 +21,8 @@ android {
         applicationId = "com.zjcrop.aromasense"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10103
-        versionName = "0.1C"
+        versionCode = 10201
+        versionName = "B0.2.a"
     }
 
     signingConfigs {

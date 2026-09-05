@@ -1,5 +1,6 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import type { StageStatus } from "./cupping-state-machine";
+import { completionForStage } from "./completion-engine";
 
 export const FINAL_ASSESSMENT_PHASES = ["flavor", "overall", "score"] as const;
 export type FinalAssessmentPhase = (typeof FINAL_ASSESSMENT_PHASES)[number];
@@ -10,20 +11,15 @@ export interface FinalPhaseProgress {
   completionHint: string;
 }
 
-const REQUIRED_STAGE_FIELDS: Readonly<Record<Exclude<StageId, "final">, readonly string[]>> = {
-  preparation: ["dry_fragrance_intensity"],
-  aroma: ["wet_aroma_intensity", "flavor_tags"],
-  high_temp: ["flavor_tags", "acidity_intensity", "sweetness_intensity", "bitterness_intensity", "mouthfeel_intensity"],
-  mid_temp: ["flavor_tags", "acidity_intensity", "sweetness_intensity", "bitterness_intensity", "mouthfeel_intensity", "finish_intensity"],
-  low_temp: ["flavor_tags", "acidity_intensity", "sweetness_intensity", "bitterness_intensity", "mouthfeel_intensity", "finish_intensity"]
-};
-
 export const STAGE_COMPLETION_HINTS: Readonly<Record<Exclude<StageId, "final">, string>> = {
   preparation: "记录干香强度",
   aroma: "记录湿香强度并选择至少一个风味描述",
   high_temp: "完成风味、酸质、甜感、苦味与口感强度",
   mid_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
-  low_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度"
+  low_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
+  flavor: "选择至少一个最终风味描述",
+  overall: "完成风味、余韵、酸质、甜感、醇厚度、干净度、一致性与平衡性八项综评",
+  scoring: "查看计算结果后主动确认评分"
 };
 
 const FINAL_OVERALL_REQUIRED_FIELDS = [
@@ -117,9 +113,7 @@ export function deriveStageStatus(stageId: StageId, observations: readonly Senso
     return phases.some((phase) => phase.status !== "not_started") ? "active" : "not_started";
   }
 
-  const required = REQUIRED_STAGE_FIELDS[stageId];
-  const map = observationMap(observations);
-  if (allPresent(map, required)) return "completed";
+  if (completionForStage(stageId, observations).complete) return "completed";
   return anyObservation(observations) ? "active" : "not_started";
 }
 

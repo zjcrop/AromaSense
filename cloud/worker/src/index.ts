@@ -1,9 +1,12 @@
 import { decodeProtectedHeader, importX509, jwtVerify, type JWTPayload } from "jose";
+import { createZhipuAiAdapter } from "../.foundation/runtime/ai-adapter.mjs";
 
 interface Env {
   DB?: D1Database;
   FIREBASE_PROJECT_ID?: string;
   PUBLIC_APP_URL?: string;
+  ZHIPU_API_KEY?: string;
+  ZHIPU_MODEL?: string;
 }
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -29,10 +32,12 @@ interface FirebaseCertificateCache {
   keys: Map<string, CryptoKey>;
 }
 
-const PRODUCT_VERSION = "0.1C";
+const PRODUCT_VERSION = "B0.2.a";
 const TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const FIREBASE_CERT_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
 const MAX_SHARE_PAYLOAD_BYTES = 1_500_000;
+const MAX_AI_SAMPLE_LENGTH = 4_000;
+const MAX_AI_BATCH_SIZE = 100;
 let firebaseCertificateCache: FirebaseCertificateCache | undefined;
 
 function json(body: JsonValue, status = 200): Response {
@@ -196,6 +201,21 @@ async function handleRevisionPost(request: Request, db: D1Database, user: Authen
   return json({ ok: true, revisionId: body.revisionId, contentHash: body.contentHash, status: "created" }, 201);
 }
 
+async function handleAiEnrichment(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try { body = await request.json(); } catch { return json({ ok: false, reason: "invalid-json" }, 400); }
+  const samples = typeof body === "object" && body !== null && Array.isArray((body as Record<string, unknown>).samples)
+    ? (body as { samples: unknown[] }).samples
+    : [];
+  if (samples.length < 2 || samples.length > MAX_AI_BATCH_SIZE || samples.some((item) => !isNonEmptyString(item, MAX_AI_SAMPLE_LENGTH))) {
+    return json({ ok: false, reason: "invalid-sample-batch" }, 400);
+  }
+  const adapter = createZhipuAiAdapter({ apiKey: env.ZHIPU_API_KEY, model: env.ZHIPU_MODEL || "glm-4-flash", fetchImpl: fetch, timeoutMs: 12_000 });
+  const result = await adapter.enrichCoffeeBatch(samples as string[]);
+  if (!result.ok) return json(result as unknown as Record<string, unknown>, result.skipped ? 503 : 502);
+  return json(result as unknown as Record<string, unknown>);
+}
+
 async function handleShareCreate(request: Request, env: Env, user: AuthenticatedUser): Promise<Response> {
   let body: unknown;
   try { body = await request.json(); } catch { return json({ ok: false, error: "INVALID_JSON" }, 400); }
@@ -232,7 +252,7 @@ export default {
     }});
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return json({ ok: true, service: "aromasense-api", version: PRODUCT_VERSION, protocol: "aromasense-sync/1.0", database: env.DB ? "configured" : "not-configured", authentication: env.FIREBASE_PROJECT_ID ? "firebase-configured" : "not-configured", timestamp: new Date().toISOString() });
+      return json({ ok: true, service: "aromasense-api", version: PRODUCT_VERSION, protocol: "aromasense-sync/1.0", database: env.DB ? "configured" : "not-configured", authentication: env.FIREBASE_PROJECT_ID ? "firebase-configured" : "not-configured", aiAdapter: env.ZHIPU_API_KEY ? "zhipu-configured" : "optional-unavailable", timestamp: new Date().toISOString() });
     }
 
     if (!env.DB) return dbUnavailable();
@@ -247,6 +267,7 @@ export default {
     const user = await authenticate(request, env.DB);
     if (!user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
     if (url.pathname === "/api/v1/auth/me" && request.method === "GET") return json({ ok: true, userId: user.userId, email: user.email });
+    if (url.pathname === "/api/v1/ai/enrich-samples" && request.method === "POST") return handleAiEnrichment(request, env);
     if (url.pathname === "/api/v1/share" && request.method === "POST") return handleShareCreate(request, env, user);
 
     if (url.pathname === "/api/v1/revisions") {

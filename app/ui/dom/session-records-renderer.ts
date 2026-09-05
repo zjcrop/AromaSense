@@ -80,7 +80,7 @@ export class SessionRecordsRenderer {
     header.append(
       button("session-records__back", "返回", () => this.options.onBack()),
       element("h1", "session-records__title", "杯测记录"),
-      element("span", "session-records__version", "0.1C")
+      element("span", "session-records__version", "B0.2.a")
     );
     this.root.append(header, this.renderToolbar());
 

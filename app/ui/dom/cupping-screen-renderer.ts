@@ -394,6 +394,27 @@ export class CuppingScreenRenderer {
         callbacks,
         scoreProfile: scoreProfileForMetadata(state.sessionMetadata)
       });
+    } else if (active.context.stageId === "flavor") {
+      renderSensoryEditor(this.editorRoot, { stageId: "flavor", observations: active.slice.observations, flavorPreferences: preferences, callbacks, fieldFilter: new Set(["flavor_tags", "notes"]) });
+    } else if (active.context.stageId === "overall" || active.context.stageId === "scoring") {
+      const scoringObservations = active.context.stageId === "scoring"
+        ? (await this.summaryReader.listObservations(active.context.sampleId))
+            .filter((item) => item.stageId === "overall" || item.stageId === "final")
+            .map((item, index) => ({
+              observationId: `score-source:${index}`, sessionId: state.sessionId, sampleId: active.context.sampleId,
+              stageId: "scoring" as const, fieldKey: item.fieldKey, value: item.value,
+              dictionaryVersion: "sensory-flow/2.0", updatedAt: this.options.now()
+            }))
+        : active.slice.observations;
+      renderFinalAssessment(this.editorRoot, {
+        observations: active.context.stageId === "scoring"
+          ? [...scoringObservations, ...active.slice.observations.filter((item) => item.fieldKey === "score_confirmed")]
+          : scoringObservations,
+        flavorPreferences: preferences,
+        callbacks,
+        scoreProfile: scoreProfileForMetadata(state.sessionMetadata),
+        phase: active.context.stageId === "overall" ? "overall" : "score"
+      });
     } else {
       renderSensoryEditor(this.editorRoot, { stageId: active.context.stageId, observations: active.slice.observations, flavorPreferences: preferences, callbacks });
     }
@@ -426,7 +447,7 @@ export class CuppingScreenRenderer {
     const stepCompleted = finalPhase ? currentPhaseState?.status === "completed" : active.slice.stageStatus === "completed";
     const completionHint = finalPhase ? currentPhaseState?.completionHint : stage?.completionHint;
     const previous = button("cupping-nav cupping-nav--previous", "上一步", previousAction);
-    const nextLabel = active.context.stageId === "final" && finalPhase === "score" ? "完成本样品" : "下一步";
+    const nextLabel = (active.context.stageId === "final" && finalPhase === "score") || active.context.stageId === "scoring" ? "完成本样品" : "下一步";
     const next = button("cupping-nav cupping-nav--next", nextLabel, nextAction);
     next.disabled = !stepCompleted;
     if (!stepCompleted) next.title = `达到完成标准后可继续${completionHint ? `：${completionHint}` : ""}`;

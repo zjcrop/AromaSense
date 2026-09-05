@@ -50,7 +50,7 @@ export function buildSampleBatch(
     displayNumber: index + 1,
     sortOrder: index + 1,
     label: cleanOptionalText(input.label),
-    metadata: { ...(input.metadata ?? {}) },
+    metadata: { sampleIndex: index, ...(input.metadata ?? {}) },
     createdAt: now,
     updatedAt: now
   }));

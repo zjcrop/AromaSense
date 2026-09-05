@@ -77,11 +77,11 @@ test("Blind roast-date manual input remains free text for multilingual base-date
   assert.match(stableCupping, /input\.type = "text"/);
 });
 
-test("Web progress remains gray light-blue green with six sample stages and eight workflow steps", () => {
+test("Web progress remains gray light-blue green across the seven formal workflow steps", () => {
   assert.match(cuppingCss, /--as-progress-not-started: #5e6267/);
   assert.match(cuppingCss, /--as-progress-active: #83b9e6/);
   assert.match(cuppingCss, /--as-progress-completed: #5ba66d/);
-  assert.match(cuppingCss, /grid-template-columns: repeat\(8, minmax\(0, 1fr\)\)/);
+  assert.match(cuppingCss, /grid-template-columns: repeat\(7, minmax\(0, 1fr\)\)/);
   assert.match(rail, /for \(const stage of item\.stages\)/);
   assert.match(rail, /sample-rail__identity-line/);
   assert.match(rail, /buildStageProgress\(item\)/);

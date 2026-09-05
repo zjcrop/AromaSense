@@ -16,7 +16,7 @@ The system is intended to improve process consistency, data integrity, recoverab
 
 A session may contain multiple coffee samples. Samples are imported/created, automatically numbered, and can be manually reordered. The operator works through a single reusable cupping UI while selecting the active sample from a compact sample list.
 
-Each sample progresses through structured sensory stages such as preparation/aroma and temperature-dependent tasting stages. The exact stage taxonomy remains versioned and must not be hard-coded into database table names.
+Each new sample progresses through seven formal sensory steps: aroma, high temperature, mid temperature, low temperature, flavor, overall assessment, and scoring. `preparation` and the combined legacy `final` stage remain readable only through versioned compatibility paths; neither is a formal step for new sessions. The exact stage taxonomy remains versioned and must not be hard-coded into database table names.
 
 ## Cupping target and blind modes
 

@@ -44,6 +44,11 @@ interface SampleRow {
 }
 
 interface StageRow { status: StageStatus; }
+export interface PersistedStageState {
+  sessionId: string; sampleId: string; stageId: StageId; status: StageStatus;
+  startedAt?: string; completedAt?: string; updatedAt: string;
+}
+interface FullStageRow { session_id: string; sample_id: string; stage_id: StageId; status: StageStatus; started_at: string | null; completed_at: string | null; updated_at: string; }
 interface ObservationRow {
   observation_id: string;
   session_id: string;
@@ -310,5 +315,14 @@ export class LocalCuppingRepository {
        FROM observations WHERE session_id = ? ORDER BY sample_id, stage_id, field_key`, [sessionId]
     );
     return rows.map(observationFromRow);
+  }
+
+  async listStageStates(sessionId: string): Promise<readonly PersistedStageState[]> {
+    const rows = await this.db.all<FullStageRow>(
+      `SELECT session_id, sample_id, stage_id, status, started_at, completed_at, updated_at
+       FROM stage_state WHERE session_id = ? ORDER BY sample_id, stage_id`, [sessionId]
+    );
+    return rows.map((row) => ({ sessionId: row.session_id, sampleId: row.sample_id, stageId: row.stage_id, status: row.status,
+      startedAt: row.started_at ?? undefined, completedAt: row.completed_at ?? undefined, updatedAt: row.updated_at }));
   }
 }

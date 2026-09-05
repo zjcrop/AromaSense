@@ -65,7 +65,18 @@ export class SessionRecordsReader {
       SELECT
         s.session_id, s.title, s.metadata_json, s.status, s.created_at, s.updated_at,
         COUNT(DISTINCT p.sample_id) AS sample_count,
-        COUNT(DISTINCT CASE WHEN st.stage_id = 'final' AND st.status = 'completed' THEN st.sample_id END) AS completed_samples,
+        COUNT(DISTINCT CASE WHEN (
+          st.stage_id = 'scoring' AND st.status = 'completed' AND
+          (SELECT COUNT(DISTINCT flow.stage_id) FROM stage_state flow
+           WHERE flow.sample_id = st.sample_id AND flow.status = 'completed'
+             AND flow.stage_id IN ('aroma','high_temp','mid_temp','low_temp','flavor','overall','scoring')) = 7
+        ) OR (
+          st.stage_id = 'final' AND st.status = 'completed' AND NOT EXISTS (
+            SELECT 1 FROM stage_state modern
+            WHERE modern.sample_id = st.sample_id
+              AND modern.stage_id IN ('flavor','overall','scoring')
+          )
+        ) THEN st.sample_id END) AS completed_samples,
         COUNT(DISTINCT o.observation_id) AS observation_count,
         COUNT(DISTINCT r.revision_id) AS revision_count,
         COUNT(DISTINCT CASE WHEN q.status = 'synced' THEN r.revision_id END) AS synced_count,

@@ -1,4 +1,4 @@
-export const PRODUCT_VERSION = "0.1C" as const;
+export const PRODUCT_VERSION = "B0.2.a" as const;
 export const VERSION_STAGE = "alpha" as const;
 
 export const VERSION_POLICY = {

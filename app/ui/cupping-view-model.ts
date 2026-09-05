@@ -57,7 +57,10 @@ const STAGE_META: Record<StageId, { label: string; tone: StageTone }> = {
   high_temp: { label: "高温", tone: "pink" },
   mid_temp: { label: "中温", tone: "blue" },
   low_temp: { label: "低温", tone: "white" },
-  final: { label: "终评", tone: "neutral" }
+  flavor: { label: "风味", tone: "neutral" },
+  overall: { label: "综评", tone: "neutral" },
+  scoring: { label: "评分", tone: "neutral" },
+  final: { label: "旧版综评", tone: "neutral" }
 };
 
 const FINAL_PHASE_LABELS: Readonly<Record<FinalAssessmentPhase, string>> = {
@@ -98,7 +101,13 @@ export function buildSampleRailViewState(
   return [...samples]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((sample) => {
-      const stages = STAGE_IDS.map((stageId): StageViewState => {
+      const hasLegacyFinal = progressByKey.has(progressKey(sample.sampleId, "final"));
+      const hasModernConclusion = (["flavor", "overall", "scoring"] as const)
+        .some((stageId) => progressByKey.has(progressKey(sample.sampleId, stageId)));
+      const visibleStageIds: readonly StageId[] = hasLegacyFinal && !hasModernConclusion
+        ? ["aroma", "high_temp", "mid_temp", "low_temp", "final"]
+        : STAGE_IDS;
+      const stages = visibleStageIds.map((stageId): StageViewState => {
         const stageProgress = progressByKey.get(progressKey(sample.sampleId, stageId));
         const status = stageProgress?.status ?? "not_started";
         return {
@@ -133,13 +142,13 @@ export function buildSampleRailViewState(
 }
 
 export function nextStage(stageId: StageId): StageId | undefined {
-  const index = STAGE_IDS.indexOf(stageId);
+  const index = (STAGE_IDS as readonly StageId[]).indexOf(stageId);
   if (index < 0 || index >= STAGE_IDS.length - 1) return undefined;
   return STAGE_IDS[index + 1];
 }
 
 export function previousStage(stageId: StageId): StageId | undefined {
-  const index = STAGE_IDS.indexOf(stageId);
+  const index = (STAGE_IDS as readonly StageId[]).indexOf(stageId);
   if (index <= 0) return undefined;
   return STAGE_IDS[index - 1];
 }

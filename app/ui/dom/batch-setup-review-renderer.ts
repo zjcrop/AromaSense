@@ -14,6 +14,7 @@ import {
 import type { CuppingSetupService } from "../../core/cupping-setup-service";
 import { normalizeImportBundle, type ImportBundle, type ImportSessionDraft } from "../../core/import-bundle";
 import { recognizeManualText } from "../../core/manual-text-recognizer";
+import { canonicalizeAndValidateImportBundle, type CoffeeFoundationGateway, type InputValidationResult } from "../../core/sample-input-pipeline";
 import {
   cuppingModeLabel,
   defaultSessionMetadata,
@@ -25,6 +26,7 @@ import {
 import type { RecognizedPage, RecognizedSample, SampleRecognitionService } from "../../core/sample-recognition-service";
 import { parseSpreadsheetFile, SPREADSHEET_ACCEPT } from "../../core/spreadsheet-import";
 import { openBatchReviewDialog, type BatchReviewDialogHandle, type BatchReviewField, type BatchReviewValue } from "./batch-review-dialog";
+import { eventManifestFromSubmission, type EventManifest } from "../../core/submission-bundle";
 import { button, clearElement, element } from "./dom-helpers";
 import { compactImagePreview } from "./image-preview-data";
 import { openImportBundleDialog } from "./import-bundle-dialog";
@@ -53,16 +55,20 @@ export interface BatchSetupRendererOptions {
   loadDraft?(): Promise<BatchSetupDraft | undefined>;
   saveDraft?(draft: BatchSetupDraft): void | Promise<void>;
   clearDraft?(): void | Promise<void>;
+  foundationGateway?: CoffeeFoundationGateway;
+  cacheEvent?(manifest: EventManifest): void | Promise<void>;
 }
 
-type FieldSpec = readonly [key: string, label: string, group: string, kind?: "date" | "multiline"];
+type FieldSpec = readonly [key: string, label: string, group: string, kind?: "date" | "multiline", tier?: "core" | "detail"];
 const FIELD_SPECS: readonly FieldSpec[] = [
   ["country", "国家", "产地信息"], ["origin", "产地", "产地信息"], ["region", "产区", "产地信息"],
-  ["farm", "庄园", "产地信息"], ["station", "处理站", "产地信息"], ["producer", "生产者", "产地信息"], ["cooperative", "合作社", "产地信息"],
-  ["variety", "品种", "豆种与处理"], ["species", "种属", "豆种与处理"], ["process", "处理法", "豆种与处理"], ["lot", "批次", "豆种与处理"], ["grade", "等级", "豆种与处理"],
-  ["roast", "烘焙度", "烘焙与批次"], ["roastColor", "烘焙色值", "烘焙与批次"], ["roastDate", "烘焙日期", "烘焙与批次", "date"],
-  ["productionDate", "生产日期", "烘焙与批次", "date"], ["packDate", "包装日期", "烘焙与批次", "date"], ["bestBefore", "最佳赏味期", "烘焙与批次", "date"], ["expiryDate", "到期日", "烘焙与批次", "date"], ["harvest", "产季", "烘焙与批次"],
-  ["altitude", "海拔", "其他信息"], ["roaster", "烘焙商", "其他信息"], ["weight", "净重", "其他信息"], ["flavorNotes", "风味", "其他信息", "multiline"], ["aroma", "香气", "其他信息", "multiline"]
+  ["variety", "品种", "豆种与处理"], ["process", "处理法", "豆种与处理"], ["altitude", "海拔", "产地信息"],
+  ["roaster", "烘焙商", "烘焙与批次"], ["roast", "烘焙度", "烘焙与批次"], ["roastDate", "烘焙日期", "烘焙与批次", "date"],
+  ["flavorNotes", "风味", "风味线索", "multiline"], ["aroma", "香气", "风味线索", "multiline"],
+  ["farm", "庄园", "产地信息", undefined, "detail"], ["station", "处理站", "产地信息", undefined, "detail"], ["producer", "生产者", "产地信息", undefined, "detail"], ["cooperative", "合作社", "产地信息", undefined, "detail"],
+  ["species", "种属", "豆种与处理", undefined, "detail"], ["lot", "批次", "豆种与处理", undefined, "detail"], ["grade", "等级", "豆种与处理", undefined, "detail"],
+  ["roastColor", "烘焙色值", "烘焙与批次", undefined, "detail"], ["productionDate", "生产日期", "烘焙与批次", "date", "detail"], ["packDate", "包装日期", "烘焙与批次", "date", "detail"], ["bestBefore", "最佳赏味期", "烘焙与批次", "date", "detail"], ["expiryDate", "到期日", "烘焙与批次", "date", "detail"], ["harvest", "产季", "烘焙与批次", undefined, "detail"],
+  ["weight", "净重", "其他信息", undefined, "detail"]
 ];
 
 const CUPPING_TARGET_OPTIONS: readonly CuppingTargetChoice[] = ["open", "blind", "semi_blind"] as const;
@@ -148,6 +154,7 @@ export class BatchSetupRenderer {
   private cuppingModeMenu?: HTMLElement;
   private cuppingMode: CuppingMode = "open";
   private importQueue?: ImportQueueState;
+  private eventContext: Partial<CuppingSessionMetadata> = {};
 
   constructor(
     private readonly root: HTMLElement,
@@ -169,7 +176,7 @@ export class BatchSetupRenderer {
 
     const header = element("header", "batch-setup__header");
     const copy = element("div", "batch-setup__header-copy");
-    copy.append(element("h1", "batch-setup__heading", "AromaSense · 香迹 0.1C"));
+    copy.append(element("h1", "batch-setup__heading", "AromaSense · 香迹 B0.2.a"));
     const headerActions = element("div", "batch-setup__header-actions");
     headerActions.append(
       button("batch-setup__account", "账户", () => this.options.onOpenAccount?.()),
@@ -188,7 +195,8 @@ export class BatchSetupRenderer {
     actions.append(
       button("batch-setup__capture", "拍摄录入", () => cameraInput.click()),
       button("batch-setup__capture", "批量识别", () => this.openBatchRecognitionMenu(galleryInput, spreadsheetInput, qrInput)),
-      button("batch-setup__add", "手工录入", () => this.openManualText())
+      button("batch-setup__add", "手工录入", () => this.openManualText()),
+      button("batch-setup__clear", "清空样品", () => void this.clearAllRows())
     );
     this.captureActions = actions;
     this.startButton = button("batch-setup__start", "开始杯测", () => this.submit());
@@ -296,6 +304,7 @@ export class BatchSetupRenderer {
   }
 
   private resetSessionMetadata(): void {
+    this.eventContext = {};
     const defaults = defaultSessionMetadata(this.options.now());
     for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
       const input = this.sessionInputs.get(key);
@@ -308,6 +317,7 @@ export class BatchSetupRenderer {
 
   private sessionMetadata(): CuppingSessionMetadata {
     return normalizeSessionMetadata({
+      ...this.eventContext,
       date: this.sessionInputs.get("date")?.value,
       time: this.sessionInputs.get("time")?.value,
       organizer: this.sessionInputs.get("organizer")?.value,
@@ -318,6 +328,11 @@ export class BatchSetupRenderer {
   }
 
   private applySessionMetadata(metadata: Partial<CuppingSessionMetadata>): void {
+    this.eventContext = {
+      eventId: metadata.eventId,
+      eventRevision: metadata.eventRevision,
+      lowPrecisionLocation: metadata.lowPrecisionLocation
+    };
     for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
       const input = this.sessionInputs.get(key);
       const value = metadata[key];
@@ -394,7 +409,18 @@ export class BatchSetupRenderer {
   private openManualText(): void {
     openManualTextImportDialog({
       root: this.root,
-      onParse: async (text) => this.previewImportBundle(recognizeManualText(text))
+      onParse: async (text) => {
+        const local = recognizeManualText(text);
+        const bundle = this.options.foundationGateway
+          ? await canonicalizeAndValidateImportBundle(local, this.options.foundationGateway)
+          : local;
+        const samples = bundle.sessions.flatMap((session) => session.samples);
+        for (const sample of samples) this.addRow(sample.label, sample.metadata, {
+          id: this.rowId(), status: "本地解析 · Dictionary/Recognition canonical 化", requiresReview: sample.requiresReview, confirmed: false
+        });
+        await this.saveDraft();
+        this.showStatus(`已自动导入 ${samples.length} 个样品${bundle.warnings.length ? ` · ${bundle.warnings.join("；")}` : ""}。`);
+      }
     });
   }
 
@@ -451,6 +477,8 @@ export class BatchSetupRenderer {
           })();
       const bundle = normalizeImportBundle(payload, { kind, name: url.hostname || "分享链接" });
       if (!bundle) throw new Error("分享数据没有可识别的杯测组或样品");
+      const eventManifest = eventManifestFromSubmission(payload);
+      if (eventManifest) await this.options.cacheEvent?.(eventManifest);
       this.previewImportBundle(bundle);
     } catch (error) { this.showStatus(`链接导入失败：${error instanceof Error ? error.message : String(error)}`, true); }
     finally { this.root.toggleAttribute("aria-busy", false); }
@@ -541,7 +569,9 @@ export class BatchSetupRenderer {
     const review = row.querySelector<HTMLButtonElement>("[data-review]"); if (review) review.textContent = state.confirmed ? "修改" : "确认";
     const main = row.querySelector<HTMLElement>(".batch-setup__row-main"); if (!main) return;
     main.querySelector(".batch-setup__recognition-status")?.remove(); main.querySelector(".batch-setup__field-summary")?.remove();
-    main.append(element("small", `batch-setup__recognition-status${state.confirmed ? " is-confirmed" : state.requiresReview ? " is-review" : ""}`, `${state.confirmed ? "已确认" : "待确认"}${state.status ? ` · ${state.status}` : ""}`));
+    const validation = record((this.metadata.get(row) ?? {}).inputValidation) as unknown as InputValidationResult | undefined;
+    const marker = validation?.marker ?? (state.requiresReview && !state.confirmed ? "?" : "");
+    main.append(element("small", `batch-setup__recognition-status${state.confirmed ? " is-confirmed" : state.requiresReview ? " is-review" : ""}`, `${marker ? `${marker} ` : ""}${state.confirmed ? "已确认" : "待确认"}${state.status ? ` · ${state.status}` : ""}`));
     const metadata = this.metadata.get(row) ?? {}; const summary = element("div", "batch-setup__field-summary");
     for (const [key, labelText] of FIELD_SPECS) {
       const value = String(metadata[key] ?? "").trim(); if (!value || summary.childElementCount >= 8) continue;
@@ -553,6 +583,18 @@ export class BatchSetupRenderer {
   private removeRow(row: HTMLElement): void {
     if (this.review && row.dataset.rowId === this.root.querySelector<HTMLElement>(".batch-review")?.dataset.rowId) { this.review.close(); this.review = undefined; }
     row.remove(); this.renumber(); this.ensureEmptyHint(); void this.saveDraft();
+  }
+
+  private async clearAllRows(): Promise<void> {
+    if (!this.rows().length) return;
+    if (!window.confirm("一次性清空全部已录入样品？此操作不会删除已建立的历史杯测。")) return;
+    this.review?.close(); this.review = undefined;
+    clearElement(this.rowsRoot);
+    this.importQueue = undefined;
+    this.eventContext = {};
+    await this.options.clearDraft?.();
+    this.ensureEmptyHint();
+    this.showStatus("已清空本次尚未建立的全部样品。");
   }
 
   private rows(): HTMLElement[] { return [...this.rowsRoot.querySelectorAll<HTMLElement>(".batch-setup__row")]; }
@@ -574,7 +616,7 @@ export class BatchSetupRenderer {
     try {
       const items = this.items();
       if (!items.length) { await this.options.clearDraft?.(); return; }
-      const sessionMetadata: Partial<CuppingSessionMetadata> = { cuppingMode: this.cuppingMode };
+      const sessionMetadata: Partial<CuppingSessionMetadata> = { ...this.eventContext, cuppingMode: this.cuppingMode };
       for (const key of ["date", "time", "organizer", "participants", "eventName"] as const) {
         const value = this.sessionInputs.get(key)?.value.trim(); if (value) sessionMetadata[key] = value;
       }
@@ -630,7 +672,7 @@ export class BatchSetupRenderer {
 
   private reviewFields(row: HTMLElement): BatchReviewField[] {
     const metadata = this.metadata.get(row) ?? {};
-    return FIELD_SPECS.map(([key, labelText, group, kind]) => ({ key, label: labelText, group, value: String(metadata[key] ?? ""), candidates: candidates(metadata, key), confidence: confidence(metadata, key), multiline: kind === "multiline", date: kind === "date" }));
+    return FIELD_SPECS.map(([key, labelText, group, kind, tier]) => ({ key, label: labelText, group, tier, value: String(metadata[key] ?? ""), candidates: candidates(metadata, key), confidence: confidence(metadata, key), multiline: kind === "multiline", date: kind === "date" }));
   }
 
   private applyReviewValue(row: HTMLElement, value: BatchReviewValue, markDirty: boolean, confirm: boolean): void {
