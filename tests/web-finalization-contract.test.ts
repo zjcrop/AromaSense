@@ -33,19 +33,26 @@ test("Web homepage is a real four-section layout instead of legacy DOM with cosm
   assert.match(home, /actions\.replaceChildren\(\)/);
 });
 
-test("Homepage header keeps only account while list actions and records follow the requested hierarchy", () => {
+test("Homepage header keeps only account while list actions and expandable records follow the requested hierarchy", () => {
   assert.match(home, /account\.textContent = "账户"/);
-  assert.match(home, /records\.textContent = "记录"/);
+  assert.match(home, /recordToggle\.textContent = "记录"/);
   assert.match(home, /photo\?\.remove\(\)/);
   assert.match(home, /clear\.textContent = "清空列表"/);
-  assert.match(home, /captureActions\.replaceChildren\(\.\.\.\[batch, manual, clear, importButton\]/);
+  assert.match(home, /const homeActions = \[batch, manual, clear, importButton\]/);
+  assert.match(home, /action\.className = "batch-setup__capture batch-setup__home-capture-action"/);
+  assert.match(home, /captureActions\.replaceChildren\(\.\.\.homeActions\)/);
   assert.match(home, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(home, /footer\.append\(start\);\s*if \(this\.recordsButton\) footer\.append\(this\.recordsButton\)/);
+  assert.match(home, /recordToggle\.setAttribute\("aria-expanded", "false"\)/);
+  assert.match(home, /this\.toggleRecordsMenu\(\)/);
+  assert.match(home, /addScope\("unfinished", "未完成记录"\)/);
+  assert.match(home, /addScope\("completed", "已完成记录"\)/);
+  assert.match(home, /footer\.append\(start\)/);
+  assert.match(home, /footer\.append\(this\.recordsButton, this\.recordsMenu\)/);
   assert.match(home, /font-size:23px!important/);
   assert.match(home, /min-height:68px!important/);
 });
 
-test("Homepage account and records stay in centered blurred modals", () => {
+test("Homepage account and records stay in centered blurred modals after a record scope is selected", () => {
   assert.match(app, /onOpenAccount: \(\) => this\.showHomeAccountModal\(\)/);
   assert.match(app, /onOpenRecords: \(\) => this\.showHomeRecordsModal\(\)/);
   assert.match(app, /\.home-modal\{position:fixed;inset:0;z-index:2200;display:grid;place-items:center/);
@@ -53,12 +60,15 @@ test("Homepage account and records stay in centered blurred modals", () => {
   assert.match(app, /if \(event\.target === overlay\) close\(\)/);
   assert.match(app, /if \(event\.key === "Escape"\) close\(\)/);
   assert.match(app, /session-records__tool/);
+  assert.match(home, /await this\.options\.onOpenRecords\?\.\(\)/);
+  assert.match(home, /data-record-scope-tab=\\"\$\{scope\}\\"/);
 });
 
-test("Homepage hides direct history and records modal owns unfinished/completed navigation", () => {
+test("Homepage hides direct history and record submenu owns unfinished/completed navigation", () => {
   assert.doesNotMatch(home, /buildRecentSessions\(/);
   assert.match(home, /this\.root\.querySelector\("\.batch-setup__recent"\)\?\.remove\(\)/);
   assert.match(home, /this\.root\.querySelector\("\.batch-setup__history"\)\?\.remove\(\)/);
+  assert.match(home, /data\.homeRecordScope = scope|dataset\.homeRecordScope = scope/);
   assert.match(records, /addScope\("unfinished", "未完成记录"/);
   assert.match(records, /addScope\("completed", "已完成记录"/);
   assert.match(records, /this\.statusScope === "unfinished" \? isUnfinished\(record\) : !isUnfinished\(record\)/);
