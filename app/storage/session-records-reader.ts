@@ -62,33 +62,49 @@ export class SessionRecordsReader {
   async list(limit = 200): Promise<readonly SessionRecordSummary[]> {
     const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
     const rows = await this.db.all<RecordRow>(`
+      WITH
+      sample_stats AS (
+        SELECT session_id, COUNT(*) AS sample_count
+        FROM samples
+        GROUP BY session_id
+      ),
+      completion_stats AS (
+        SELECT session_id, COUNT(DISTINCT sample_id) AS completed_samples
+        FROM stage_state
+        WHERE status = 'completed'
+          AND stage_id IN ('scoring', 'final')
+        GROUP BY session_id
+      ),
+      observation_stats AS (
+        SELECT session_id, COUNT(DISTINCT observation_id) AS observation_count
+        FROM observations
+        GROUP BY session_id
+      ),
+      revision_stats AS (
+        SELECT
+          r.session_id,
+          COUNT(DISTINCT r.revision_id) AS revision_count,
+          COUNT(DISTINCT CASE WHEN q.status = 'synced' THEN r.revision_id END) AS synced_count,
+          COUNT(DISTINCT CASE WHEN q.status IN ('failed','conflict') THEN r.revision_id END) AS failed_count,
+          COUNT(DISTINCT CASE WHEN q.status IN ('pending','uploading') THEN r.revision_id END) AS pending_count
+        FROM revisions r
+        LEFT JOIN sync_queue q ON q.revision_id = r.revision_id
+        GROUP BY r.session_id
+      )
       SELECT
         s.session_id, s.title, s.metadata_json, s.status, s.created_at, s.updated_at,
-        COUNT(DISTINCT p.sample_id) AS sample_count,
-        COUNT(DISTINCT CASE WHEN (
-          st.stage_id = 'scoring' AND st.status = 'completed' AND
-          (SELECT COUNT(DISTINCT flow.stage_id) FROM stage_state flow
-           WHERE flow.sample_id = st.sample_id AND flow.status = 'completed'
-             AND flow.stage_id IN ('aroma','high_temp','mid_temp','low_temp','flavor','overall','scoring')) = 7
-        ) OR (
-          st.stage_id = 'final' AND st.status = 'completed' AND NOT EXISTS (
-            SELECT 1 FROM stage_state modern
-            WHERE modern.sample_id = st.sample_id
-              AND modern.stage_id IN ('flavor','overall','scoring')
-          )
-        ) THEN st.sample_id END) AS completed_samples,
-        COUNT(DISTINCT o.observation_id) AS observation_count,
-        COUNT(DISTINCT r.revision_id) AS revision_count,
-        COUNT(DISTINCT CASE WHEN q.status = 'synced' THEN r.revision_id END) AS synced_count,
-        COUNT(DISTINCT CASE WHEN q.status IN ('failed','conflict') THEN r.revision_id END) AS failed_count,
-        COUNT(DISTINCT CASE WHEN q.status IN ('pending','uploading') THEN r.revision_id END) AS pending_count
+        COALESCE(samples.sample_count, 0) AS sample_count,
+        COALESCE(completed.completed_samples, 0) AS completed_samples,
+        COALESCE(observations.observation_count, 0) AS observation_count,
+        COALESCE(revisions.revision_count, 0) AS revision_count,
+        COALESCE(revisions.synced_count, 0) AS synced_count,
+        COALESCE(revisions.failed_count, 0) AS failed_count,
+        COALESCE(revisions.pending_count, 0) AS pending_count
       FROM sessions s
-      LEFT JOIN samples p ON p.session_id = s.session_id
-      LEFT JOIN stage_state st ON st.session_id = s.session_id
-      LEFT JOIN observations o ON o.session_id = s.session_id
-      LEFT JOIN revisions r ON r.session_id = s.session_id
-      LEFT JOIN sync_queue q ON q.revision_id = r.revision_id
-      GROUP BY s.session_id, s.title, s.metadata_json, s.status, s.created_at, s.updated_at
+      LEFT JOIN sample_stats samples ON samples.session_id = s.session_id
+      LEFT JOIN completion_stats completed ON completed.session_id = s.session_id
+      LEFT JOIN observation_stats observations ON observations.session_id = s.session_id
+      LEFT JOIN revision_stats revisions ON revisions.session_id = s.session_id
       ORDER BY s.updated_at DESC
       LIMIT ?`, [safeLimit]);
 
