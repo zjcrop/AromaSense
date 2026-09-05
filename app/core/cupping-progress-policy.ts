@@ -109,7 +109,8 @@ export function finalPhaseProgress(observations: readonly SensoryObservation[]):
 export function deriveStageStatus(stageId: StageId, observations: readonly SensoryObservation[]): StageStatus {
   if (stageId === "final") {
     const phases = finalPhaseProgress(observations);
-    if (phases.every((phase) => phase.status === "completed")) return "completed";
+    const score = phases.find((phase) => phase.phase === "score");
+    if (score?.status === "completed") return "completed";
     return phases.some((phase) => phase.status !== "not_started") ? "active" : "not_started";
   }
 
@@ -119,7 +120,7 @@ export function deriveStageStatus(stageId: StageId, observations: readonly Senso
 
 export function stageCompletionHint(stageId: StageId): string {
   return stageId === "final"
-    ? "依次完成风味描述、综评与评分确认"
+    ? "最终得分确认后，本样品即视为完成"
     : STAGE_COMPLETION_HINTS[stageId];
 }
 
