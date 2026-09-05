@@ -159,7 +159,6 @@ export function validateYingxiangManifest(manifest: YingxiangEventManifest, requ
     if (orders.has(sample.order)) throw new Error("YINGXIANG_SAMPLE_ORDER_DUPLICATE");
     ids.add(id); codes.add(code); orders.add(sample.order);
     // Older local signatures encoded an absent optional label as JSON null.
-    // Treat null like undefined when validating persisted participant-safe manifests.
     if (sample.label != null) normalizedRequired(sample.label, "YINGXIANG_SAMPLE_LABEL_INVALID");
   }
   const sortedOrders = [...orders].sort((a, b) => a - b);
@@ -179,7 +178,8 @@ export function validateYingxiangEvent(event: YingxiangEvent): YingxiangEvent {
     || naming.minLength < 1 || naming.maxLength < naming.minLength || naming.maxLength > 64) {
     throw new Error("YINGXIANG_NAME_LENGTH_POLICY_INVALID");
   }
-  if (naming.requiredPrefix !== undefined && naming.requiredPrefix.normalize("NFKC").trim().length > naming.maxLength) {
+  // Earlier local signatures encoded an absent optional prefix as JSON null.
+  if (naming.requiredPrefix != null && naming.requiredPrefix.normalize("NFKC").trim().length > naming.maxLength) {
     throw new Error("YINGXIANG_NAME_PREFIX_INVALID");
   }
   return event;
