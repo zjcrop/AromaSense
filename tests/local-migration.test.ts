@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,10 @@ function fixture() {
   const filename = join(dir, "migration.sqlite");
   const db = NodeSQLiteDriver.open(filename);
   return { dir, filename, db };
+}
+
+function migrationSql(filename: string): string {
+  return readFileSync(join(process.cwd(), "app", "storage", filename), "utf8");
 }
 
 test("local migration applies once and remains restart-safe", async () => {
@@ -67,6 +71,95 @@ test("forward migration after database reopen preserves existing rows", async ()
       reopened.close();
     }
   } finally {
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("workflow migration skips orphan legacy children without deleting them", async () => {
+  const f = fixture();
+  const base = {
+    id: 1,
+    name: "local_schema_v1",
+    sql: migrationSql("0001_local_schema.sql")
+  };
+  const workflow = {
+    id: 3,
+    name: "workflow_event_comparison_0_2",
+    sql: migrationSql("0003_workflow_event_comparison.sql")
+  };
+  const now = "2026-09-05T10:15:00Z";
+
+  try {
+    await new LocalMigrationRunner(f.db).apply([base], now);
+    await f.db.run(
+      "INSERT INTO sessions (session_id, title, status, taxonomy_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["session-valid", "legacy", "active", "sensory-dictionary/1.0", now, now]
+    );
+    await f.db.run(
+      "INSERT INTO samples (sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ["sample-valid", "session-valid", 1, 1, "1", "{}", now, now]
+    );
+    await f.db.run(
+      "INSERT INTO observations (observation_id, session_id, sample_id, stage_id, field_key, value_json, dictionary_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ["obs-valid", "session-valid", "sample-valid", "preparation", "dry_fragrance_intensity", "7", "sensory-dictionary/1.0", now, now]
+    );
+    await f.db.run(
+      "INSERT INTO stage_state (session_id, sample_id, stage_id, status, started_at, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ["session-valid", "sample-valid", "preparation", "active", now, null, now]
+    );
+
+    // Simulate a historical browser database written while FK enforcement was disabled.
+    f.db.exec("PRAGMA foreign_keys = OFF");
+    await f.db.run(
+      "INSERT INTO observations (observation_id, session_id, sample_id, stage_id, field_key, value_json, dictionary_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ["obs-orphan", "session-missing", "sample-missing", "preparation", "dry_fragrance_intensity", "6", "sensory-dictionary/1.0", now, now]
+    );
+    await f.db.run(
+      "INSERT INTO stage_state (session_id, sample_id, stage_id, status, started_at, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ["session-missing", "sample-missing", "preparation", "active", now, null, now]
+    );
+    f.db.exec("PRAGMA foreign_keys = ON");
+
+    await new LocalMigrationRunner(f.db).apply([base, workflow], now);
+
+    assert.equal(
+      (await f.db.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM observations WHERE observation_id = 'obs-valid:flow-aroma'"
+      ))?.count,
+      1
+    );
+    assert.equal(
+      (await f.db.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM stage_state WHERE session_id = 'session-valid' AND sample_id = 'sample-valid' AND stage_id = 'aroma'"
+      ))?.count,
+      1
+    );
+    assert.equal(
+      (await f.db.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM observations WHERE observation_id = 'obs-orphan'"
+      ))?.count,
+      1,
+      "legacy orphan source row must be preserved"
+    );
+    assert.equal(
+      (await f.db.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM observations WHERE observation_id = 'obs-orphan:flow-aroma'"
+      ))?.count,
+      0,
+      "migration must not create a new orphan row"
+    );
+    assert.equal(
+      (await f.db.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM stage_state WHERE session_id = 'session-missing' AND sample_id = 'sample-missing' AND stage_id = 'aroma'"
+      ))?.count,
+      0
+    );
+    assert.equal(
+      (await f.db.get<{ count: number }>("SELECT COUNT(*) AS count FROM _aromasense_migrations"))?.count,
+      2
+    );
+  } finally {
+    f.db.close();
     rmSync(f.dir, { recursive: true, force: true });
   }
 });
