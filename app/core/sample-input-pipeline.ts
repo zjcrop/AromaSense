@@ -113,6 +113,57 @@ export function canonicalizeSampleInput(
   return sample;
 }
 
+/**
+ * Final human confirmation is authoritative for the values visible in the review
+ * form. Recognition/Foundation conflict remains in the audit trail, but may not
+ * make a reviewed row impossible to finish. This never invents a canonical ID or
+ * core code: unresolved values are confirmed as user-entered display values only.
+ */
+export function confirmSampleInput(
+  original: ImportSampleDraft,
+  gateway: CoffeeFoundationGateway | undefined,
+  evidenceRef: string,
+  confirmedAt: string
+): ImportSampleDraft {
+  const sample = canonicalizeSampleInput(original, gateway, evidenceRef);
+  const canonical = object(sample.metadata.canonical) ?? {};
+  const decisions = Array.isArray(canonical.decisions) ? canonical.decisions as FoundationFieldDecision[] : [];
+  const overrides: Array<Record<string, unknown>> = [];
+  const confirmedDecisions = decisions.map((decision) => {
+    if (decision.status === "confirmed") return decision;
+    const value = text(sample.metadata[decision.field]) || text(decision.normalizedValue) || text(decision.rawValue);
+    if (!value) return decision;
+    overrides.push({
+      field: decision.field,
+      previousStatus: decision.status,
+      previousReason: decision.reason,
+      rawValue: decision.rawValue,
+      normalizedValue: decision.normalizedValue,
+      confirmedValue: value,
+      confirmedAt
+    });
+    return {
+      ...decision,
+      normalizedValue: value,
+      status: "confirmed" as const,
+      reason: "user-confirmed-override",
+      selected: decision.selected?.canonicalId || decision.selected?.coreCode
+        ? decision.selected
+        : { display: value, canonicalId: null, coreCode: null }
+    };
+  });
+  sample.metadata.canonical = {
+    ...canonical,
+    decisions: confirmedDecisions,
+    ...(overrides.length ? { manualOverrides: overrides } : {}),
+    userConfirmedAt: confirmedAt
+  };
+  const validation = validateSampleInput(sample);
+  sample.metadata.inputValidation = validation;
+  sample.requiresReview = validation.state !== "valid";
+  return sample;
+}
+
 export async function canonicalizeAndValidateImportBundle(bundle: ImportBundle, gateway: CoffeeFoundationGateway): Promise<ImportBundle> {
   const sourceRows = bundle.sessions.flatMap((session) => session.samples.map((sample) => sample.rawText ?? sample.label));
   const ai = sourceRows.length >= 2 && gateway.enrichBatch ? await gateway.enrichBatch(sourceRows) : { ok: false, reason: "minimum-two-samples" };
