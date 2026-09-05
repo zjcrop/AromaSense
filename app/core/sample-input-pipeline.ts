@@ -58,8 +58,14 @@ export function validateSampleInput(sample: Pick<ImportSampleDraft, "label" | "m
   const canonical = object(sample.metadata.canonical);
   const decisions = Array.isArray(canonical?.decisions) ? canonical.decisions as FoundationFieldDecision[] : [];
   for (const decision of decisions) {
-    if (decision.status === "conflict" || decision.status === "invalid") issues.push({ field: decision.field, code: decision.reason, severity: "error" });
-    else if (decision.status === "review" || decision.status === "unknown") issues.push({ field: decision.field, code: decision.reason, severity: "review" });
+    // Foundation conflict/invalid means machine resolution could not safely choose
+    // a canonical fact. It must remain visible for human review, but it must not
+    // make the review dialog impossible to finish after the user has explicitly
+    // accepted or corrected the displayed value. Structural errors such as a
+    // missing sample label remain true blocking errors.
+    if (["conflict", "invalid", "review", "unknown"].includes(decision.status)) {
+      issues.push({ field: decision.field, code: decision.reason, severity: "review" });
+    }
   }
   for (const key of DATE_KEYS) {
     const value = text(sample.metadata[key]);
