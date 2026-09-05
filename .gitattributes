@@ -1,0 +1,2 @@
+cloud/worker/migrations/*.sql text eol=lf
+app/storage/*.sql text eol=lf
