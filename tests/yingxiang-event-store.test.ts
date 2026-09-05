@@ -3,7 +3,7 @@ import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { bindEventPrincipal, defaultYingxiangEventPolicy, type YingxiangEvent } from "../app/core/yingxiang-event";
+import { bindEventPrincipal, buildYingxiangManifest, defaultYingxiangEventPolicy, type YingxiangEvent } from "../app/core/yingxiang-event";
 import { NodeSQLiteDriver } from "../app/storage/node-sqlite-driver";
 import { YingxiangEventStore } from "../app/storage/yingxiang-event-store";
 
@@ -16,6 +16,7 @@ function makeEvent(): YingxiangEvent {
     title: "迎香测试活动",
     status: "published",
     policy: defaultYingxiangEventPolicy(),
+    manifest: buildYingxiangManifest({ organizerName: "测试主办方", cuppingMode: "blind", sampleCodes: ["S01", "S02", "S03"] }),
     createdAt: "2026-09-06T00:00:00.000Z",
     updatedAt: "2026-09-06T00:00:00.000Z"
   };
@@ -33,13 +34,26 @@ function closeStore(value: { dir: string; db: NodeSQLiteDriver }): void {
   rmSync(value.dir, { recursive: true, force: true });
 }
 
+function publicContext(event: YingxiangEvent) {
+  return {
+    eventId: event.eventId,
+    eventRevision: event.eventRevision,
+    title: event.title,
+    status: event.status,
+    policy: event.policy,
+    manifest: event.manifest,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt
+  };
+}
+
 test("yingxiang local store persists scoped principals and releases them without touching personal account identity", async () => {
   const state = openStore();
   try {
     const event = makeEvent();
     assert.equal(await state.store.putEvent(event), "created");
     assert.equal(await state.store.putEvent(event), "already_present");
-    assert.equal((await state.store.getEventContext(event.eventId))?.title, event.title);
+    assert.equal((await state.store.getEventContext(event.eventId))?.manifest.samples.length, 3);
 
     const principal = bindEventPrincipal(event, {
       participantId: "participant-1",
@@ -59,22 +73,11 @@ test("participant can persist a public event context and principal without recei
   const state = openStore();
   try {
     const event = makeEvent();
-    const context = {
-      eventId: event.eventId,
-      eventRevision: event.eventRevision,
-      title: event.title,
-      status: event.status,
-      policy: event.policy,
-      createdAt: event.createdAt,
-      updatedAt: event.updatedAt
-    };
-    assert.equal(await state.store.putEventContext(context, "2026-09-06T00:02:00.000Z"), "created");
+    assert.equal(await state.store.putEventContext(publicContext(event), "2026-09-06T00:02:00.000Z"), "created");
     assert.equal(await state.store.getEvent("event-a"), undefined);
+    assert.equal((await state.store.getEventContext("event-a"))?.manifest.organizerName, "测试主办方");
 
-    const principal = bindEventPrincipal(event, {
-      participantId: "guest-1",
-      requestedName: "匿名07"
-    }, "principal-guest-1", "2026-09-06T00:03:00.000Z");
+    const principal = bindEventPrincipal(event, { participantId: "guest-1", requestedName: "匿名07" }, "principal-guest-1", "2026-09-06T00:03:00.000Z");
     await state.store.putPrincipal(principal);
     const stored = await state.store.getActivePrincipal("event-a", "guest-1");
     assert.equal(stored?.displayName, "匿名07");
@@ -95,12 +98,21 @@ test("event names are unique when organizer policy requires it and repeated cali
       groupId: "cal-a",
       eventId: "event-a",
       canonicalSampleId: "coffee-a",
-      eventSampleIds: ["event-a:s03", "event-a:s10"],
+      eventSampleIds: ["slot-001", "slot-003"],
       revealPolicy: "after_event",
       createdAt: "2026-09-06T00:00:00.000Z"
     });
     const groups = await state.store.listCalibrationGroups("event-a");
-    assert.deepEqual(groups[0]?.eventSampleIds, ["event-a:s03", "event-a:s10"]);
+    assert.deepEqual(groups[0]?.eventSampleIds, ["slot-001", "slot-003"]);
+    await assert.rejects(() => state.store.putCalibrationGroup({
+      schemaVersion: "yingxiang-calibration-group/0.1",
+      groupId: "cal-invalid",
+      eventId: "event-a",
+      canonicalSampleId: "coffee-b",
+      eventSampleIds: ["slot-001", "missing-slot"],
+      revealPolicy: "after_event",
+      createdAt: "2026-09-06T00:00:00.000Z"
+    }), /YINGXIANG_CALIBRATION_UNKNOWN_EVENT_SAMPLE/);
   } finally { closeStore(state); }
 });
 
@@ -120,20 +132,9 @@ test("public event context also rejects same-revision silent overwrite", async (
   const state = openStore();
   try {
     const event = makeEvent();
-    const context = {
-      eventId: event.eventId,
-      eventRevision: event.eventRevision,
-      title: event.title,
-      status: event.status,
-      policy: event.policy,
-      createdAt: event.createdAt,
-      updatedAt: event.updatedAt
-    };
+    const context = publicContext(event);
     await state.store.putEventContext(context, "cache-1");
     assert.equal(await state.store.putEventContext(context, "cache-2"), "already_present");
-    await assert.rejects(
-      () => state.store.putEventContext({ ...context, title: "非法覆盖" }, "cache-3"),
-      /YINGXIANG_EVENT_REVISION_CONFLICT/
-    );
+    await assert.rejects(() => state.store.putEventContext({ ...context, title: "非法覆盖" }, "cache-3"), /YINGXIANG_EVENT_REVISION_CONFLICT/);
   } finally { closeStore(state); }
 });
