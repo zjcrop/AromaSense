@@ -38,6 +38,10 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build browser application
         run: npm run bundle:web
+      - name: Run homepage and records UI acceptance
+        env:
+          AROMASENSE_ACCEPTANCE_DEBUG: '1'
+        run: node scripts/home-ui-acceptance.mjs
       - name: Run current-round visible UI acceptance
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
