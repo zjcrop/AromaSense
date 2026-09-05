@@ -149,7 +149,7 @@ async function runAcceptance(appUrl) {
     await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.home-modal .session-records__scopes')`)), "records modal");
 
     const records = await cdp.evaluate(`(() => ({
-      tabs:[...document.querySelectorAll('.home-modal [data-record-scope-tab]')].map(n=>n.textContent?.trim()?.replace(/\d+$/,'')),
+      tabs:[...document.querySelectorAll('.home-modal [data-record-scope-tab]')].map(n=>n.childNodes[0]?.textContent?.trim() || ''),
       ids:[...document.querySelectorAll('.home-modal [data-record-scope-tab]')].map(n=>n.dataset.recordScopeTab),
       active:document.querySelector('.home-modal [data-record-scope-tab].is-active')?.dataset.recordScopeTab,
       scope:document.querySelector('.home-modal .session-records__list')?.dataset.recordScope
