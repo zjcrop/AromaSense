@@ -158,7 +158,9 @@ export function validateYingxiangManifest(manifest: YingxiangEventManifest, requ
     if (codes.has(code)) throw new Error("YINGXIANG_SAMPLE_CODE_DUPLICATE");
     if (orders.has(sample.order)) throw new Error("YINGXIANG_SAMPLE_ORDER_DUPLICATE");
     ids.add(id); codes.add(code); orders.add(sample.order);
-    if (sample.label !== undefined) normalizedRequired(sample.label, "YINGXIANG_SAMPLE_LABEL_INVALID");
+    // Older local signatures encoded an absent optional label as JSON null.
+    // Treat null like undefined when validating persisted participant-safe manifests.
+    if (sample.label != null) normalizedRequired(sample.label, "YINGXIANG_SAMPLE_LABEL_INVALID");
   }
   const sortedOrders = [...orders].sort((a, b) => a - b);
   if (sortedOrders.some((value, index) => value !== index + 1)) throw new Error("YINGXIANG_SAMPLE_ORDER_NOT_CONTIGUOUS");
