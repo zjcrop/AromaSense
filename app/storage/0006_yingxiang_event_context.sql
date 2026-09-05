@@ -48,6 +48,18 @@ CREATE INDEX IF NOT EXISTS idx_yingxiang_principals_event_status
 CREATE INDEX IF NOT EXISTS idx_yingxiang_principals_account
   ON yingxiang_event_principals(account_user_id, event_id, status);
 
+CREATE TABLE IF NOT EXISTS yingxiang_session_bindings (
+  event_id TEXT NOT NULL REFERENCES yingxiang_event_contexts(event_id) ON DELETE CASCADE,
+  participant_id TEXT NOT NULL,
+  session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  bound_at TEXT NOT NULL,
+  PRIMARY KEY(event_id, participant_id),
+  UNIQUE(session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_yingxiang_session_bindings_session
+  ON yingxiang_session_bindings(session_id);
+
 CREATE TABLE IF NOT EXISTS yingxiang_calibration_groups (
   group_id TEXT PRIMARY KEY,
   event_id TEXT NOT NULL REFERENCES yingxiang_event_contexts(event_id) ON DELETE CASCADE,
