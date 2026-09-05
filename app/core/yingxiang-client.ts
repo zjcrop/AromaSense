@@ -1,4 +1,4 @@
-import type { YingxiangEventPolicy } from "./yingxiang-event";
+import type { YingxiangEventManifest, YingxiangEventPolicy } from "./yingxiang-event";
 
 export interface YingxiangRemoteEvent {
   schemaVersion: "yingxiang-event/0.1";
@@ -7,6 +7,7 @@ export interface YingxiangRemoteEvent {
   title: string;
   status: "draft" | "published" | "active" | "completed" | "cancelled";
   policy: YingxiangEventPolicy;
+  manifest: YingxiangEventManifest;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,7 +52,7 @@ export class YingxiangClient {
     private readonly token: () => Promise<string | undefined>
   ) {}
 
-  async createEvent(input: { title: string; policy: YingxiangEventPolicy; publish?: boolean }): Promise<YingxiangRemoteEvent> {
+  async createEvent(input: { title: string; policy: YingxiangEventPolicy; manifest: YingxiangEventManifest; publish?: boolean }): Promise<YingxiangRemoteEvent> {
     const response = await this.request("/api/v1/yingxiang/events", { method: "POST", body: input, auth: true });
     return this.requireObject(response, "event") as unknown as YingxiangRemoteEvent;
   }
@@ -144,8 +145,10 @@ export class YingxiangClient {
 function messageForYingxiangError(code: string): string {
   const messages: Record<string, string> = {
     UNAUTHORIZED: "迎香发布功能需要先登录账户。",
+    YINGXIANG_EVENT_PAYLOAD_INVALID: "活动信息、参与规则或样品列表不完整。",
     YINGXIANG_EVENT_NOT_FOUND: "未找到该迎香活动，或当前账户没有管理权限。",
     YINGXIANG_EVENT_NOT_SHAREABLE: "当前活动尚未发布或已经结束，不能生成邀请。",
+    YINGXIANG_EVENT_CONTRACT_CORRUPT: "活动数据契约损坏，已停止继续操作。",
     YINGXIANG_INVITE_NOT_FOUND: "邀请无效或不存在。",
     YINGXIANG_INVITE_REVOKED: "该邀请已被撤销。",
     YINGXIANG_INVITE_EXPIRED: "该邀请已经过期。",
@@ -160,6 +163,7 @@ function messageForYingxiangError(code: string): string {
     YINGXIANG_ACCOUNT_NAME_POLICY_MISMATCH: "个人账户显示名称不符合本次活动的命名规则。",
     YINGXIANG_ACCOUNT_NAME_INVALID: "账户显示名称必须为 1–64 个字符。",
     YINGXIANG_ASSIGNED_NAME_REQUIRED: "该活动要求主办方为邀请指定参与名称。",
+    YINGXIANG_CALIBRATION_INVALID: "校准设置引用了无效或重复的活动样品。",
     NETWORK_ERROR: "当前无法连接迎香服务。"
   };
   return messages[code] ?? "迎香操作失败，请检查活动状态和输入内容。";
