@@ -79,7 +79,7 @@ test("Coffee Foundation gateway does not parse the recognition book when the hom
     assert.equal(reads, 0);
   } finally {
     if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
-    else delete (globalThis as typeof globalThis & { localStorage?: Storage }).localStorage;
+    else Reflect.deleteProperty(globalThis, "localStorage");
   }
 });
 
