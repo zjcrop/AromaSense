@@ -184,13 +184,14 @@ export class CuppingScreenController {
 
   canFinishSession(): boolean {
     const state = this.requireState();
-    return state.samples.length > 0
-      && state.rail.every((item) => item.stages.length > 0 && item.stages.every((stage) => stage.status === "completed"));
+    if (!state.samples.length) return false;
+    const scoreConfirmed = new Set(state.lockedSampleIds);
+    return state.samples.every((sample) => scoreConfirmed.has(sample.sampleId));
   }
 
   async finishSession(now: string): Promise<CuppingScreenState> {
     const state = this.requireState();
-    if (!this.canFinishSession()) throw new Error("ALL_SAMPLE_STAGES_REQUIRED");
+    if (!this.canFinishSession()) throw new Error("ALL_SAMPLE_FINAL_SCORES_REQUIRED");
     await this.editor.flush();
     const session = await this.repository.getSession(state.sessionId);
     const completed = completeSession(session, now);
