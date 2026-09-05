@@ -126,6 +126,18 @@ async function setValue(cdp, selector, value) {
   const result = await cdp.evaluate(`(() => { const n=document.querySelector(${js(selector)}); if(!(n instanceof HTMLInputElement||n instanceof HTMLTextAreaElement||n instanceof HTMLSelectElement)) return false; n.value=${js(String(value))}; n.dispatchEvent(new Event('input',{bubbles:true})); n.dispatchEvent(new Event('change',{bubbles:true})); return n.value; })()`);
   requireCondition(result === String(value), `Unable to set ${selector}`);
 }
+async function setRangeByLabel(cdp, label, value) {
+  const result = await cdp.evaluate(`(() => {
+    const field=[...document.querySelectorAll('.sensory-field')].find((node)=>node.querySelector('.sensory-field__label')?.textContent?.trim()===${js(label)});
+    const input=field?.querySelector('.sensory-range__input');
+    if(!(input instanceof HTMLInputElement)) return false;
+    input.value=${js(String(value))};
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+    return input.value;
+  })()`);
+  requireCondition(result === String(value), `Unable to set range field ${label}`);
+}
 
 async function runAcceptance(appUrl) {
   const executable = chromeExecutable();
@@ -153,7 +165,6 @@ async function runAcceptance(appUrl) {
 
     await waitExpression(cdp, `document.querySelector('#app')?.dataset.screen==='setup'`, "setup screen");
 
-    // Manual intake must be a user-visible one-sample-per-line flow.
     await click(cdp, ".batch-setup__add");
     const manual = await cdp.evaluate(`(() => ({
       textarea: Boolean(document.querySelector('.manual-import__textarea')),
@@ -162,7 +173,6 @@ async function runAcceptance(appUrl) {
     requireCondition(manual?.textarea === true && /每个豆子一行/.test(manual?.hint || ""), `Manual intake contract not visible: ${JSON.stringify(manual)}`);
     await click(cdp, ".manual-import__close");
 
-    // Build one blind sample without pre-populating sensory data.
     await setValue(cdp, '[data-session-field="组织方"] input', "AromaSense UI Acceptance");
     await setValue(cdp, '[data-session-field="杯测会名称"] input', "Current Round Visible UI");
     await click(cdp, 'button[data-cupping-target="blind"]');
@@ -189,7 +199,6 @@ async function runAcceptance(appUrl) {
     requireCondition(initial?.currentId === "aroma" && /is-not_started/.test(initial?.currentClass || ""), `Browsing incorrectly started aroma: ${JSON.stringify(initial)}`);
     requireCondition(/未开始/.test(initial?.currentHint || "") && /完成标准/.test(initial?.currentHint || ""), `Current completion criterion is not visibly rendered: ${JSON.stringify(initial)}`);
 
-    // Expanded rail must expose the exact three-state legend below the finish controls.
     await click(cdp, "[data-rail-toggle]");
     const legend = await waitExpression(cdp, `(() => {
       const node=document.querySelector('.cupping-progress-legend');
@@ -197,7 +206,6 @@ async function runAcceptance(appUrl) {
     })()`, "three-state legend");
     requireCondition(/灰色\s*未开始/.test(legend) && /浅蓝\s*已开始/.test(legend) && /绿色\s*已完成/.test(legend), `Progress legend incomplete: ${legend}`);
 
-    // Merely navigating to Overall must remain not-started and must expose defects/off-flavors.
     await click(cdp, '[data-stage-id="overall"]');
     await waitExpression(cdp, `document.querySelector('[data-stage-id="overall"]')?.getAttribute('aria-current')==='step'`, "overall selection");
     const overall = await cdp.evaluate(`(() => ({
@@ -207,10 +215,9 @@ async function runAcceptance(appUrl) {
     requireCondition(/is-not_started/.test(overall?.cls || ""), `Browsing incorrectly started overall: ${JSON.stringify(overall)}`);
     requireCondition(/缺陷与异味/.test(overall?.body || ""), `Overall does not visibly expose defect/off-flavor section: ${JSON.stringify(overall)}`);
 
-    // Return to aroma: one real value starts the step (light blue), and adding a descriptor completes it (green).
     await click(cdp, '[data-stage-id="aroma"]');
     await waitExpression(cdp, `Boolean(document.querySelector('.sensory-range__input'))`, "aroma editor");
-    await setValue(cdp, ".sensory-range__input", "7");
+    await setRangeByLabel(cdp, "湿香强度", "7");
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-active')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma active state");
     const activeBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(activeBorder !== initial?.currentBorder, `Started state did not visibly change progress color: ${activeBorder}`);
@@ -225,7 +232,6 @@ async function runAcceptance(appUrl) {
     const completedBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(completedBorder !== activeBorder, `Completed state did not visibly change progress color: ${completedBorder}`);
 
-    // Scoring is an independent seventh step rather than a hidden Overall subpage.
     await click(cdp, '[data-stage-id="scoring"]');
     await waitExpression(cdp, `document.querySelector('[data-stage-id="scoring"]')?.getAttribute('aria-current')==='step'`, "scoring selection");
     const scoring = await cdp.evaluate(`document.querySelector('.cupping-main__editor')?.textContent || ''`);
