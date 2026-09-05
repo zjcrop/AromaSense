@@ -253,6 +253,32 @@ export function splitSegmentationRegion(
   return model.regions.flatMap((item, index) => index === regionIndex ? [upper, lower] : [item]);
 }
 
+export function splitSegmentationRegionVertically(
+  model: SegmentationReviewModel,
+  regionIndex: number,
+  splitX: number
+): SegmentationReviewRegion[] {
+  const region = model.regions[regionIndex];
+  if (!region) throw new Error("要拆分的分区不存在");
+  const selected = model.lines.filter((line) => region.lineIds.includes(line.id));
+  const leftLines = selected.filter((line) => line.box.centerX < splitX);
+  const rightLines = selected.filter((line) => line.box.centerX >= splitX);
+  if (!leftLines.length || !rightLines.length) throw new Error("拆分线两侧都必须包含识别文字");
+  const left: SegmentationReviewRegion = {
+    id: `${region.id}-left`,
+    label: "",
+    box: unionBoxes(leftLines.map((line) => line.box)),
+    lineIds: leftLines.map((line) => line.id)
+  };
+  const right: SegmentationReviewRegion = {
+    id: `${region.id}-right`,
+    label: "",
+    box: unionBoxes(rightLines.map((line) => line.box)),
+    lineIds: rightLines.map((line) => line.id)
+  };
+  return model.regions.flatMap((item, index) => index === regionIndex ? [left, right] : [item]);
+}
+
 function targetField(field: unknown): string {
   const source = String(field ?? "");
   return UPSTREAM_FIELD_MAP[source] ?? source;
