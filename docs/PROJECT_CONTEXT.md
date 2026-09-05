@@ -56,6 +56,7 @@ The profile owns the scoring label, metadata policy and calculator version. The 
 - One active sample/stage editing context at a time.
 - Switching samples must not discard unfinished local edits.
 - Completed/recorded stages have clear visual progress states.
+- Browsing samples or workflow steps leaves both the Session and sensory stages unstarted. Empty edits, identity edits and legacy phase navigation do not start a Session. The first meaningful saved sensory input activates the Session; the first meaningful stage input records its start time. Completion still requires the stage's explicit criteria.
 - Voice prompts may signal preparation, high-temperature, mid-temperature, low-temperature, and completion stages.
 - Flavor labels can be grouped/collapsed and may support user ordering where defined by product requirements.
 - Blind visibility must be enforced by shared view/domain helpers rather than isolated CSS hiding, so web and Android use the same rule.

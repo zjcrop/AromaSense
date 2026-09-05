@@ -45,16 +45,10 @@ export class CuppingScreenController {
   }
 
   async select(sampleId: string, stageId: StageId, now: string): Promise<CuppingScreenState> {
-    let state = this.requireState();
+    const state = this.requireState();
     const sample = state.samples.find((item) => item.sampleId === sampleId);
     if (!sample) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
-    if (state.sessionStatus === "draft") {
-      const activated = activateSession(await this.repository.getSession(state.sessionId), now);
-      await this.repository.saveSession(activated);
-      this.state = { ...state, sessionStatus: activated.status, sessionMetadata: activated.metadata };
-      state = this.state;
-    }
     const active = await this.editor.open({ sessionId: state.sessionId, sampleId, stageId }, now);
     return this.refreshState(active);
   }
@@ -63,6 +57,12 @@ export class CuppingScreenController {
     await this.editor.saveField(fieldKey, value, now);
     const active = this.editor.current();
     if (!active) throw new Error("NO_ACTIVE_EDITING_CONTEXT");
+    const state = this.requireState();
+    if (state.sessionStatus === "draft" && active.slice.stageStatus !== "not_started") {
+      const activated = activateSession(await this.repository.getSession(state.sessionId), now);
+      await this.repository.saveSession(activated);
+      this.state = { ...state, sessionStatus: activated.status, sessionMetadata: activated.metadata };
+    }
     return this.refreshState(active);
   }
 

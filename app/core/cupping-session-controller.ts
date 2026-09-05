@@ -74,9 +74,6 @@ export class CuppingSessionController {
     };
 
     return this.enqueueWrite(async () => {
-      if (active.slice.stageStatus === "not_started") {
-        await this.repository.setStageState(active.context.sessionId, active.context.sampleId, active.context.stageId, "active", now, now);
-      }
       await this.repository.saveObservation(observation);
       let observations = replaceObservation(this.active?.slice.observations ?? active.slice.observations, observation);
 
