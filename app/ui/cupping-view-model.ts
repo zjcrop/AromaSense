@@ -51,12 +51,19 @@ export interface SampleVisibilityContext {
   status: SessionStatus;
 }
 
+/**
+ * Formal sensory-flow/2.0 deliberately uses one neutral stage identity.
+ * Color is reserved exclusively for progress state:
+ * not_started -> gray, active -> light blue, completed -> green.
+ * Legacy tone names remain in the exported type only so old renderers/records do
+ * not become unreadable; the current product flow never emits them.
+ */
 const STAGE_META: Record<StageId, { label: string; tone: StageTone }> = {
-  preparation: { label: "准备", tone: "orange" },
-  aroma: { label: "香气", tone: "orange" },
-  high_temp: { label: "高温", tone: "pink" },
-  mid_temp: { label: "中温", tone: "blue" },
-  low_temp: { label: "低温", tone: "white" },
+  preparation: { label: "准备", tone: "neutral" },
+  aroma: { label: "香气", tone: "neutral" },
+  high_temp: { label: "高温", tone: "neutral" },
+  mid_temp: { label: "中温", tone: "neutral" },
+  low_temp: { label: "低温", tone: "neutral" },
   flavor: { label: "风味", tone: "neutral" },
   overall: { label: "综评", tone: "neutral" },
   scoring: { label: "评分", tone: "neutral" },
