@@ -103,7 +103,6 @@ test("joined invite becomes one recoverable AromaSense session with event-safe s
     });
     assert.equal(second.sessionId, first.sessionId);
     assert.equal(second.resumed, true);
-    assert.equal(await state.db.get<{ count: number }>("SELECT COUNT(*) AS count FROM sessions"), undefined, "sqlite count uses bigint in node:sqlite and is checked below");
     const countRow = await state.db.get<{ count: bigint }>("SELECT COUNT(*) AS count FROM sessions");
     assert.equal(Number(countRow?.count ?? 0n), 1);
 
