@@ -1,5 +1,12 @@
 import type { OCRBox } from "../../core/ocr-layout-model";
 import {
+  attachROIRefinementProvenance,
+  failedROIRefinement,
+  refineSegmentationRegionEvidence,
+  regionRecognitionAvailable,
+  type ROIRefinementProvenance
+} from "../../core/sample-roi-refinement";
+import {
   buildSegmentationReviewModel,
   linesInsideBox,
   mergeSegmentationRegions,
@@ -15,6 +22,7 @@ import { button, element } from "./dom-helpers";
 export interface SegmentationReviewDialogOptions {
   root: HTMLElement;
   page: RecognizedPage;
+  file: File;
 }
 
 function installStyles(): void {
@@ -41,7 +49,7 @@ function installStyles(): void {
     .seg-review__label{display:grid;gap:4px;color:#c7b98f;font-size:10px}.seg-review__label input{min-height:36px;border:1px solid #464646;border-radius:7px;padding:7px 8px;background:#111;color:#fff;font:inherit}
     .seg-review__bounds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.seg-review__bound{display:grid;grid-template-columns:42px 1fr 36px;align-items:center;gap:5px;color:#aaa;font-size:9px}.seg-review__bound input{width:100%}
     .seg-review__tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.seg-review__tools button,.seg-review__actions button{min-height:38px;border-radius:8px;font:inherit;font-size:11px;font-weight:650}
-    .seg-review__tool{border:1px solid #4a4439;background:#222;color:#d2c5a8}.seg-review__tool:disabled{opacity:.35}.seg-review__split{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:center;color:#999;font-size:9px}.seg-review__split input{width:100%}
+    .seg-review__tool{border:1px solid #4a4439;background:#222;color:#d2c5a8}.seg-review__tool:disabled{opacity:.35}.seg-review__roi{border-color:#7b6540;background:#292218;color:#e0bf7d}.seg-review__roi.is-done{border-color:#46745a;color:#9fd1af}.seg-review__split{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:center;color:#999;font-size:9px}.seg-review__split input{width:100%}
     .seg-review__status{min-height:18px;color:#b9b1a6;font-size:10px;line-height:1.4}.seg-review__status.is-error{color:#f0a39b}
     .seg-review__actions{display:grid;grid-template-columns:.8fr 1.2fr;gap:8px;margin-top:4px}.seg-review__keep{border:1px solid #454545;background:#222;color:#bbb}.seg-review__apply{border:1px solid #b9995a;background:#b9995a;color:#111}
     @media(max-width:760px){.seg-review{padding:8px}.seg-review__panel{max-height:96vh;padding:12px}.seg-review__layout{grid-template-columns:1fr}.seg-review__canvas-shell{min-height:390px}.seg-review__regions{max-height:130px}}
@@ -80,6 +88,14 @@ function boundControl(labelText: string, value: number, onInput: (value: number)
   return wrapper;
 }
 
+function safeRegionCapability(): boolean {
+  try {
+    return regionRecognitionAvailable();
+  } catch {
+    return false;
+  }
+}
+
 export function openSegmentationReviewDialog(options: SegmentationReviewDialogOptions): Promise<RecognizedPage> {
   installStyles();
   const initial = buildSegmentationReviewModel(options.page);
@@ -90,6 +106,8 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
     let selectedIndex = 0;
     let splitY = model.regions[0]?.box.centerY ?? 0.5;
     let settled = false;
+    let refining = false;
+    const refinements = new Map<string, ROIRefinementProvenance>();
 
     const overlay = element("div", "seg-review");
     const panel = element("section", "seg-review__panel");
@@ -97,7 +115,7 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
     const heading = element("div", "");
     heading.append(
       element("h2", "seg-review__title", "核对样品分区"),
-      element("p", "seg-review__note", `自动分区置信度 ${Math.round(options.page.segmentationConfidence * 100)}%。这里只调整 OCR 文字属于哪个样品，不重新压缩或改写原图。`)
+      element("p", "seg-review__note", `自动分区置信度 ${Math.round(options.page.segmentationConfidence * 100)}%。可先调整分区，再按需局部重新识别；原图裁剪只在正式 Recognition Worker/native 层执行。`)
     );
     header.append(heading);
 
@@ -127,10 +145,12 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
     };
 
     const selectedRegion = () => model.regions[selectedIndex];
+    const invalidateROI = () => refinements.clear();
 
-    const updateSelected = (patch: Partial<SegmentationReviewRegion>) => {
+    const updateSelected = (patch: Partial<SegmentationReviewRegion>, invalidate = false) => {
       const current = selectedRegion();
       if (!current) return;
+      if (invalidate) invalidateROI();
       const regions = model.regions.map((region, index) => index === selectedIndex ? { ...region, ...patch } : region);
       model = replaceRegions(model, regions);
       render();
@@ -141,8 +161,8 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
       if (!current) return;
       const next = { ...current.box, [edge]: value } as OCRBox;
       try {
-        updateSelected({ box: normalizeRegionBox(next) });
-        setStatus("边界已调整。点击“按当前边界归属文字”后才改变文字归属。", false);
+        updateSelected({ box: normalizeRegionBox(next) }, true);
+        setStatus("边界已调整。原 ROI 结果已作废；可重新归属文字或执行局部重新识别。", false);
       } catch (error) {
         setStatus(error instanceof Error ? error.message : String(error), true);
       }
@@ -182,10 +202,12 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
       model.regions.forEach((region, index) => {
         const item = element("button", `seg-review__region-card${index === selectedIndex ? " is-selected" : ""}`);
         item.type = "button";
+        const refined = refinements.get(region.id);
+        const state = refined?.status === "success" ? " · ROI" : refined?.status === "failed" ? " · ROI失败" : "";
         item.append(
           element("strong", "", String(index + 1).padStart(2, "0")),
           element("span", "", region.label || "未命名样品"),
-          element("span", "seg-review__region-count", `${region.lineIds.length} 行`)
+          element("span", "seg-review__region-count", `${region.lineIds.length} 行${state}`)
         );
         item.addEventListener("click", () => {
           selectedIndex = index;
@@ -194,6 +216,34 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
         });
         regionList.append(item);
       });
+    };
+
+    const runROIRefinement = async () => {
+      const region = selectedRegion();
+      if (!region || refining) return;
+      if (!safeRegionCapability()) {
+        setStatus("当前构建未加载 recognition-roi/1.0 安全接口；不会回退主线程裁剪。", true);
+        return;
+      }
+      refining = true;
+      setStatus("正在 Worker/native 层裁剪当前区域并执行 PP-OCRv5 二次识别…", false);
+      render();
+      try {
+        const result = await refineSegmentationRegionEvidence({
+          file: options.file,
+          model,
+          regionIndex: selectedIndex
+        });
+        model = result.model;
+        refinements.set(region.id, result.provenance);
+        setStatus(`局部重新识别完成：${result.provenance.blockCount ?? 0} 行文字已替换当前分区证据。`, false);
+      } catch (error) {
+        refinements.set(region.id, failedROIRefinement(region, error));
+        setStatus(`局部重新识别失败，原识别证据已保留：${error instanceof Error ? error.message : String(error)}`, true);
+      } finally {
+        refining = false;
+        render();
+      }
     };
 
     const renderEditor = () => {
@@ -217,15 +267,26 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
         boundControl("下", region.box.bottom, (value) => updateBoxEdge("bottom", value))
       );
 
+      const roiState = refinements.get(region.id);
+      const roi = button(
+        `seg-review__tool seg-review__roi${roiState?.status === "success" ? " is-done" : ""}`,
+        refining ? "局部重新识别中…" : roiState?.status === "success" ? "重新执行局部识别" : "局部重新识别",
+        runROIRefinement
+      );
+      const roiCapable = safeRegionCapability();
+      roi.disabled = refining || !roiCapable;
+      if (!roiCapable) roi.title = "需要 Recognition Foundation recognition-roi/1.0 Worker/native 接口";
+
       const reassignment = button("seg-review__tool", "按当前边界归属文字", () => {
         const ids = linesInsideBox(model.lines, region.box);
         if (!ids.length) {
           setStatus("当前分区边界内没有 OCR 文字。", true);
           return;
         }
-        updateSelected({ lineIds: ids });
-        setStatus(`已把边界内 ${ids.length} 行文字归入当前样品。`);
+        updateSelected({ lineIds: ids }, true);
+        setStatus(`已把边界内 ${ids.length} 行文字归入当前样品；原 ROI 结果已作废。`);
       });
+      reassignment.disabled = refining;
 
       const split = element("div", "seg-review__split");
       const splitInput = element("input", "");
@@ -244,43 +305,49 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
       const tools = element("div", "seg-review__tools");
       const mergePrevious = button("seg-review__tool", "与上一块合并", () => {
         try {
+          invalidateROI();
           model = replaceRegions(model, mergeSegmentationRegions(model, selectedIndex - 1, selectedIndex));
           selectedIndex = Math.max(0, selectedIndex - 1);
           splitY = selectedRegion()?.box.centerY ?? 0.5;
-          setStatus("已合并分区。", false);
+          setStatus("已合并分区；之前的 ROI 结果已作废。", false);
           render();
         } catch (error) { setStatus(error instanceof Error ? error.message : String(error), true); }
       });
-      mergePrevious.disabled = selectedIndex <= 0;
+      mergePrevious.disabled = selectedIndex <= 0 || refining;
       const mergeNext = button("seg-review__tool", "与下一块合并", () => {
         try {
+          invalidateROI();
           model = replaceRegions(model, mergeSegmentationRegions(model, selectedIndex, selectedIndex + 1));
           splitY = selectedRegion()?.box.centerY ?? 0.5;
-          setStatus("已合并分区。", false);
+          setStatus("已合并分区；之前的 ROI 结果已作废。", false);
           render();
         } catch (error) { setStatus(error instanceof Error ? error.message : String(error), true); }
       });
-      mergeNext.disabled = selectedIndex >= model.regions.length - 1;
+      mergeNext.disabled = selectedIndex >= model.regions.length - 1 || refining;
       const splitButton = button("seg-review__tool", "按横线拆成两块", () => {
         try {
+          invalidateROI();
           model = replaceRegions(model, splitSegmentationRegion(model, selectedIndex, splitY));
-          setStatus("已拆分分区；请分别确认两个新样品名称。", false);
+          setStatus("已拆分分区；请分别确认两个新样品，必要时再执行局部识别。", false);
           render();
         } catch (error) { setStatus(error instanceof Error ? error.message : String(error), true); }
       });
+      splitButton.disabled = refining;
       const remove = button("seg-review__tool", "删除当前分区", () => {
         if (model.regions.length <= 1) {
           setStatus("至少保留一个样品分区。", true);
           return;
         }
+        invalidateROI();
         model = replaceRegions(model, model.regions.filter((_, index) => index !== selectedIndex));
         selectedIndex = Math.min(selectedIndex, model.regions.length - 1);
         splitY = selectedRegion()?.box.centerY ?? 0.5;
         setStatus("已删除分区；未归属文字不会进入样品。", false);
         render();
       });
-      tools.append(mergePrevious, mergeNext, splitButton, remove);
-      editor.append(label, bounds, reassignment, split, tools);
+      remove.disabled = refining;
+      tools.append(roi, reassignment, mergePrevious, mergeNext, splitButton, remove);
+      editor.append(label, bounds, split, tools);
     };
 
     const render = () => {
@@ -290,11 +357,14 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
       renderEditor();
     };
 
-    const keep = button("seg-review__keep", "保留自动分区", () => finish(options.page));
+    const keep = button("seg-review__keep", "保留自动分区", () => {
+      if (!refining) finish(options.page);
+    });
     const apply = button("seg-review__apply", "应用分区并重新解析", () => {
+      if (refining) return;
       try {
         const page = resegmentRecognizedPage(options.page, model);
-        finish(page);
+        finish(attachROIRefinementProvenance(page, model, refinements));
       } catch (error) {
         setStatus(error instanceof Error ? error.message : String(error), true);
       }
@@ -302,8 +372,12 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
     actions.append(keep, apply);
     side.append(regionList, editor, status, actions);
 
-    overlay.addEventListener("click", (event) => { if (event.target === overlay) finish(options.page); });
-    overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") finish(options.page); });
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay && !refining) finish(options.page);
+    });
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !refining) finish(options.page);
+    });
     options.root.append(overlay);
     overlay.tabIndex = -1;
     overlay.focus();

@@ -12,6 +12,7 @@ const pagesOcrOut = resolve(pagesOut, "vendor/paddleocr");
 const REQUIRED_ASSETS = [
   ["sdk.mjs", 10_000],
   ["worker.js", 100_000],
+  ["roi-worker.js", 1_000],
   ["models/PP-OCRv5_mobile_det_onnx_infer.tar", 1_000_000],
   ["models/PP-OCRv5_mobile_rec_onnx_infer.tar", 1_000_000],
   ["ort/ort-wasm-simd-threaded.mjs", 10_000],
@@ -31,20 +32,21 @@ async function existsFile(path) {
 
 async function ensureFoundationRuntimePrepared() {
   const manifestPath = resolve(foundationOcrSource, "manifest.json");
-  if (await existsFile(manifestPath)) return;
+  const roiWorkerPath = resolve(foundationOcrSource, "roi-worker.js");
+  if (await existsFile(manifestPath) && await existsFile(roiWorkerPath)) return;
 
   // npm 11 may deliberately suppress git-dependency lifecycle scripts unless
   // they are explicitly approved. Do not rely on LuckyBean's postinstall for a
   // production-critical OCR runtime: execute the pinned Foundation preparer as
-  // an explicit AromaSense build step when the generated assets are absent.
+  // an explicit AromaSense build step when generated assets are absent/incomplete.
   const preparer = resolve(foundationPackage, "scripts/prepare-paddleocr-vendor.mjs");
   if (!(await existsFile(preparer))) {
     throw new Error("Pinned LuckyBean package does not contain the Foundation PP-OCR vendor preparer");
   }
-  console.log("Foundation OCR assets absent after npm install; preparing pinned same-origin runtime explicitly...");
+  console.log("Foundation OCR assets absent/incomplete after npm install; preparing pinned same-origin runtime explicitly...");
   await import(`${pathToFileURL(preparer).href}?aromasense=${Date.now()}`);
-  if (!(await existsFile(manifestPath))) {
-    throw new Error("LuckyBean Foundation OCR vendor preparer completed without manifest.json");
+  if (!(await existsFile(manifestPath)) || !(await existsFile(roiWorkerPath))) {
+    throw new Error("LuckyBean Foundation OCR vendor preparer completed without ROI runtime assets");
   }
 }
 
@@ -132,14 +134,32 @@ async function executeRecognitionCoreSmoke() {
   });
 
   const core = context.LuckyBeanRecognitionCore;
-  for (const method of ["preparePackageImage", "recognizeCoffeeBag", "createRecognitionDocument", "analyzeRecognitionDocument"]) {
+  for (const method of [
+    "preparePackageImage",
+    "recognizeCoffeeBag",
+    "recognizeImageRegion",
+    "normalizeRecognitionRegion",
+    "createRecognitionDocument",
+    "analyzeRecognitionDocument"
+  ]) {
     if (typeof core?.[method] !== "function") {
       throw new Error(`Formal LuckyBean recognition core failed runtime smoke: ${method} is unavailable`);
     }
   }
+  const normalized = core.normalizeRecognitionRegion({ left: 0.1, top: 0.2, right: 0.8, bottom: 0.9 });
+  if (normalized.left !== 0.1 || normalized.bottom !== 0.9) {
+    throw new Error("Foundation recognition-roi/1.0 normalization failed runtime smoke");
+  }
+
   const paddle = context.LuckyBeanPaddleOCR;
-  if (paddle?.workerOnly !== true || typeof paddle.runtimeBase !== "function") {
-    throw new Error("Foundation PP-OCR Worker provider failed runtime smoke");
+  if (
+    paddle?.workerOnly !== true ||
+    paddle?.roiWorkerOnly !== true ||
+    paddle?.regionRecognition !== "recognition-roi/1.0" ||
+    typeof paddle?.recognizeRegion !== "function" ||
+    typeof paddle?.runtimeBase !== "function"
+  ) {
+    throw new Error("Foundation PP-OCR Worker/ROI provider failed runtime smoke");
   }
   const actualBase = paddle.runtimeBase();
   const expectedBase = "https://example.test/AromaSense/vendor/paddleocr/";
@@ -151,4 +171,4 @@ async function executeRecognitionCoreSmoke() {
 await installPagesRuntime();
 await configurePagesRuntime();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + same-origin PP-OCR assets verified");
+console.log("Foundation recognition runtime: executable core + same-origin PP-OCR + ROI Worker assets verified");

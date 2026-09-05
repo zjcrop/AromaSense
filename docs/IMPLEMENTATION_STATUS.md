@@ -67,13 +67,22 @@ Updated: 2026-09-05
 - [x] OCR original text and parsed sample metadata stored in `samples.metadata_json`
 - [x] recognition result remains editable before Session creation
 - [x] Android native recognition bridge ported and build-validated
-- [x] OCR segmentation manual merge / split / region-adjust interaction — automated domain/UI integration implemented; `aromasense-recognition/3.3`
+- [x] OCR segmentation manual merge / split / region-adjust interaction — automated domain/UI integration implemented
+- [x] shared Foundation `recognition-roi/1.0` Worker-only normalized ROI contract merged in LuckyBean at `2efa52e2cc4e0f4c4d71b51a0bf60104d47f9b6c`
+- [x] segmented ROI pixel-level second-pass OCR refinement — automated integration implemented; `aromasense-recognition/3.4`
+- [x] ROI-local OCR geometry remapped into page-normalized geometry and selected-region evidence replaced without affecting other regions
+- [x] ROI provenance and invalidation rules covered by automated tests
+- [x] browser Tesseract/CDN fallback removed from AromaSense recognition path
+- [x] Web build requires `roi-worker.js` and executable ROI runtime contract
 - [ ] batch photo recognition runtime acceptance on current GitHub Pages build
 - [ ] Android native OCR real-device acceptance with camera and gallery originals
 - [ ] physical touch acceptance of manual segmentation review on phone/tablet
-- [ ] segmented ROI pixel-level second-pass OCR refinement
+- [ ] physical-device acceptance of ROI second-pass OCR against real complex labels/menus
+- [ ] Android native ROI acceptance if/when Foundation exposes `nativeRegion=true` on the device bridge
 
-The manual segmentation flow intentionally operates on the OCR geometry/evidence already produced by the production Recognition/Foundation path. It supports region-bound adjustment, line reassignment, adjacent merge, horizontal split, deletion and label correction, then re-runs the official Foundation semantic analyzer. It does **not** decode/re-encode the original high-resolution image on the UI thread. Pixel-level ROI second-pass OCR remains blocked until a Worker/native crop contract is available in the shared recognition base.
+The manual segmentation flow operates on the OCR geometry/evidence produced by the production Recognition/Foundation path. It supports region-bound adjustment, line reassignment, adjacent merge, horizontal split, deletion and label correction, then re-runs the official Foundation semantic analyzer. For an uncertain region, `recognition-roi/1.0` can re-read only that region: browser cropping/orientation handling is performed in the shared Foundation ROI Worker and the cropped Blob is passed to the formal PP-OCRv5 Worker. AromaSense itself does **not** decode/re-encode, crop or Base64-encode the original high-resolution image on the UI thread. Geometry changes invalidate prior ROI evidence before final parsing.
+
+Automated engineering acceptance is complete for the shared Worker ROI path and the AromaSense consumer contract. This does not constitute real camera/gallery/touch acceptance on physical devices. Android native ROI remains capability-gated; AromaSense only enables it when the shared Foundation reports `nativeRegion=true`.
 
 ### Left sample sticky-note rail
 - [x] sample rail state model
@@ -129,8 +138,8 @@ The manual segmentation flow intentionally operates on the OCR geometry/evidence
 
 B0.2.a core product code, Web/Cloud deployment path, Local-first persistence, workflow completion semantics, sample intake/canonicalization, comparison/export and immutable Submission revisions are already in the main development line.
 
-The current recognition hardening batch closes the previously missing manual OCR segmentation interaction at the automated engineering level. It does not claim physical-device acceptance. The next recognition-layer dependency is a safe shared ROI crop/re-recognition contract; that capability belongs in the shared Recognition/Foundation base rather than a private AromaSense image-processing fallback.
+The current recognition hardening batch now closes both missing engineering pieces for complex photo intake: manual OCR segmentation review and shared pixel-level ROI second-pass OCR. The shared ROI capability was implemented in the Recognition/Foundation base first and only then consumed by AromaSense. The browser path is Worker-only, uses the formal PP-OCRv5 runtime, and has no AromaSense Tesseract/CDN or DOM Canvas fallback. The remaining recognition work is therefore physical/runtime acceptance rather than another private OCR implementation.
 
-APK formal signing/publishing is intentionally not part of the current gate. Remaining acceptance work is primarily real-browser/real-device recovery and touch testing, authenticated cloud round-trip/cross-device restore, and later pixel-level ROI second-pass OCR after the shared base exposes a safe crop path.
+APK formal signing/publishing is intentionally not part of the current gate. Remaining non-APK acceptance work is primarily real-browser refresh/resume, physical-device camera/gallery/touch testing, authenticated cloud round-trip/cross-device restore, and real complex-label validation of the ROI workflow.
 
 LuckyBean remains a reference/upstream implementation for recognition vocabulary and the shared production recognition runtime. AromaSense retains its own Session/Sample Local-first storage model and does not import LuckyBean inventory/business logic wholesale.

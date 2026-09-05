@@ -4,20 +4,25 @@ import test from "node:test";
 
 const packageJson = readFileSync("package.json", "utf8");
 const commonEntry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
+const recognitionService = readFileSync("app/core/sample-recognition-service.ts", "utf8");
 const buildScript = readFileSync("scripts/build-web.mjs", "utf8");
 const runtimeHardener = readFileSync("scripts/harden-recognition-runtime.mjs", "utf8");
+const roiRefinement = readFileSync("app/core/sample-roi-refinement.ts", "utf8");
 const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
+const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
 test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", () => {
   assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
-  assert.doesNotMatch(packageJson, /github:zjcrop\/luckybean#ae4486454e49d6f73e1e9b96c5cbe4077a199376/);
+  assert.match(packageJson, /2efa52e2cc4e0f4c4d71b51a0bf60104d47f9b6c/);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
+  assert.match(commonEntry, /recognizeImageRegion/);
+  assert.match(commonEntry, /normalizeRecognitionRegion/);
   assert.match(buildScript, /1\.24P-recognition-pipeline\.3/);
   assert.match(buildScript, /candidateCoreCode/);
   assert.match(buildScript, /manualConfirmationRequired/);
@@ -27,6 +32,8 @@ test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", ()
   assert.match(buildScript, /productionCoreApproved/);
   assert.match(runtimeHardener, /CoffeeFoundationOcrAssetBase/);
   assert.match(runtimeHardener, /vendor\/paddleocr/);
+  assert.match(runtimeHardener, /roi-worker\.js/);
+  assert.match(runtimeHardener, /recognition-roi\/1\.0/);
   assert.match(runtimeHardener, /vm\.runInNewContext/);
   assert.match(runtimeHardener, /Formal LuckyBean recognition core failed runtime smoke/);
 });
@@ -37,6 +44,11 @@ test("recognition path never decodes or re-encodes full images on the UI thread"
   assert.match(commonEntry, /native-direct/);
   assert.match(commonEntry, /worker-direct/);
   assert.doesNotMatch(commonEntry, executableImageWork);
+  assert.doesNotMatch(recognitionService, executableTesseractFallback);
+  assert.doesNotMatch(recognitionService, executableImageWork);
+  assert.doesNotMatch(roiRefinement, executableImageWork);
+  assert.match(roiRefinement, /recognizeImageRegion/);
+  assert.match(roiRefinement, /recognition-roi\/1\.0/);
   assert.match(preview, /return Promise\.resolve\(["']{2}\)/);
   assert.doesNotMatch(preview, executableImageWork);
 });

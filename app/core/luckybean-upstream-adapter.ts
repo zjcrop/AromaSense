@@ -65,6 +65,26 @@ export interface LuckyBeanOCRResult {
   [key: string]: unknown;
 }
 
+export interface LuckyBeanRecognitionRegion {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export interface LuckyBeanRegionRecognitionResult extends LuckyBeanOCRResult {
+  regionProtocol?: string;
+  region?: LuckyBeanRecognitionRegion;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  cropX?: number;
+  cropY?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  outputWidth?: number;
+  outputHeight?: number;
+}
+
 export interface LuckyBeanRecognitionDocument {
   schemaVersion?: string;
   parserVersion?: string;
@@ -114,6 +134,14 @@ export interface LuckyBeanRecognitionAnalysis {
   reviewCount?: number;
 }
 
+export interface LuckyBeanRecognitionCapabilities {
+  native?: boolean;
+  webPaddle?: boolean;
+  textDetector?: boolean;
+  nativeRegion?: boolean;
+  webPaddleRegion?: boolean;
+}
+
 export interface LuckyBeanRecognitionCore {
   RECOGNITION_DOCUMENT_SCHEMA?: string;
   RECOGNITION_PIPELINE_VERSION?: string;
@@ -122,7 +150,13 @@ export interface LuckyBeanRecognitionCore {
     images: readonly LuckyBeanOCRImage[],
     options?: { locale?: string; onProgress?(progress: unknown): void }
   ): Promise<LuckyBeanOCRResult>;
-  getRecognitionCapabilities?(): { native?: boolean; webPaddle?: boolean; textDetector?: boolean };
+  recognizeImageRegion?(
+    image: LuckyBeanOCRImage,
+    region: LuckyBeanRecognitionRegion,
+    options?: { locale?: string; maxEdge?: number }
+  ): Promise<LuckyBeanRegionRecognitionResult>;
+  normalizeRecognitionRegion?(region: LuckyBeanRecognitionRegion): LuckyBeanRecognitionRegion;
+  getRecognitionCapabilities?(): LuckyBeanRecognitionCapabilities;
   createRecognitionDocument(input: {
     images?: readonly { id?: string; role?: string; roleLabel?: string }[];
     blocks?: readonly LuckyBeanCoreBlock[];

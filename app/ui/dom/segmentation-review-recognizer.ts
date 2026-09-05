@@ -8,6 +8,8 @@ import { openSegmentationReviewDialog } from "./segmentation-review-dialog";
  * Automatic OCR and segmentation still run in the shared Recognition/Foundation
  * path. Only pages explicitly marked as segmentation-review candidates are paused
  * for human geometry correction before the existing setup flow receives samples.
+ * The original File is retained only for an explicit Worker/native ROI second pass;
+ * AromaSense never decodes or crops it on the UI thread.
  */
 export class SegmentationReviewRecognitionService extends SampleRecognitionService {
   constructor(
@@ -25,6 +27,6 @@ export class SegmentationReviewRecognitionService extends SampleRecognitionServi
     const page = await this.delegate.recognizePage(file, index);
     if (!page.requiresSegmentationReview) return page;
     if (!buildSegmentationReviewModel(page)) return page;
-    return openSegmentationReviewDialog({ root: this.root, page });
+    return openSegmentationReviewDialog({ root: this.root, page, file });
   }
 }

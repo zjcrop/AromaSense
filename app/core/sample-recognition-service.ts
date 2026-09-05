@@ -58,28 +58,6 @@ interface NativeRecognitionResult {
   error?: string;
 }
 
-interface TesseractWorkerLike {
-  recognize(image: Blob): Promise<{ data?: { text?: string; confidence?: number } }>;
-  setParameters?(parameters: Record<string, string>): Promise<void>;
-}
-
-interface TesseractLike {
-  createWorker(
-    languages: readonly string[] | string,
-    oem?: number,
-    options?: { logger?(message: { status?: string; progress?: number }): void }
-  ): Promise<TesseractWorkerLike>;
-}
-
-const TESSERACT_VERSION = "6.0.1";
-const TESSERACT_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VERSION}/dist/tesseract.min.js`;
-let tesseractLoader: Promise<TesseractLike> | undefined;
-let workerPromise: Promise<TesseractWorkerLike> | undefined;
-
-function runtimeWindow(): Window & typeof globalThis & { Tesseract?: TesseractLike } {
-  return window as Window & typeof globalThis & { Tesseract?: TesseractLike };
-}
-
 function cleanText(value: unknown): string {
   return String(value ?? "")
     .normalize("NFKC")
@@ -87,53 +65,6 @@ function cleanText(value: unknown): string {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function ensureTesseract(): Promise<TesseractLike> {
-  const current = runtimeWindow().Tesseract;
-  if (current?.createWorker) return Promise.resolve(current);
-  if (tesseractLoader) return tesseractLoader;
-  tesseractLoader = new Promise<TesseractLike>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = TESSERACT_URL;
-    script.crossOrigin = "anonymous";
-    script.referrerPolicy = "no-referrer";
-    script.onload = () => {
-      const loaded = runtimeWindow().Tesseract;
-      if (loaded?.createWorker) resolve(loaded);
-      else reject(new Error("网页 OCR 主程序未正确加载"));
-    };
-    script.onerror = () => reject(new Error("网页 OCR 主程序下载失败，请检查网络"));
-    document.head.append(script);
-  }).catch((error) => {
-    tesseractLoader = undefined;
-    throw error;
-  });
-  return tesseractLoader;
-}
-
-async function ensureTesseractWorker(
-  onEngineProgress?: (message: string, progress: number) => void
-): Promise<TesseractWorkerLike> {
-  if (!workerPromise) {
-    workerPromise = ensureTesseract().then((tesseract) => tesseract.createWorker(["chi_sim", "eng"], 1, {
-      logger(message) {
-        onEngineProgress?.(String(message.status ?? "正在识别"), Number(message.progress ?? 0));
-      }
-    }));
-  }
-  return workerPromise;
-}
-
-async function recognizeTesseract(file: Blob): Promise<NativeRecognitionResult> {
-  const worker = await ensureTesseractWorker();
-  await worker.setParameters?.({ tessedit_pageseg_mode: "11", preserve_interword_spaces: "1", user_defined_dpi: "300" });
-  const result = await worker.recognize(file);
-  return {
-    fullText: cleanText(result.data?.text),
-    engine: `tesseract.js-${TESSERACT_VERSION}-chi_sim+eng`,
-    confidence: Number.isFinite(Number(result.data?.confidence)) ? Number(result.data?.confidence) / 100 : undefined
-  };
 }
 
 function blockToLine(block: LuckyBeanCoreBlock, index: number): NativeOCRLine {
@@ -155,61 +86,37 @@ function averageConfidence(lines: readonly NativeOCRLine[]): number | undefined 
 async function recognizeWithLuckyBean(file: File, id: string): Promise<NativeRecognitionResult | undefined> {
   const core = requireLuckyBeanRecognitionCore();
   const prepared: LuckyBeanPreparedImage = await core.preparePackageImage(file);
-  const role = "front";
-  try {
-    const result = await core.recognizeCoffeeBag([{
-      id,
-      role,
-      roleLabel: "样品图片",
-      blob: prepared.blob,
-      nativeSource: Boolean(prepared.nativeSource),
-      fileName: file.name
-    }], { locale: "zh-CN" });
-    const lines = [...(result.blocks ?? [])]
-      .map(blockToLine)
-      .filter((line) => cleanText(line.text));
-    const fullText = cleanText(result.fullText || lines.map((line) => line.text).join("\n"));
-    if (!fullText && !lines.length) return undefined;
-    return {
-      fullText,
-      lines,
-      engine: String(result.engine ?? "LuckyBean-OCR"),
-      confidence: averageConfidence(lines),
-      sourceWidth: Number(prepared.processedWidth || prepared.width) || undefined,
-      sourceHeight: Number(prepared.processedHeight || prepared.height) || undefined,
-      imageQuality: {
-        score: prepared.score,
-        status: prepared.status,
-        warnings: prepared.warnings ?? [],
-        originalWidth: prepared.width,
-        originalHeight: prepared.height,
-        processedWidth: prepared.processedWidth,
-        processedHeight: prepared.processedHeight,
-        nativeSource: Boolean(prepared.nativeSource)
-      }
-    };
-  } catch (error) {
-    const capabilities = core.getRecognitionCapabilities?.();
-    const hasNative = Boolean(capabilities?.native);
-    if (hasNative) throw error;
-    const fallback = await recognizeTesseract(prepared.blob);
-    return {
-      ...fallback,
-      sourceWidth: Number(prepared.processedWidth || prepared.width) || undefined,
-      sourceHeight: Number(prepared.processedHeight || prepared.height) || undefined,
-      imageQuality: {
-        score: prepared.score,
-        status: prepared.status,
-        warnings: prepared.warnings ?? [],
-        originalWidth: prepared.width,
-        originalHeight: prepared.height,
-        processedWidth: prepared.processedWidth,
-        processedHeight: prepared.processedHeight,
-        nativeSource: Boolean(prepared.nativeSource),
-        fallbackReason: error instanceof Error ? error.message : String(error)
-      }
-    };
-  }
+  const result = await core.recognizeCoffeeBag([{
+    id,
+    role: "front",
+    roleLabel: "样品图片",
+    blob: prepared.blob,
+    nativeSource: Boolean(prepared.nativeSource),
+    fileName: file.name
+  }], { locale: "zh-CN" });
+  const lines = [...(result.blocks ?? [])]
+    .map(blockToLine)
+    .filter((line) => cleanText(line.text));
+  const fullText = cleanText(result.fullText || lines.map((line) => line.text).join("\n"));
+  if (!fullText && !lines.length) return undefined;
+  return {
+    fullText,
+    lines,
+    engine: String(result.engine ?? "LuckyBean-OCR"),
+    confidence: averageConfidence(lines),
+    sourceWidth: Number(prepared.processedWidth || prepared.width) || undefined,
+    sourceHeight: Number(prepared.processedHeight || prepared.height) || undefined,
+    imageQuality: {
+      score: prepared.score,
+      status: prepared.status,
+      warnings: prepared.warnings ?? [],
+      originalWidth: prepared.width,
+      originalHeight: prepared.height,
+      processedWidth: prepared.processedWidth,
+      processedHeight: prepared.processedHeight,
+      nativeSource: Boolean(prepared.nativeSource)
+    }
+  };
 }
 
 function ocrLines(result: NativeRecognitionResult): OCRLineInput[] {
@@ -368,21 +275,20 @@ export class SampleRecognitionService {
         return {
           engine: "android-mlkit+luckybean-production",
           ready: true,
-          message: `LuckyBean 图像预处理 + Android OCR + 正式识别核心 ${version} 已就绪`
+          message: `Android OCR + 正式 Recognition Foundation ${version} 已就绪`
         };
       }
-      if (capabilities?.webPaddle || capabilities?.textDetector) {
+      if (capabilities?.webPaddle) {
         return {
-          engine: "browser+luckybean-production",
+          engine: "browser-ppocr-worker+luckybean-production",
           ready: true,
-          message: `LuckyBean 图像预处理 + 网页 OCR + 正式识别核心 ${version} 已就绪`
+          message: `PP-OCRv5 Worker + 正式 Recognition Foundation ${version} 已就绪`
         };
       }
-      await ensureTesseractWorker();
       return {
-        engine: `tesseract.js-${TESSERACT_VERSION}+luckybean-production`,
-        ready: true,
-        message: `LuckyBean 图像预处理 + Tesseract 后备 + 正式识别核心 ${version} 已就绪`
+        engine: "unavailable",
+        ready: false,
+        message: "当前设备没有可安全运行的 Worker/native OCR；不会回退主线程 Tesseract"
       };
     } catch (error) {
       return { engine: "unavailable", ready: false, message: error instanceof Error ? error.message : String(error) };
@@ -430,7 +336,7 @@ export class SampleRecognitionService {
           ...(sourceCode ? { sourceCode } : {}),
           ...(Object.keys(sourceFields).length ? { sourceFields } : {}),
           recognition: {
-            schemaVersion: "aromasense-recognition/3.2",
+            schemaVersion: "aromasense-recognition/3.4",
             source: "photo",
             fileName: file.name,
             mimeType: file.type,
@@ -503,8 +409,8 @@ export class SampleRecognitionService {
           fileName: file.name,
           status: "completed",
           message: recognized.samples.length > 1
-            ? `识别到 ${recognized.samples.length} 个样品区块 · LuckyBean 正式全链完成`
-            : "LuckyBean 正式全链完成"
+            ? `识别到 ${recognized.samples.length} 个样品区块 · Foundation 正式全链完成`
+            : "Foundation 正式全链完成"
         });
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error(String(error));
