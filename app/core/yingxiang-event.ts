@@ -1,9 +1,11 @@
 export const YINGXIANG_EVENT_SCHEMA_VERSION = "yingxiang-event/0.1" as const;
 export const YINGXIANG_PRINCIPAL_SCHEMA_VERSION = "yingxiang-principal/0.1" as const;
+export const YINGXIANG_MANIFEST_SCHEMA_VERSION = "yingxiang-event-manifest/0.1" as const;
 
 export type YingxiangEventStatus = "draft" | "published" | "active" | "completed" | "cancelled";
 export type YingxiangPrincipalStatus = "active" | "released";
 export type YingxiangIdentityKind = "guest" | "account";
+export type YingxiangCuppingMode = "open" | "blind" | "semi_blind";
 
 export interface YingxiangParticipantNamePolicy {
   mode: "organizer_assigned" | "participant_choice";
@@ -23,6 +25,22 @@ export interface YingxiangEventPolicy {
   calibrationRepeatEnabled: boolean;
 }
 
+export interface YingxiangEventSampleSlot {
+  /** Stable inside one event. It does not expose the canonical coffee identity. */
+  eventSampleId: string;
+  sampleCode: string;
+  order: number;
+  /** Optional participant-safe label only; never place hidden coffee identity here for blind events. */
+  label?: string;
+}
+
+export interface YingxiangEventManifest {
+  schemaVersion: typeof YINGXIANG_MANIFEST_SCHEMA_VERSION;
+  organizerName: string;
+  cuppingMode: YingxiangCuppingMode;
+  samples: readonly YingxiangEventSampleSlot[];
+}
+
 export interface YingxiangEvent {
   schemaVersion: typeof YINGXIANG_EVENT_SCHEMA_VERSION;
   eventId: string;
@@ -31,6 +49,7 @@ export interface YingxiangEvent {
   title: string;
   status: YingxiangEventStatus;
   policy: YingxiangEventPolicy;
+  manifest: YingxiangEventManifest;
   createdAt: string;
   updatedAt: string;
 }
@@ -101,11 +120,57 @@ export function defaultYingxiangEventPolicy(): YingxiangEventPolicy {
   };
 }
 
+export function buildYingxiangManifest(input: {
+  organizerName: string;
+  cuppingMode: YingxiangCuppingMode;
+  sampleCodes: readonly string[];
+}): YingxiangEventManifest {
+  const organizerName = normalizedRequired(input.organizerName, "YINGXIANG_ORGANIZER_NAME_REQUIRED");
+  if (!(["open", "blind", "semi_blind"] as const).includes(input.cuppingMode)) throw new Error("YINGXIANG_CUPPING_MODE_INVALID");
+  const codes = input.sampleCodes.map((code) => normalizedRequired(code, "YINGXIANG_SAMPLE_CODE_REQUIRED"));
+  if (codes.length === 0) throw new Error("YINGXIANG_SAMPLE_REQUIRED");
+  if (new Set(codes).size !== codes.length) throw new Error("YINGXIANG_SAMPLE_CODE_DUPLICATE");
+  return {
+    schemaVersion: YINGXIANG_MANIFEST_SCHEMA_VERSION,
+    organizerName,
+    cuppingMode: input.cuppingMode,
+    samples: codes.map((sampleCode, index) => ({
+      eventSampleId: `slot-${String(index + 1).padStart(3, "0")}`,
+      sampleCode,
+      order: index + 1
+    }))
+  };
+}
+
+export function validateYingxiangManifest(manifest: YingxiangEventManifest, requireSamples = true): YingxiangEventManifest {
+  if (manifest.schemaVersion !== YINGXIANG_MANIFEST_SCHEMA_VERSION) throw new Error("YINGXIANG_MANIFEST_VERSION_INVALID");
+  normalizedRequired(manifest.organizerName, "YINGXIANG_ORGANIZER_NAME_REQUIRED");
+  if (!(["open", "blind", "semi_blind"] as const).includes(manifest.cuppingMode)) throw new Error("YINGXIANG_CUPPING_MODE_INVALID");
+  if (requireSamples && manifest.samples.length === 0) throw new Error("YINGXIANG_SAMPLE_REQUIRED");
+  const ids = new Set<string>();
+  const codes = new Set<string>();
+  const orders = new Set<number>();
+  for (const sample of manifest.samples) {
+    const id = normalizedRequired(sample.eventSampleId, "YINGXIANG_EVENT_SAMPLE_ID_REQUIRED");
+    const code = normalizedRequired(sample.sampleCode, "YINGXIANG_SAMPLE_CODE_REQUIRED");
+    if (!Number.isSafeInteger(sample.order) || sample.order < 1) throw new Error("YINGXIANG_SAMPLE_ORDER_INVALID");
+    if (ids.has(id)) throw new Error("YINGXIANG_EVENT_SAMPLE_ID_DUPLICATE");
+    if (codes.has(code)) throw new Error("YINGXIANG_SAMPLE_CODE_DUPLICATE");
+    if (orders.has(sample.order)) throw new Error("YINGXIANG_SAMPLE_ORDER_DUPLICATE");
+    ids.add(id); codes.add(code); orders.add(sample.order);
+    if (sample.label !== undefined) normalizedRequired(sample.label, "YINGXIANG_SAMPLE_LABEL_INVALID");
+  }
+  const sortedOrders = [...orders].sort((a, b) => a - b);
+  if (sortedOrders.some((value, index) => value !== index + 1)) throw new Error("YINGXIANG_SAMPLE_ORDER_NOT_CONTIGUOUS");
+  return manifest;
+}
+
 export function validateYingxiangEvent(event: YingxiangEvent): YingxiangEvent {
   normalizedRequired(event.eventId, "YINGXIANG_EVENT_ID_REQUIRED");
   normalizedRequired(event.hostUserId, "YINGXIANG_HOST_ACCOUNT_REQUIRED");
   normalizedRequired(event.title, "YINGXIANG_EVENT_TITLE_REQUIRED");
   if (!Number.isSafeInteger(event.eventRevision) || event.eventRevision < 1) throw new Error("YINGXIANG_EVENT_REVISION_INVALID");
+  validateYingxiangManifest(event.manifest, event.status !== "draft");
   const naming = event.policy.participantName;
   if (event.policy.allowGuestParticipants !== true) throw new Error("YINGXIANG_GUEST_SUPPORT_REQUIRED");
   if (!Number.isSafeInteger(naming.minLength) || !Number.isSafeInteger(naming.maxLength)
@@ -158,7 +223,7 @@ export function bindEventPrincipal(
   now: string
 ): YingxiangEventPrincipal {
   validateYingxiangEvent(event);
-  if (event.status === "completed" || event.status === "cancelled") throw new Error("YINGXIANG_EVENT_NOT_JOINABLE");
+  if (event.status === "draft" || event.status === "completed" || event.status === "cancelled") throw new Error("YINGXIANG_EVENT_NOT_JOINABLE");
   const participantId = normalizedRequired(input.participantId, "YINGXIANG_PARTICIPANT_ID_REQUIRED");
   const accountUserId = input.accountUserId?.normalize("NFKC").trim() || undefined;
   const displayName = selectEventDisplayName({ ...input, accountUserId }, event.policy.participantName);
