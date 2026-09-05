@@ -80,6 +80,15 @@ export class YingxiangClient {
     };
   }
 
+  async setAccountDisplayName(displayName: string): Promise<string> {
+    const response = await this.request("/api/v1/yingxiang/account-display-name", {
+      method: "POST", body: { displayName }, auth: true
+    });
+    const value = response.displayName;
+    if (typeof value !== "string" || !value.trim()) throw new YingxiangClientError("INVALID_SERVER_RESPONSE", 200);
+    return value;
+  }
+
   async createCalibrationGroup(eventId: string, input: { canonicalSampleId: string; eventSampleIds: readonly string[]; revealPolicy?: "after_event" | "organizer_only" }): Promise<Record<string, unknown>> {
     return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/calibration-groups`, {
       method: "POST", body: { ...input, eventSampleIds: [...input.eventSampleIds] }, auth: true
@@ -147,6 +156,9 @@ function messageForYingxiangError(code: string): string {
     YINGXIANG_PARTICIPANT_NAME_CONFLICT: "该参与名称在本次活动中已经被使用。",
     YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME: "选择个人账户名称参与时必须先登录。",
     YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED: "主办方不允许使用个人账户名称参与。",
+    YINGXIANG_ACCOUNT_NAME_UNAVAILABLE: "当前账户还没有设置可用于迎香的显示名称。",
+    YINGXIANG_ACCOUNT_NAME_POLICY_MISMATCH: "个人账户显示名称不符合本次活动的命名规则。",
+    YINGXIANG_ACCOUNT_NAME_INVALID: "账户显示名称必须为 1–64 个字符。",
     YINGXIANG_ASSIGNED_NAME_REQUIRED: "该活动要求主办方为邀请指定参与名称。",
     NETWORK_ERROR: "当前无法连接迎香服务。"
   };
