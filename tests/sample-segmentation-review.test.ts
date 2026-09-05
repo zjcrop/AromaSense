@@ -7,6 +7,7 @@ import {
   mergeSegmentationRegions,
   resegmentRecognizedPage,
   splitSegmentationRegion,
+  splitSegmentationRegionVertically,
   type SegmentationReviewModel
 } from "../app/core/sample-segmentation-review";
 import type { RecognizedPage, RecognizedSample } from "../app/core/sample-recognition-service";
@@ -121,7 +122,7 @@ test("segmentation review model preserves OCR geometry and supports box reassign
   assert.deepEqual(linesInsideBox(model.lines, box(0, 0, 0.6, 0.3)), ["l1", "l2"]);
 });
 
-test("manual regions can merge and split without inventing or duplicating OCR lines", () => {
+test("manual regions can merge and split horizontally without inventing or duplicating OCR lines", () => {
   const model = buildSegmentationReviewModel(fixturePage()) as SegmentationReviewModel;
   const merged = mergeSegmentationRegions(model, 0, 1);
   assert.equal(merged.length, 1);
@@ -132,6 +133,23 @@ test("manual regions can merge and split without inventing or duplicating OCR li
   assert.equal(split.length, 2);
   assert.deepEqual(split[0].lineIds, ["l1", "l2"]);
   assert.deepEqual(split[1].lineIds, ["l3", "l4"]);
+});
+
+test("manual regions can split vertically into left and right samples", () => {
+  const model = buildSegmentationReviewModel(fixturePage()) as SegmentationReviewModel;
+  const verticalModel: SegmentationReviewModel = {
+    ...model,
+    regions: [{
+      id: "vertical-region",
+      label: "",
+      box: box(0.1, 0.1, 0.48, 0.62),
+      lineIds: ["l1", "l3"]
+    }]
+  };
+  const split = splitSegmentationRegionVertically(verticalModel, 0, 0.28);
+  assert.equal(split.length, 2);
+  assert.deepEqual(split[0].lineIds, ["l1"]);
+  assert.deepEqual(split[1].lineIds, ["l3"]);
 });
 
 test("applying reviewed regions reruns Foundation semantic parsing and clears segmentation review", () => {
