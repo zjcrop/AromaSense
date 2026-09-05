@@ -30,7 +30,8 @@ test("segmentation review exposes direct dragging, both split directions, delete
   const dialog = source("app/ui/dom/segmentation-review-dialog.ts");
   assert.match(dialog, /beginRegionDrag/u);
   assert.match(dialog, /setPointerCapture/u);
-  assert.match(dialog, /seg-review__handle is-left/u);
+  assert.match(dialog, /for \(const edge of \["left", "right", "top", "bottom"\] as const\)/u);
+  assert.match(dialog, /`seg-review__handle is-\$\{edge\}`/u);
   assert.match(dialog, /"横向拆分"/u);
   assert.match(dialog, /"纵向拆分"/u);
   assert.match(dialog, /splitSegmentationRegionVertically/u);
