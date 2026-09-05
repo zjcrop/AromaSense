@@ -190,7 +190,11 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
     }
     validation.hidden = true;
     const accepted = await options.onConfirm(value);
-    if (accepted === false) return;
+    if (accepted === false) {
+      validation.textContent = "仍有无效或冲突的信息，请检查样品名称和字段后再确认。";
+      validation.hidden = false;
+      return;
+    }
   });
   footer.append(previousButton, confirmButton);
   panel.append(footer);

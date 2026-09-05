@@ -87,6 +87,32 @@ function applyAiCandidates(sample: ImportSampleDraft, candidates: readonly Found
   return { ...sample, metadata, requiresReview: sample.requiresReview || accepted.length > 0 };
 }
 
+/** Rebuild decisions from the current fields so edits cannot retain stale validation. */
+export function canonicalizeSampleInput(
+  original: ImportSampleDraft,
+  gateway: CoffeeFoundationGateway | undefined,
+  evidenceRef: string
+): ImportSampleDraft {
+  const sample = { ...original, metadata: { ...original.metadata } };
+  const decisions: FoundationFieldDecision[] = [];
+  for (const [field, value] of Object.entries(sample.metadata)) {
+    const normalized = text(value);
+    if (!normalized || !CANONICAL_KEYS.has(field)) continue;
+    decisions.push(gateway
+      ? gateway.resolve(field, normalized, evidenceRef)
+      : { field, rawValue: normalized, normalizedValue: normalized, status: "review", reason: "foundation-runtime-unavailable", selected: null });
+  }
+  sample.metadata.canonical = {
+    schemaVersion: "coffee-canonical-record/1.0",
+    foundationContract: "coffee-foundation/1.0",
+    decisions
+  };
+  const validation = validateSampleInput(sample);
+  sample.metadata.inputValidation = validation;
+  sample.requiresReview = validation.state !== "valid";
+  return sample;
+}
+
 export async function canonicalizeAndValidateImportBundle(bundle: ImportBundle, gateway: CoffeeFoundationGateway): Promise<ImportBundle> {
   const sourceRows = bundle.sessions.flatMap((session) => session.samples.map((sample) => sample.rawText ?? sample.label));
   const ai = sourceRows.length >= 2 && gateway.enrichBatch ? await gateway.enrichBatch(sourceRows) : { ok: false, reason: "minimum-two-samples" };
@@ -100,24 +126,10 @@ export async function canonicalizeAndValidateImportBundle(bundle: ImportBundle, 
       samples: session.samples.map((original) => {
         globalIndex += 1;
         const evidenceRef = `sample:${globalIndex}`;
-        let sample = aiValid ? applyAiCandidates(original, ai.result!.candidates, evidenceRef) : { ...original, metadata: { ...original.metadata } };
-        const decisions: FoundationFieldDecision[] = [];
-        for (const [field, value] of Object.entries(sample.metadata)) {
-          const normalized = text(value);
-          if (!normalized || !CANONICAL_KEYS.has(field)) continue;
-          decisions.push(gateway.resolve(field, normalized, evidenceRef));
-        }
-        sample.metadata.canonical = {
-          schemaVersion: "coffee-canonical-record/1.0",
-          foundationContract: "coffee-foundation/1.0",
-          decisions
-        };
-        const validation = validateSampleInput(sample);
-        sample.metadata.inputValidation = validation;
-        sample.requiresReview = validation.state !== "valid";
-        return sample;
+        const sample = aiValid ? applyAiCandidates(original, ai.result!.candidates, evidenceRef) : original;
+        return canonicalizeSampleInput(sample, gateway, evidenceRef);
       })
     })),
-    warnings: [...bundle.warnings, ...(sourceRows.length >= 2 && !aiValid && ai.reason && ai.reason !== "api-key-unavailable" ? [`AI 增强已降级：${ai.reason}`] : [])]
+    warnings: [...bundle.warnings, ...(sourceRows.length >= 2 && !aiValid ? ["AI 增强暂不可用，已保存本地解析结果"] : [])]
   };
 }
