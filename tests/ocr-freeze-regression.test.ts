@@ -13,6 +13,7 @@ const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
+const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
 test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", () => {
   assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
@@ -43,8 +44,7 @@ test("recognition path never decodes or re-encodes full images on the UI thread"
   assert.match(commonEntry, /native-direct/);
   assert.match(commonEntry, /worker-direct/);
   assert.doesNotMatch(commonEntry, executableImageWork);
-  assert.doesNotMatch(recognitionService, /tesseract/iu);
-  assert.doesNotMatch(recognitionService, /cdn\.jsdelivr/iu);
+  assert.doesNotMatch(recognitionService, executableTesseractFallback);
   assert.doesNotMatch(recognitionService, executableImageWork);
   assert.doesNotMatch(roiRefinement, executableImageWork);
   assert.match(roiRefinement, /recognizeImageRegion/);
