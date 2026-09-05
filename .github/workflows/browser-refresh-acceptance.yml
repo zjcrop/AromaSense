@@ -34,8 +34,8 @@ jobs:
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
         run: node scripts/live-pages-smoke.mjs
-      - name: Install locked dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
       - name: Build browser application
         run: npm run bundle:web
       - name: Run homepage and records UI acceptance
