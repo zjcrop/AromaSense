@@ -54,16 +54,21 @@ GitHub Pages 部署基础设施已经启用。当前发布流程要求仓库变�
 
 - 相机和多图相册导入；
 - Android ML Kit 中文 / 拉丁文字原图识别桥；
+- 浏览器同源 PP-OCRv5 Worker 识别；
 - OCR 行坐标、图像尺寸和 polygon 结构；
 - 多样品版面分割；
 - 国家、处理法、海拔、烘焙日期等字段的语义决策与冲突复核；
 - 对低置信度自动分区进行人工复核：可合并、拆分、调整边界并按边界重新归属 OCR 文字；
 - 手工调整分区后重新调用正式 LuckyBean / Coffee Foundation 语义解析，不在 AromaSense 内维护第二套字段解析规则；
+- 对需要进一步复核的分区可执行 `recognition-roi/1.0` 局部二次 OCR：浏览器端由共享 Foundation `roi-worker.js` 在 Worker 内完成原图方向处理、裁剪和 Blob 生成，再交给正式 PP-OCRv5 Worker；
+- ROI 新文字坐标会从局部裁剪坐标回映到整页归一化几何，只替换当前分区证据；调整边界、重新归属、合并、拆分或删除分区后旧 ROI 结果立即失效；
 - 识别结果人工确认后再建立 Session。
 
-手工分区后的识别元数据使用 `aromasense-recognition/3.3`，并记录 `manualSegmentation=true`。该流程只重新组合已经由正式 OCR 产生的文字与几何证据，不在浏览器主线程重新解码或压缩整张原图。
+分区复核后的识别元数据使用 `aromasense-recognition/3.4`。其中 `manualSegmentation=true` 表示人工调整过版面，`roiRefinement` 记录 `recognition-roi/1.0` 的执行状态、区域、引擎及裁剪/输出尺寸等 provenance。AromaSense 不在 UI 线程解码、裁剪、压缩或 Base64 编码高分辨率原图。
 
-真实设备 OCR 和分区后的像素级 ROI 二次 OCR 仍处于验收/开发阶段。ROI 二次 OCR 必须通过正式 Recognition/Foundation 的 Worker 或 Android native crop 接口实现，不允许为了该功能恢复高分辨率图片的主线程 Canvas 处理。
+浏览器识别不再保留 Tesseract/CDN 主线程回退路径：正式 Worker/native OCR 不可用或 ROI 失败时会明确返回失败并保留原证据，而不是切换到不可控的主线程图像处理。Android 原生整图 OCR 继续使用现有 native bridge；原生 ROI 只有在 Foundation 报告 `nativeRegion` 能力时才会启用，否则使用受支持的 Worker ROI 或保持不可用状态，不虚报原生能力。
+
+真实设备相机/相册 OCR、分区复核触控和原生 ROI 仍需要物理设备验收；自动测试不能替代这些验收。
 
 ## 感官数据原则
 
@@ -100,6 +105,8 @@ B0.2.a 已建立以下自动化验收：
 - 100 样品压力测试；
 - OCR 版面分割和字段语义决策测试；
 - 手工分区 merge / split / region reassignment / Foundation reparse / 重复文字冲突测试；
+- `recognition-roi/1.0` 坐标回映、证据替换、provenance 和 `nativeSource` 传递测试；
+- Web bundle 对 `roi-worker.js`、ROI API、Worker-only provider 的可执行 runtime smoke；
 - Worker typecheck；
 - Android `assembleDebug`。
 
