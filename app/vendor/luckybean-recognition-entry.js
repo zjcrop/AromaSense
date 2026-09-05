@@ -1,4 +1,4 @@
-// AromaSense consumes LuckyBean's emergency Worker-only PP-OCR implementation.
+// AromaSense consumes LuckyBean's Worker-only PP-OCR implementation.
 // No browser/main-thread OCR fallback or Canvas image-quality pass is loaded here.
 import 'luckybean-static-app/src/recognition-paddle-ocr.js';
 
@@ -6,6 +6,8 @@ import {
   RECOGNITION_DOCUMENT_SCHEMA,
   RECOGNITION_PIPELINE_VERSION,
   recognizeCoffeeBag,
+  recognizeImageRegion,
+  normalizeRecognitionRegion,
   getRecognitionCapabilities,
   createRecognitionDocument,
   recognitionDocumentFromText,
@@ -56,6 +58,8 @@ globalThis.LuckyBeanRecognitionCore = Object.freeze({
   RECOGNITION_PIPELINE_VERSION,
   preparePackageImage,
   recognizeCoffeeBag,
+  recognizeImageRegion,
+  normalizeRecognitionRegion,
   getRecognitionCapabilities,
   createRecognitionDocument,
   recognitionDocumentFromText,
