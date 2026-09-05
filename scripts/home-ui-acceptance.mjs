@@ -124,12 +124,14 @@ async function runAcceptance(appUrl) {
     await waitUntil(async () => (await cdp.evaluate(`document.querySelector('#app')?.dataset.screen==='setup'`)) === true, "setup screen");
 
     const home = await cdp.evaluate(`(() => {
-      const capture=[...document.querySelectorAll('.batch-setup__capture-actions button')].map(n=>n.textContent?.trim());
-      const footer=[...document.querySelectorAll('.batch-setup__footer-section button')].map(n=>n.textContent?.trim());
+      const actionNodes=[...document.querySelectorAll('.batch-setup__capture-actions button')];
+      const capture=actionNodes.map(n=>n.textContent?.trim());
+      const captureStyles=actionNodes.map(n=>{const s=getComputedStyle(n);return {text:n.textContent?.trim(),className:n.className,background:s.backgroundColor,border:s.border,color:s.color,height:n.getBoundingClientRect().height}});
+      const footer=[...document.querySelectorAll('.batch-setup__footer-section > button')].map(n=>n.textContent?.trim());
       const header=[...document.querySelectorAll('.batch-setup__header-actions button')].map(n=>n.textContent?.trim());
       const start=document.querySelector('[data-home-action="start-cupping"]');
       return {
-        capture, footer, header,
+        capture, captureStyles, footer, header,
         hasPhoto:capture.includes('拍摄录入'),
         hasDirectHistory:Boolean(document.querySelector('.batch-setup__history,.batch-setup__recent')),
         startFont:start ? parseFloat(getComputedStyle(start).fontSize) : 0,
@@ -143,25 +145,54 @@ async function runAcceptance(appUrl) {
     requireCondition(home?.hasPhoto === false, `拍摄录入 still visible: ${JSON.stringify(home)}`);
     requireCondition(home?.hasDirectHistory === false, `History still rendered directly on homepage: ${JSON.stringify(home)}`);
     requireCondition(home?.startFont >= 20 && home?.startHeight >= 60, `Start action is not visually dominant: ${JSON.stringify(home)}`);
+    const styleKeys = (home?.captureStyles ?? []).map((item) => JSON.stringify({className:item.className,background:item.background,border:item.border,color:item.color,height:item.height}));
+    requireCondition(styleKeys.length === 4 && new Set(styleKeys).size === 1, `Four home intake actions are not visually identical: ${JSON.stringify(home?.captureStyles)}`);
 
     const opened = await cdp.evaluate(`(() => { const n=document.querySelector('[data-home-action="records"]'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
-    requireCondition(opened === true, "Unable to open records from footer");
-    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.home-modal .session-records__scopes')`)), "records modal");
+    requireCondition(opened === true, "Unable to expand records from footer");
+    await waitUntil(async () => Boolean(await cdp.evaluate(`(() => { const menu=document.querySelector('[data-home-records-menu]'); return menu && !menu.hidden; })()`)), "records submenu");
 
-    const records = await cdp.evaluate(`(() => ({
-      tabs:[...document.querySelectorAll('.home-modal [data-record-scope-tab]')].map(n=>n.childNodes[0]?.textContent?.trim() || ''),
-      ids:[...document.querySelectorAll('.home-modal [data-record-scope-tab]')].map(n=>n.dataset.recordScopeTab),
+    const expanded = await cdp.evaluate(`(() => ({
+      expanded:document.querySelector('[data-home-action="records"]')?.getAttribute('aria-expanded'),
+      labels:[...document.querySelectorAll('[data-home-record-scope]')].map(n=>n.textContent?.trim()),
+      ids:[...document.querySelectorAll('[data-home-record-scope]')].map(n=>n.dataset.homeRecordScope),
+      visible:!document.querySelector('[data-home-records-menu]')?.hidden
+    }))()`);
+    requireCondition(expanded?.expanded === "true" && expanded?.visible === true, `Record submenu did not expand below button: ${JSON.stringify(expanded)}`);
+    requireCondition(JSON.stringify(expanded?.ids) === JSON.stringify(["unfinished","completed"]), `Record submenu scopes missing: ${JSON.stringify(expanded)}`);
+    requireCondition(JSON.stringify(expanded?.labels) === JSON.stringify(["未完成记录","已完成记录"]), `Record submenu labels wrong: ${JSON.stringify(expanded)}`);
+
+    const openCompleted = await cdp.evaluate(`(() => { const n=document.querySelector('[data-home-record-scope="completed"]'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
+    requireCondition(openCompleted === true, "Unable to open completed records page");
+    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.home-modal .session-records__scopes')`)), "completed records modal");
+    await waitUntil(async () => (await cdp.evaluate(`document.querySelector('.home-modal [data-record-scope-tab].is-active')?.dataset.recordScopeTab`)) === "completed", "completed records scope");
+
+    const completed = await cdp.evaluate(`(() => ({
       active:document.querySelector('.home-modal [data-record-scope-tab].is-active')?.dataset.recordScopeTab,
       scope:document.querySelector('.home-modal .session-records__list')?.dataset.recordScope
     }))()`);
-    requireCondition(JSON.stringify(records?.ids) === JSON.stringify(["unfinished","completed"]), `Record scopes missing: ${JSON.stringify(records)}`);
-    requireCondition(JSON.stringify(records?.tabs) === JSON.stringify(["未完成记录","已完成记录"]), `Record scope labels wrong: ${JSON.stringify(records)}`);
-    requireCondition(records?.active === records?.scope, `Record active scope and list differ: ${JSON.stringify(records)}`);
+    requireCondition(completed?.active === "completed" && completed?.scope === "completed", `Completed record page was not selected: ${JSON.stringify(completed)}`);
+
+    const closeCompleted = await cdp.evaluate(`(() => { const n=document.querySelector('.home-modal .session-records__back'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
+    requireCondition(closeCompleted === true, "Unable to close completed records page");
+    await waitUntil(async () => (await cdp.evaluate(`Boolean(document.querySelector('.home-modal'))`)) === false, "completed records close");
+
+    await cdp.evaluate(`document.querySelector('[data-home-action="records"]')?.click()`);
+    await waitUntil(async () => Boolean(await cdp.evaluate(`(() => { const menu=document.querySelector('[data-home-records-menu]'); return menu && !menu.hidden; })()`)), "records submenu reopen");
+    const openUnfinished = await cdp.evaluate(`(() => { const n=document.querySelector('[data-home-record-scope="unfinished"]'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
+    requireCondition(openUnfinished === true, "Unable to open unfinished records page");
+    await waitUntil(async () => (await cdp.evaluate(`document.querySelector('.home-modal [data-record-scope-tab].is-active')?.dataset.recordScopeTab`)) === "unfinished", "unfinished records scope");
+
+    const unfinished = await cdp.evaluate(`(() => ({
+      active:document.querySelector('.home-modal [data-record-scope-tab].is-active')?.dataset.recordScopeTab,
+      scope:document.querySelector('.home-modal .session-records__list')?.dataset.recordScope
+    }))()`);
+    requireCondition(unfinished?.active === "unfinished" && unfinished?.scope === "unfinished", `Unfinished record page was not selected: ${JSON.stringify(unfinished)}`);
 
     const relevantErrors = cdp.errors.filter((entry) => !/favicon|Failed to load resource.*404|onnxruntime/i.test(entry));
     requireCondition(relevantErrors.length === 0, `Browser errors:\n${relevantErrors.join("\n")}`);
     console.log("AromaSense home UI acceptance: PASS");
-    console.log(JSON.stringify({ home, records }, null, 2));
+    console.log(JSON.stringify({ home, expanded, completed, unfinished }, null, 2));
   } finally {
     cdp?.close();
     chrome.kill("SIGTERM");
