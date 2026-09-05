@@ -241,12 +241,14 @@ export async function refineSegmentationRegionEvidence(input: {
   if (typeof core.recognizeImageRegion !== "function") {
     throw new Error("当前 Recognition Foundation 尚未提供 ROI 二次识别接口");
   }
+  const prepared = await core.preparePackageImage(input.file);
   const normalizedRegion = regionContract(region.box);
   const result = await core.recognizeImageRegion({
     id: `roi-source-${Date.now().toString(36)}`,
     role: "front",
     roleLabel: "样品分区二次识别",
-    blob: input.file,
+    blob: prepared.blob,
+    nativeSource: Boolean(prepared.nativeSource),
     fileName: input.file.name
   }, normalizedRegion, { locale: "zh-CN", maxEdge: 2200 });
   if (result.regionProtocol && result.regionProtocol !== ROI_RECOGNITION_PROTOCOL) {
