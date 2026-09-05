@@ -21,6 +21,10 @@ function box(left: number, top: number, right: number, bottom: number): OCRBox {
   };
 }
 
+function approximately(actual: number, expected: number, epsilon = 1e-9): void {
+  assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} is not within ${epsilon} of ${expected}`);
+}
+
 function fixtureModel(): SegmentationReviewModel {
   return {
     fileName: "menu.jpg",
@@ -57,24 +61,27 @@ test("ROI local pixels map back into the page-normalized segment box", () => {
     100,
     50
   );
-  assert.deepEqual(mapped, [
-    { x: 0.28, y: 0.38 },
-    { x: 0.52, y: 0.62 }
-  ]);
+  assert.equal(mapped.length, 2);
+  approximately(mapped[0].x, 0.28);
+  approximately(mapped[0].y, 0.38);
+  approximately(mapped[1].x, 0.52);
+  approximately(mapped[1].y, 0.62);
 });
 
-test("ROI second pass replaces only the selected region evidence and records Foundation provenance", async () => {
+test("ROI second pass replaces only selected evidence, preserves nativeSource and records provenance", async () => {
   const runtime = globalThis as typeof globalThis & { LuckyBeanRecognitionCore?: unknown };
   const previous = runtime.LuckyBeanRecognitionCore;
+  let receivedImage: Record<string, unknown> | undefined;
   runtime.LuckyBeanRecognitionCore = {
-    async preparePackageImage(blob: Blob) { return { blob }; },
+    async preparePackageImage(blob: Blob) { return { blob, nativeSource: true }; },
     async recognizeCoffeeBag() { return { blocks: [], fullText: "" }; },
-    getRecognitionCapabilities() { return { webPaddleRegion: true }; },
-    async recognizeImageRegion(_image: unknown, region: unknown) {
+    getRecognitionCapabilities() { return { nativeRegion: true }; },
+    async recognizeImageRegion(image: unknown, region: unknown) {
+      receivedImage = image as Record<string, unknown>;
       return {
         regionProtocol: ROI_RECOGNITION_PROTOCOL,
         region,
-        engine: "fixture-roi-worker",
+        engine: "fixture-roi-native",
         outputWidth: 100,
         outputHeight: 50,
         sourceWidth: 1000,
@@ -97,9 +104,10 @@ test("ROI second pass replaces only the selected region evidence and records Fou
       model: fixtureModel(),
       regionIndex: 0
     });
+    assert.equal(receivedImage?.nativeSource, true);
     assert.equal(result.provenance.status, "success");
     assert.equal(result.provenance.protocol, ROI_RECOGNITION_PROTOCOL);
-    assert.equal(result.provenance.engine, "fixture-roi-worker");
+    assert.equal(result.provenance.engine, "fixture-roi-native");
     assert.equal(result.model.regions[0].lineIds.length, 2);
     assert.equal(result.model.lines.some((line) => line.id === "old-1"), false);
     assert.equal(result.model.lines.some((line) => line.id === "other-1"), true);
