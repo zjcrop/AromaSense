@@ -4,6 +4,7 @@ import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import workflowMigration from "../storage/0003_workflow_event_comparison.sql";
 import submissionMigration from "../storage/0004_submission_revisions.sql";
 import sessionTimingMigration from "../storage/0005_session_timing.sql";
+import yingxiangEventMigration from "../storage/0006_yingxiang_event_context.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
@@ -43,7 +44,8 @@ async function main(): Promise<void> {
       { id: 2, name: "session_metadata_0_1c", sql: sessionMetadataMigration },
       { id: 3, name: "workflow_event_comparison_0_2", sql: workflowMigration },
       { id: 4, name: "submission_revisions_0_2", sql: submissionMigration },
-      { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration }
+      { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration },
+      { id: 6, name: "yingxiang_event_context_0_1", sql: yingxiangEventMigration }
     ],
     new Date().toISOString()
   );
