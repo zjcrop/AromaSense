@@ -78,23 +78,26 @@
 
     /* Legacy chip/near-complete inputs are collapsed into the same three visual
        states so old sessions cannot reintroduce stage-specific or fourth-state colors. */
-    .stage-chip--active,
-    .sample-rail__stage-token[data-state="active"] .sample-rail__stage-line,
-    .sample-rail__stage-token[data-state="near_complete"] .sample-rail__stage-line {
+    .stage-chip--active {
       border-color: var(--as-progress-active) !important;
       color: var(--as-progress-active) !important;
-      background: var(--as-progress-active) !important;
     }
-    .stage-chip--completed,
-    .sample-rail__stage-token[data-state="completed"] .sample-rail__stage-line {
+    .stage-chip--completed {
       border-color: var(--as-progress-completed) !important;
       color: var(--as-progress-completed) !important;
-      background: var(--as-progress-completed) !important;
     }
-    .stage-chip:not(.stage-chip--active):not(.stage-chip--completed),
-    .sample-rail__stage-token[data-state="not_started"] .sample-rail__stage-line {
+    .stage-chip:not(.stage-chip--active):not(.stage-chip--completed) {
       border-color: var(--as-progress-not-started) !important;
       color: var(--as-progress-not-started) !important;
+    }
+    .sample-rail__stage-token[data-state="active"] .sample-rail__stage-line,
+    .sample-rail__stage-token[data-state="near_complete"] .sample-rail__stage-line {
+      background: var(--as-progress-active) !important;
+    }
+    .sample-rail__stage-token[data-state="completed"] .sample-rail__stage-line {
+      background: var(--as-progress-completed) !important;
+    }
+    .sample-rail__stage-token[data-state="not_started"] .sample-rail__stage-line {
       background: var(--as-progress-not-started) !important;
     }
 
