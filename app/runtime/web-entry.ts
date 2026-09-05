@@ -10,6 +10,7 @@ import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import { AromaSenseDomApp } from "./dom-app";
+import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
   if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
@@ -51,15 +52,19 @@ async function main(): Promise<void> {
   );
   startup.setStatus("database", "ready", "本地数据库与迁移已就绪");
 
+  const now = () => new Date().toISOString();
+  const cloudBaseUrl = document.documentElement.dataset.cloudBaseUrl || undefined;
   app = new AromaSenseDomApp(root, db, {
-    now: () => new Date().toISOString(),
+    now,
     createSessionId: () => crypto.randomUUID(),
     createSampleId: () => crypto.randomUUID(),
     observationIdFactory: (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`,
-    cloudBaseUrl: document.documentElement.dataset.cloudBaseUrl || undefined,
+    cloudBaseUrl,
     firebaseApiKey: document.documentElement.dataset.firebaseApiKey || undefined,
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
+
+  new YingxiangBrowserBootstrap(root, db, { now, cloudBaseUrl }).start();
 
   startup.setStatus("recognition", "ready", "图像识别按需加载；首次识别时初始化");
   startup.allowEnter();
