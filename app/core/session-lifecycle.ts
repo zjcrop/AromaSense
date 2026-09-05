@@ -11,6 +11,7 @@ export interface CuppingSession {
   status: SessionStatus;
   taxonomyVersion: string;
   createdAt: string;
+  startedAt?: string;
   updatedAt: string;
   completedAt?: string;
 }
@@ -62,9 +63,9 @@ export function updateSessionMetadata(
 }
 
 export function activateSession(session: CuppingSession, now: string): CuppingSession {
-  if (session.status === "active") return session;
+  if (session.status === "active") return session.startedAt ? session : { ...session, startedAt: now, updatedAt: now };
   if (session.status !== "draft") throw new Error(`INVALID_SESSION_TRANSITION:${session.status}->active`);
-  return { ...session, status: "active", updatedAt: now };
+  return { ...session, status: "active", startedAt: session.startedAt ?? now, updatedAt: now };
 }
 
 export function completeSession(session: CuppingSession, now: string): CuppingSession {
@@ -74,6 +75,7 @@ export function completeSession(session: CuppingSession, now: string): CuppingSe
     ...session,
     metadata: revealBlindSessionMetadata(session.metadata, now),
     status: "completed",
+    startedAt: session.startedAt ?? session.createdAt,
     completedAt: now,
     updatedAt: now
   };
