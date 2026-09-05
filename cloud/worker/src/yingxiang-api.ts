@@ -135,6 +135,12 @@ async function eventById(db: D1Database, eventId: string): Promise<EventRow | nu
     FROM yingxiang_events WHERE event_id = ?1`).bind(eventId).first<EventRow>();
 }
 
+async function accountDisplayName(db: D1Database, userId: string): Promise<string | undefined> {
+  const row = await db.prepare("SELECT display_name FROM users WHERE user_id = ?1")
+    .bind(userId).first<{ display_name: string | null }>();
+  return normalizeName(row?.display_name) || undefined;
+}
+
 function publicEvent(row: EventRow, policy: EventPolicy): Record<string, unknown> {
   return {
     schemaVersion: "yingxiang-event/0.1",
@@ -213,11 +219,14 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
   if (naming.mode === "organizer_assigned") {
     displayName = validateDisplayName(resolved.invite.assigned_name, naming);
     if (!displayName) return json({ ok: false, error: "YINGXIANG_ASSIGNED_NAME_MISSING" }, 409);
+  } else if (body.nameSource === "account") {
+    if (!user) return json({ ok: false, error: "YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME" }, 401);
+    if (!naming.allowAccountDisplayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED" }, 403);
+    const verifiedAccountName = await accountDisplayName(db, user.userId);
+    if (!verifiedAccountName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_UNAVAILABLE" }, 409);
+    displayName = validateDisplayName(verifiedAccountName, naming);
+    if (!displayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_POLICY_MISMATCH" }, 409);
   } else {
-    if (body.nameSource === "account") {
-      if (!user) return json({ ok: false, error: "YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME" }, 401);
-      if (!naming.allowAccountDisplayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED" }, 403);
-    }
     displayName = validateDisplayName(body.displayName, naming);
     if (!displayName) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_INVALID" }, 400);
   }
@@ -316,6 +325,16 @@ async function handleInviteCreate(eventId: string, request: Request, db: D1Datab
   }, 201);
 }
 
+async function handleAccountDisplayName(request: Request, db: D1Database, user: YingxiangAuthenticatedUser): Promise<Response> {
+  const body = await parseJsonObject(request);
+  if (!body) return json({ ok: false, error: "INVALID_JSON" }, 400);
+  const displayName = normalizeName(body.displayName);
+  const length = Array.from(displayName).length;
+  if (!displayName || length < 1 || length > 64) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_INVALID" }, 400);
+  await db.prepare("UPDATE users SET display_name = ?1 WHERE user_id = ?2").bind(displayName, user.userId).run();
+  return json({ ok: true, displayName });
+}
+
 async function handleCalibrationCreate(eventId: string, request: Request, db: D1Database, user: YingxiangAuthenticatedUser): Promise<Response> {
   const event = await eventById(db, eventId);
   if (!event || event.owner_user_id !== user.userId) return json({ ok: false, error: "YINGXIANG_EVENT_NOT_FOUND" }, 404);
@@ -376,6 +395,7 @@ export async function handleYingxiangAuthenticatedRoute(
   publicAppUrl?: string
 ): Promise<Response | undefined> {
   if (url.pathname === "/api/v1/yingxiang/events" && request.method === "POST") return handleEventCreate(request, db, user);
+  if (url.pathname === "/api/v1/yingxiang/account-display-name" && request.method === "POST") return handleAccountDisplayName(request, db, user);
 
   const inviteMatch = url.pathname.match(/^\/api\/v1\/yingxiang\/events\/([^/]+)\/invites$/u);
   if (inviteMatch && request.method === "POST") return handleInviteCreate(decodeURIComponent(inviteMatch[1]), request, db, user, publicAppUrl);
