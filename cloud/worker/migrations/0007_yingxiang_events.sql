@@ -54,16 +54,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_yingxiang_active_account_unique
 
 CREATE TRIGGER IF NOT EXISTS trg_yingxiang_participant_invite_guard
 BEFORE INSERT ON yingxiang_participants
+WHEN NOT EXISTS (
+  SELECT 1 FROM yingxiang_invites i
+  WHERE i.invite_id = NEW.invite_id
+    AND i.event_id = NEW.event_id
+    AND i.revoked_at IS NULL
+    AND i.expires_at > NEW.joined_at
+    AND (i.max_uses IS NULL OR i.use_count < i.max_uses)
+    AND i.event_revision = (SELECT e.event_revision FROM yingxiang_events e WHERE e.event_id = NEW.event_id)
+)
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM yingxiang_invites i
-    WHERE i.invite_id = NEW.invite_id
-      AND i.event_id = NEW.event_id
-      AND i.revoked_at IS NULL
-      AND i.expires_at > NEW.joined_at
-      AND (i.max_uses IS NULL OR i.use_count < i.max_uses)
-      AND i.event_revision = (SELECT e.event_revision FROM yingxiang_events e WHERE e.event_id = NEW.event_id)
-  ) THEN RAISE(ABORT, 'YINGXIANG_INVITE_UNAVAILABLE') END;
+  SELECT RAISE(ABORT, 'YINGXIANG_INVITE_UNAVAILABLE');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_yingxiang_participant_name_guard
@@ -72,13 +73,14 @@ WHEN COALESCE(json_extract(
   (SELECT e.policy_json FROM yingxiang_events e WHERE e.event_id = NEW.event_id),
   '$.participantName.uniqueWithinEvent'
 ), 1) = 1
+AND EXISTS (
+  SELECT 1 FROM yingxiang_participants p
+  WHERE p.event_id = NEW.event_id
+    AND p.status = 'active'
+    AND p.display_name = NEW.display_name
+)
 BEGIN
-  SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM yingxiang_participants p
-    WHERE p.event_id = NEW.event_id
-      AND p.status = 'active'
-      AND p.display_name = NEW.display_name
-  ) THEN RAISE(ABORT, 'YINGXIANG_PARTICIPANT_NAME_CONFLICT') END;
+  SELECT RAISE(ABORT, 'YINGXIANG_PARTICIPANT_NAME_CONFLICT');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_yingxiang_participant_invite_consume
@@ -100,18 +102,24 @@ CREATE TABLE IF NOT EXISTS yingxiang_calibration_groups (
 CREATE INDEX IF NOT EXISTS idx_yingxiang_calibration_event
   ON yingxiang_calibration_groups(event_id, created_at);
 
+CREATE TRIGGER IF NOT EXISTS trg_yingxiang_calibration_repeat_guard
+BEFORE INSERT ON yingxiang_calibration_groups
+WHEN json_array_length(NEW.event_sample_ids_json) < 2
+BEGIN
+  SELECT RAISE(ABORT, 'YINGXIANG_CALIBRATION_REQUIRES_REPEAT');
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_yingxiang_calibration_manifest_guard
 BEFORE INSERT ON yingxiang_calibration_groups
-BEGIN
-  SELECT CASE WHEN json_array_length(NEW.event_sample_ids_json) < 2
-    THEN RAISE(ABORT, 'YINGXIANG_CALIBRATION_REQUIRES_REPEAT') END;
-  SELECT CASE WHEN EXISTS (
+WHEN EXISTS (
+  SELECT 1
+  FROM json_each(NEW.event_sample_ids_json) requested
+  WHERE NOT EXISTS (
     SELECT 1
-    FROM json_each(NEW.event_sample_ids_json) requested
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM json_each((SELECT e.manifest_json FROM yingxiang_events e WHERE e.event_id = NEW.event_id), '$.samples') sample
-      WHERE json_extract(sample.value, '$.eventSampleId') = requested.value
-    )
-  ) THEN RAISE(ABORT, 'YINGXIANG_CALIBRATION_UNKNOWN_EVENT_SAMPLE') END;
+    FROM json_each((SELECT e.manifest_json FROM yingxiang_events e WHERE e.event_id = NEW.event_id), '$.samples') sample
+    WHERE json_extract(sample.value, '$.eventSampleId') = requested.value
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'YINGXIANG_CALIBRATION_UNKNOWN_EVENT_SAMPLE');
 END;
