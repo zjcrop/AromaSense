@@ -202,6 +202,19 @@ async function click(cdp, selector) {
   requireCondition(clicked === true, `Unable to click ${selector}`);
 }
 
+async function pointerTap(cdp, selector) {
+  const tapped = await cdp.evaluate(`(() => {
+    const node = document.querySelector(${jsString(selector)});
+    if (!(node instanceof HTMLElement)) return false;
+    const rect = node.getBoundingClientRect();
+    const init = { bubbles: true, pointerId: 17, pointerType: 'mouse', clientX: rect.left + 8, clientY: rect.top + 8 };
+    node.dispatchEvent(new PointerEvent('pointerdown', init));
+    node.dispatchEvent(new PointerEvent('pointerup', init));
+    return true;
+  })()`);
+  requireCondition(tapped === true, `Unable to pointer-tap ${selector}`);
+}
+
 async function runAcceptance(appUrl) {
   const executable = chromeExecutable();
   const debugPort = await freePort();
@@ -271,16 +284,19 @@ async function runAcceptance(appUrl) {
     await cdp.send("Page.reload", { ignoreCache: true });
     await waitForExpression(cdp, `typeof window.__aromasenseAcceptanceBeforeReload === 'undefined' && document.querySelector('#app')?.dataset.screen === 'setup'`, "setup after hard browser refresh", 60_000);
 
-    await click(cdp, '[data-history-group="unfinished"] .batch-setup__history-toggle');
+    await click(cdp, '[data-home-action="records"]');
+    await waitForExpression(cdp, `Boolean(document.querySelector('.home-modal .session-records__scopes'))`, "records modal after reload");
+    await click(cdp, '.home-modal [data-record-scope-tab="unfinished"]');
     const historyMeta = await waitForExpression(cdp, `(() => {
-      const group = document.querySelector('[data-history-group="unfinished"]');
-      const item = group?.querySelector('.batch-setup__history-item');
-      if (!item || item.closest('.batch-setup__history-list')?.hidden) return false;
-      return item.querySelector('.batch-setup__history-meta')?.textContent?.trim() || false;
-    })()`, "unfinished session after reload");
-    requireCondition(/1\s*个样品/.test(historyMeta) && /进行中/.test(historyMeta), `Recovered session metadata is wrong: ${historyMeta}`);
+      const item = document.querySelector('.home-modal .session-records__list[data-record-scope="unfinished"] .session-record');
+      if (!item) return false;
+      const sampleMeta = item.querySelector('.session-record__line--secondary')?.textContent?.trim() || '';
+      const status = item.dataset.sessionStatus || '';
+      return { sampleMeta, status };
+    })()`, "unfinished session in records after reload");
+    requireCondition(/1\s*个样品/.test(historyMeta.sampleMeta) && /draft|active/.test(historyMeta.status), `Recovered session metadata is wrong: ${JSON.stringify(historyMeta)}`);
 
-    await click(cdp, '[data-history-group="unfinished"] .batch-setup__history-item');
+    await pointerTap(cdp, '.home-modal .session-records__list[data-record-scope="unfinished"] .session-record');
     await waitForExpression(cdp, `document.querySelector('#app')?.dataset.screen === 'cupping'`, "reopened unfinished session");
     await click(cdp, ".sample-rail__select");
     await waitForExpression(cdp, `Boolean(document.querySelector('.sensory-range__input')) && document.querySelector('#app')?.getAttribute('aria-busy') !== 'true'`, "reopened active sensory stage");
