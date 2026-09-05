@@ -57,9 +57,13 @@ GitHub Pages 部署基础设施已经启用。当前发布流程要求仓库变�
 - OCR 行坐标、图像尺寸和 polygon 结构；
 - 多样品版面分割；
 - 国家、处理法、海拔、烘焙日期等字段的语义决策与冲突复核；
+- 对低置信度自动分区进行人工复核：可合并、拆分、调整边界并按边界重新归属 OCR 文字；
+- 手工调整分区后重新调用正式 LuckyBean / Coffee Foundation 语义解析，不在 AromaSense 内维护第二套字段解析规则；
 - 识别结果人工确认后再建立 Session。
 
-真实设备 OCR、复杂标签手工分区调整、分区后二次 ROI OCR 仍处于验收/开发阶段。
+手工分区后的识别元数据使用 `aromasense-recognition/3.3`，并记录 `manualSegmentation=true`。该流程只重新组合已经由正式 OCR 产生的文字与几何证据，不在浏览器主线程重新解码或压缩整张原图。
+
+真实设备 OCR 和分区后的像素级 ROI 二次 OCR 仍处于验收/开发阶段。ROI 二次 OCR 必须通过正式 Recognition/Foundation 的 Worker 或 Android native crop 接口实现，不允许为了该功能恢复高分辨率图片的主线程 Canvas 处理。
 
 ## 感官数据原则
 
@@ -95,6 +99,7 @@ B0.2.a 已建立以下自动化验收：
 - revision 幂等、冲突和中断恢复；
 - 100 样品压力测试；
 - OCR 版面分割和字段语义决策测试；
+- 手工分区 merge / split / region reassignment / Foundation reparse / 重复文字冲突测试；
 - Worker typecheck；
 - Android `assembleDebug`。
 
