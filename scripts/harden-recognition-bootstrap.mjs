@@ -9,29 +9,24 @@ const outputs = [
 const key = "aromasense.luckybean-recognition-book.v1";
 const runtimeMarker = "__AROMASENSE_RECOGNITION_BOOK__";
 
-function harden(html, filename) {
-  if (html.includes(runtimeMarker)) return html;
+function optimize(html, filename) {
+  const cacheMarker = `localStorage.setItem(${JSON.stringify(key)},`;
+  if (!html.includes(cacheMarker)) throw new Error(`Recognition bootstrap not found in ${filename}`);
 
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(
-    `<script>\\(\\(\\)=>\\{try\\{localStorage\\.setItem\\((\"${escapedKey}\"),(.+)\\);\\}catch\\(_\\)\\{\\}\\}\\)\\(\\);<\\/script>`
-  );
-  const match = html.match(pattern);
-  if (!match) throw new Error(`Recognition bootstrap not found in ${filename}`);
-
-  const [, keyLiteral, payloadLiteral] = match;
-  const replacement = `<script>(()=>{const raw=${payloadLiteral};try{globalThis.${runtimeMarker}=JSON.parse(raw);}catch(_){globalThis.${runtimeMarker}=undefined;}try{localStorage.setItem(${keyLiteral},raw);}catch(_){}})();</script>`;
-  const next = html.replace(pattern, replacement);
-
-  if (!next.includes(runtimeMarker) || !next.includes(`localStorage.setItem(${keyLiteral},raw)`)) {
-    throw new Error(`Recognition bootstrap hardening failed for ${filename}`);
+  // Do not JSON.parse the full recognition/codebook payload at application boot.
+  // Keeping the serialized source in localStorage allows LuckyBean/Foundation to
+  // materialize it only when the user actually starts recognition or canonical
+  // resolution. This removes one large always-resident object graph from the
+  // normal homepage lifecycle while retaining offline recognition capability.
+  if (html.includes(`globalThis.${runtimeMarker}=JSON.parse(raw)`)) {
+    throw new Error(`Eager in-memory recognition book leaked into ${filename}`);
   }
-  return next;
+  return html;
 }
 
 for (const filename of outputs) {
   const html = await readFile(filename, "utf8");
-  await writeFile(filename, harden(html, filename), "utf8");
+  await writeFile(filename, optimize(html, filename), "utf8");
 }
 
-console.log("Recognition bootstrap hardened: in-memory primary + localStorage fallback");
+console.log("Recognition bootstrap optimized: serialized cache + lazy in-memory materialization");

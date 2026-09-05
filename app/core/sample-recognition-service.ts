@@ -9,6 +9,7 @@ import {
   type LuckyBeanRecognitionAnalysis
 } from "./luckybean-upstream-adapter";
 import { segmentSamples, type SampleLayoutType, type SampleLayoutSegment } from "./sample-layout-segmenter";
+import { refineAmbiguousSingleSampleLayout } from "./sample-multi-entry-refinement";
 
 export interface SampleRecognitionProgress {
   index: number;
@@ -308,7 +309,8 @@ export class SampleRecognitionService {
       sourceHeight: result.sourceHeight,
       fallbackText: rawText
     });
-    const layout = segmentSamples(document);
+    const primaryLayout = segmentSamples(document);
+    const layout = refineAmbiguousSingleSampleLayout(document, primaryLayout);
     const engine = result.engine ?? "OCR";
     const samples = layout.segments.map((segment, sampleIndex) => {
       const analysis = analyzeWithLuckyBean(segment, id, engine);
