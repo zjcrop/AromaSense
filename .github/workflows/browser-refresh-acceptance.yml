@@ -30,34 +30,10 @@ jobs:
           curl --fail --silent --show-error --location --retry 3 --retry-delay 2 "${base}app.js" -o /tmp/aromasense-live-app.js
           test -s /tmp/aromasense-live-app.js
           echo "Live Pages entrypoint and app.js are reachable"
-      - name: Verify live Pages renders in Chrome
-        shell: bash
-        run: |
-          set -euo pipefail
-          google-chrome --version
-          set +e
-          timeout 75s google-chrome \
-            --headless=new \
-            --disable-gpu \
-            --disable-dev-shm-usage \
-            --no-sandbox \
-            --no-first-run \
-            --virtual-time-budget=30000 \
-            --dump-dom 'https://zjcrop.github.io/AromaSense/' \
-            >/tmp/aromasense-live-dom.html 2>/tmp/aromasense-live-chrome.log
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ]; then
-            cat /tmp/aromasense-live-chrome.log
-            exit "$status"
-          fi
-          grep -Fq 'data-screen="setup"' /tmp/aromasense-live-dom.html || {
-            echo '::error::Live Pages did not reach the setup screen in Chrome'
-            grep -Eo 'AromaSense 启动失败[^<]*|startup[^<]*|data-screen="[^"]+"' /tmp/aromasense-live-dom.html | tail -n 30 || true
-            cat /tmp/aromasense-live-chrome.log || true
-            exit 1
-          }
-          echo 'Live Pages rendered to setup screen in Chrome'
+      - name: Diagnose live Pages startup in Chrome
+        env:
+          AROMASENSE_ACCEPTANCE_DEBUG: '1'
+        run: node scripts/live-pages-smoke.mjs
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
       - name: Build browser application
