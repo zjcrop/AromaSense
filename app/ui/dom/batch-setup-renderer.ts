@@ -5,6 +5,7 @@ import {
   type BatchSetupRendererOptions as BaseBatchSetupRendererOptions,
   type RecentSessionItem
 } from "./batch-setup-review-renderer";
+import { SegmentationReviewRecognitionService } from "./segmentation-review-recognizer";
 
 export interface BatchSetupRendererOptions extends BaseBatchSetupRendererOptions {
   onOpenRecent?(sessionId: string, readOnly: boolean): void | Promise<void>;
@@ -215,7 +216,7 @@ export class BatchSetupRenderer {
   ) {
     installInlineFieldStyles();
     installHomeStyles();
-    this.base = new BaseBatchSetupRenderer(root, service, recognizer, options);
+    this.base = new BaseBatchSetupRenderer(root, service, new SegmentationReviewRecognitionService(recognizer, root), options);
   }
 
   async render(): Promise<void> {
