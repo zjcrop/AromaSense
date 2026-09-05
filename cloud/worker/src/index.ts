@@ -1,5 +1,6 @@
 import { decodeProtectedHeader, importX509, jwtVerify, type JWTPayload } from "jose";
 import { createZhipuAiAdapter } from "../.foundation/runtime/ai-adapter.mjs";
+import { handleYingxiangAuthenticatedRoute, handleYingxiangPublicRoute } from "./yingxiang-api";
 
 interface Env {
   DB?: D1Database;
@@ -256,6 +257,11 @@ export default {
     }
 
     if (!env.DB) return dbUnavailable();
+    if (url.pathname.startsWith("/api/v1/yingxiang/invites/")) {
+      const optionalUser = await authenticate(request, env.DB) ?? undefined;
+      const response = await handleYingxiangPublicRoute(request, url, env.DB, optionalUser);
+      if (response) return response;
+    }
     if (url.pathname.startsWith("/api/v1/share/") && request.method === "GET") {
       const token = decodeURIComponent(url.pathname.slice("/api/v1/share/".length));
       return handleShareGet(token, env.DB);
@@ -269,6 +275,9 @@ export default {
     if (url.pathname === "/api/v1/auth/me" && request.method === "GET") return json({ ok: true, userId: user.userId, email: user.email });
     if (url.pathname === "/api/v1/ai/enrich-samples" && request.method === "POST") return handleAiEnrichment(request, env);
     if (url.pathname === "/api/v1/share" && request.method === "POST") return handleShareCreate(request, env, user);
+
+    const yingxiangResponse = await handleYingxiangAuthenticatedRoute(request, url, env.DB, user, env.PUBLIC_APP_URL);
+    if (yingxiangResponse) return yingxiangResponse;
 
     if (url.pathname === "/api/v1/revisions") {
       if (request.method === "POST") return handleRevisionPost(request, env.DB, user);

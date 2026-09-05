@@ -4,11 +4,13 @@ import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import workflowMigration from "../storage/0003_workflow_event_comparison.sql";
 import submissionMigration from "../storage/0004_submission_revisions.sql";
 import sessionTimingMigration from "../storage/0005_session_timing.sql";
+import yingxiangEventMigration from "../storage/0006_yingxiang_event_context.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import { AromaSenseDomApp } from "./dom-app";
+import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
   if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
@@ -23,11 +25,13 @@ async function main(): Promise<void> {
   if (!root) throw new Error("APP_ROOT_NOT_FOUND");
 
   let app: AromaSenseDomApp | undefined;
+  let yingxiang: YingxiangBrowserBootstrap | undefined;
   const startup = new StartupRenderer(root, {
     onEnter: async () => {
       if (!app) return;
       startup.setEntering();
       await app.start();
+      await yingxiang?.openPendingInvite();
     }
   });
   root.classList.add("startup-screen");
@@ -43,21 +47,35 @@ async function main(): Promise<void> {
       { id: 2, name: "session_metadata_0_1c", sql: sessionMetadataMigration },
       { id: 3, name: "workflow_event_comparison_0_2", sql: workflowMigration },
       { id: 4, name: "submission_revisions_0_2", sql: submissionMigration },
-      { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration }
+      { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration },
+      { id: 6, name: "yingxiang_event_context_0_1", sql: yingxiangEventMigration }
     ],
     new Date().toISOString()
   );
   startup.setStatus("database", "ready", "本地数据库与迁移已就绪");
 
+  const now = () => new Date().toISOString();
+  const cloudBaseUrl = document.documentElement.dataset.cloudBaseUrl || undefined;
+  const createSessionId = () => crypto.randomUUID();
+  const createSampleId = () => crypto.randomUUID();
   app = new AromaSenseDomApp(root, db, {
-    now: () => new Date().toISOString(),
-    createSessionId: () => crypto.randomUUID(),
-    createSampleId: () => crypto.randomUUID(),
+    now,
+    createSessionId,
+    createSampleId,
     observationIdFactory: (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`,
-    cloudBaseUrl: document.documentElement.dataset.cloudBaseUrl || undefined,
+    cloudBaseUrl,
     firebaseApiKey: document.documentElement.dataset.firebaseApiKey || undefined,
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
+
+  yingxiang = new YingxiangBrowserBootstrap(root, db, {
+    now,
+    createSessionId,
+    createSampleId,
+    onOpenSession: (sessionId) => app?.openSession(sessionId),
+    cloudBaseUrl
+  });
+  yingxiang.start();
 
   startup.setStatus("recognition", "ready", "图像识别按需加载；首次识别时初始化");
   startup.allowEnter();
