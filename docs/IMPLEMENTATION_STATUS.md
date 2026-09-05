@@ -1,6 +1,6 @@
 # AromaSense Implementation Status
 
-Updated: 2026-08-25
+Updated: 2026-09-05
 
 > This file records **observed product capability**, not merely the existence of a model, interface, or renderer. Automated acceptance and physical/runtime acceptance are distinguished explicitly. A feature that depends on external infrastructure is not treated as complete until that infrastructure has been exercised.
 
@@ -51,11 +51,6 @@ Updated: 2026-08-25
 - [x] registration client contract tests: pending verification, missing email service, verified login
 - [x] Pages workflow refuses to publish a connected-account build when `AROMASENSE_CLOUD_URL` is absent
 - [x] Cloud deploy workflow validates D1, Email Service sender and public URLs before deployment
-- [ ] Cloudflare D1 binding verified in the real environment
-- [ ] D1 migrations executed remotely and verified
-- [ ] Cloudflare Email Service sender/domain verified and `EMAIL` binding active
-- [ ] production `AROMASENSE_CLOUD_URL` configured in GitHub repository variables
-- [ ] production `AROMASENSE_EMAIL_FROM` and `AROMASENSE_PUBLIC_APP_URL` configured
 - [ ] real register → email receipt → verify → login acceptance test
 - [ ] real authenticated revision write/read/idempotency/conflict acceptance test
 - [ ] cross-device restore acceptance test
@@ -65,18 +60,20 @@ Updated: 2026-08-25
 ### Session setup and sample intake
 - [x] manual multi-sample setup and automatic numbering
 - [x] camera input and multi-image gallery input wired into setup UI
-- [x] serial batch recognition service with native/TextDetector/Tesseract fallback chain
+- [x] serial batch recognition service with production Foundation OCR path
 - [x] OCR layout model with line polygons and image geometry
 - [x] multi-sample OCR layout segmentation tests
 - [x] semantic field-decision tests for roast date, altitude, country leakage and conflicting values
 - [x] OCR original text and parsed sample metadata stored in `samples.metadata_json`
 - [x] recognition result remains editable before Session creation
-- [x] Android native ML Kit Chinese/Latin OCR bridge ported and build-validated
+- [x] Android native recognition bridge ported and build-validated
+- [x] OCR segmentation manual merge / split / region-adjust interaction — automated domain/UI integration implemented; `aromasense-recognition/3.3`
 - [ ] batch photo recognition runtime acceptance on current GitHub Pages build
 - [ ] Android native OCR real-device acceptance with camera and gallery originals
-- [ ] synonym/field-resolution coverage brought to LuckyBean production parity
-- [ ] OCR segmentation manual merge / split / region-adjust interaction
-- [ ] segmented ROI second-pass OCR refinement
+- [ ] physical touch acceptance of manual segmentation review on phone/tablet
+- [ ] segmented ROI pixel-level second-pass OCR refinement
+
+The manual segmentation flow intentionally operates on the OCR geometry/evidence already produced by the production Recognition/Foundation path. It supports region-bound adjustment, line reassignment, adjacent merge, horizontal split, deletion and label correction, then re-runs the official Foundation semantic analyzer. It does **not** decode/re-encode the original high-resolution image on the UI thread. Pixel-level ROI second-pass OCR remains blocked until a Worker/native crop contract is available in the shared recognition base.
 
 ### Left sample sticky-note rail
 - [x] sample rail state model
@@ -95,19 +92,21 @@ Updated: 2026-08-25
 - [x] dictionary-driven slider/score/toggle/text/tag controls
 - [x] persistent flavor group collapse/order
 - [x] persistent descriptor/tag ordering
-- [x] preparation/aroma/high/mid/low/final workflow
+- [x] aroma/high/mid/low/flavor/overall/score workflow for new sessions; legacy preparation/final compatibility retained
 - [x] browser voice prompt adapter
 - [x] final radar summary
 - [x] bottom action bar `退出 / 上一步 / 下一步`
-- [x] Next completes the current stage before moving forward
+- [x] Next requires the current stage completion contract before moving forward
 - [x] Exit flushes pending writes instead of deleting the Session
 - [x] setup screen lists unfinished local Sessions for resume
+- [x] browsing alone does not start a stage or Session; meaningful saved sensory input does
 - [ ] exit/resume runtime acceptance after browser refresh
 - [ ] Android process-kill resume acceptance
 - [ ] small-screen scrolling acceptance
 
 ### Product shell
-- [x] Account / Sync entry on setup screen
+- [x] four-section homepage structure
+- [x] Account / Records homepage modal entry
 - [x] Account / Sync actions available from the cupping rail
 - [x] cloud-not-configured state shown explicitly instead of hiding account UI
 - [x] local sync-queue counts shown in account panel
@@ -124,14 +123,14 @@ Updated: 2026-08-25
 - [x] multi-sample stress test — 100 samples, slice-scoped observation loading
 - [x] schema migration compatibility — automated close/reopen/forward migration test
 - [ ] camera/gallery recognition stress and cancellation handling
-- [ ] real Cloudflare authenticated round-trip
+- [ ] real authenticated cloud round-trip and cross-device restore
 
-## Current release gate
+## Current development gate
 
-The Local-first core is no longer the primary blocker. On 2026-08-25 the TypeScript strict-mode failures, Node 24 test discovery issue, Node SQLite row-shape mismatch and invalid sync-test fixtures were corrected. CI run #171 completed successfully, including TypeScript/tests, WebView bundle, Worker typecheck and Android `assembleDebug`.
+B0.2.a core product code, Web/Cloud deployment path, Local-first persistence, workflow completion semantics, sample intake/canonicalization, comparison/export and immutable Submission revisions are already in the main development line.
 
-The registration failure found during manual testing is now isolated to production infrastructure. The Worker intentionally rejects registration when Email Service is not configured, and the Pages workflow now intentionally rejects a deployment when `AROMASENSE_CLOUD_URL` is missing. This prevents a visually complete but non-functional account UI from being published as an accepted build.
+The current recognition hardening batch closes the previously missing manual OCR segmentation interaction at the automated engineering level. It does not claim physical-device acceptance. The next recognition-layer dependency is a safe shared ROI crop/re-recognition contract; that capability belongs in the shared Recognition/Foundation base rather than a private AromaSense image-processing fallback.
 
-The next hard gate is therefore external-cloud acceptance: configure the real Worker URL, D1 database, verified Email Service sender, apply migrations, then exercise `register → email → verify → login → revision upload/read → restore`. Until that chain passes, account/cloud synchronization remains incomplete.
+APK formal signing/publishing is intentionally not part of the current gate. Remaining acceptance work is primarily real-browser/real-device recovery and touch testing, authenticated cloud round-trip/cross-device restore, and later pixel-level ROI second-pass OCR after the shared base exposes a safe crop path.
 
-LuckyBean remains a reference implementation for recognition vocabulary, account/sync UX and wizard navigation patterns. AromaSense retains its own Session/Sample Local-first storage model and does not import LuckyBean inventory/business logic wholesale.
+LuckyBean remains a reference/upstream implementation for recognition vocabulary and the shared production recognition runtime. AromaSense retains its own Session/Sample Local-first storage model and does not import LuckyBean inventory/business logic wholesale.
