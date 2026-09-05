@@ -31,6 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_yingxiang_invites_event
 
 CREATE TABLE IF NOT EXISTS yingxiang_participants (
   participant_id TEXT PRIMARY KEY,
+  join_request_id TEXT NOT NULL UNIQUE,
   event_id TEXT NOT NULL REFERENCES yingxiang_events(event_id) ON DELETE CASCADE,
   invite_id TEXT NOT NULL REFERENCES yingxiang_invites(invite_id) ON DELETE RESTRICT,
   account_user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL,
