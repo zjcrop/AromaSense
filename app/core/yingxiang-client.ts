@@ -11,101 +11,62 @@ export interface YingxiangRemoteEvent {
   createdAt: string;
   updatedAt: string;
 }
-
 export interface YingxiangInviteResult {
-  inviteId: string;
-  eventId: string;
-  eventRevision: number;
-  token: string;
-  expiresAt: string;
-  maxUses: number | null;
+  inviteId: string; eventId: string; eventRevision: number; token: string; expiresAt: string; maxUses: number | null;
   share: { deepLink: string; webUrl?: string };
 }
-
 export interface YingxiangInvitePreview {
   event: YingxiangRemoteEvent;
   invite: { inviteId: string; assignedName?: string; expiresAt: string; remainingUses: number | null };
 }
-
 export interface YingxiangJoinedPrincipal {
   schemaVersion: "yingxiang-principal/0.1";
-  participantId: string;
-  eventId: string;
-  identityKind: "guest" | "account";
-  accountUserId?: string;
-  displayName: string;
-  accountDisplayNameHidden: true;
-  status: "active";
-  boundAt: string;
+  participantId: string; eventId: string; identityKind: "guest" | "account"; accountUserId?: string;
+  displayName: string; accountDisplayNameHidden: true; status: "active"; boundAt: string;
 }
 
 export class YingxiangClientError extends Error {
   constructor(public readonly code: string, public readonly status: number, message?: string) {
-    super(message || code);
-    this.name = "YingxiangClientError";
+    super(message || code); this.name = "YingxiangClientError";
   }
 }
 
 export class YingxiangClient {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly token: () => Promise<string | undefined>
-  ) {}
+  constructor(private readonly baseUrl: string, private readonly token: () => Promise<string | undefined>) {}
 
   async createEvent(input: { title: string; policy: YingxiangEventPolicy; manifest: YingxiangEventManifest; publish?: boolean }): Promise<YingxiangRemoteEvent> {
     const response = await this.request("/api/v1/yingxiang/events", { method: "POST", body: input, auth: true });
     return this.requireObject(response, "event") as unknown as YingxiangRemoteEvent;
   }
-
   async createInvite(eventId: string, input: { assignedName?: string; expiresAt?: string; maxUses?: number | null } = {}): Promise<YingxiangInviteResult> {
-    return await this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/invites`, {
-      method: "POST", body: input, auth: true
-    }) as unknown as YingxiangInviteResult;
+    return await this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/invites`, { method: "POST", body: input, auth: true }) as unknown as YingxiangInviteResult;
   }
-
   async previewInvite(token: string): Promise<YingxiangInvitePreview> {
     const response = await this.request(`/api/v1/yingxiang/invites/${encodeURIComponent(token)}`, { method: "GET" });
-    return {
-      event: this.requireObject(response, "event") as unknown as YingxiangRemoteEvent,
-      invite: this.requireObject(response, "invite") as unknown as YingxiangInvitePreview["invite"]
-    };
+    return { event: this.requireObject(response, "event") as unknown as YingxiangRemoteEvent, invite: this.requireObject(response, "invite") as unknown as YingxiangInvitePreview["invite"] };
   }
-
-  async joinInvite(token: string, input: { displayName?: string; nameSource?: "custom" | "account" }): Promise<{ principal: YingxiangJoinedPrincipal; event: YingxiangRemoteEvent }> {
-    const response = await this.request(`/api/v1/yingxiang/invites/${encodeURIComponent(token)}/join`, {
-      method: "POST", body: input, optionalAuth: true
-    });
+  async joinInvite(token: string, input: { joinRequestId: string; displayName?: string; nameSource?: "custom" | "account" }): Promise<{ principal: YingxiangJoinedPrincipal; event: YingxiangRemoteEvent; replayed: boolean }> {
+    const response = await this.request(`/api/v1/yingxiang/invites/${encodeURIComponent(token)}/join`, { method: "POST", body: input, optionalAuth: true });
     return {
       principal: this.requireObject(response, "principal") as unknown as YingxiangJoinedPrincipal,
-      event: this.requireObject(response, "event") as unknown as YingxiangRemoteEvent
+      event: this.requireObject(response, "event") as unknown as YingxiangRemoteEvent,
+      replayed: response.replayed === true
     };
   }
-
   async setAccountDisplayName(displayName: string): Promise<string> {
-    const response = await this.request("/api/v1/yingxiang/account-display-name", {
-      method: "POST", body: { displayName }, auth: true
-    });
+    const response = await this.request("/api/v1/yingxiang/account-display-name", { method: "POST", body: { displayName }, auth: true });
     const value = response.displayName;
     if (typeof value !== "string" || !value.trim()) throw new YingxiangClientError("INVALID_SERVER_RESPONSE", 200);
     return value;
   }
-
   async createCalibrationGroup(eventId: string, input: { canonicalSampleId: string; eventSampleIds: readonly string[]; revealPolicy?: "after_event" | "organizer_only" }): Promise<Record<string, unknown>> {
-    return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/calibration-groups`, {
-      method: "POST", body: { ...input, eventSampleIds: [...input.eventSampleIds] }, auth: true
-    });
+    return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/calibration-groups`, { method: "POST", body: { ...input, eventSampleIds: [...input.eventSampleIds] }, auth: true });
   }
-
   async completeEvent(eventId: string): Promise<Record<string, unknown>> {
     return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/complete`, { method: "POST", body: {}, auth: true });
   }
 
-  private async request(path: string, options: {
-    method: "GET" | "POST";
-    body?: Record<string, unknown>;
-    auth?: boolean;
-    optionalAuth?: boolean;
-  }): Promise<Record<string, unknown>> {
+  private async request(path: string, options: { method: "GET" | "POST"; body?: Record<string, unknown>; auth?: boolean; optionalAuth?: boolean }): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = { accept: "application/json" };
     if (options.body) headers["content-type"] = "application/json";
     if (options.auth || options.optionalAuth) {
@@ -114,15 +75,8 @@ export class YingxiangClient {
       if (token) headers.authorization = `Bearer ${token}`;
     }
     let response: Response;
-    try {
-      response = await fetch(new URL(path, this.baseUrl).href, {
-        method: options.method,
-        headers,
-        body: options.body ? JSON.stringify(options.body) : undefined
-      });
-    } catch {
-      throw new YingxiangClientError("NETWORK_ERROR", 0, "当前无法连接迎香服务。杯测本地记录仍可继续使用。");
-    }
+    try { response = await fetch(new URL(path, this.baseUrl).href, { method: options.method, headers, body: options.body ? JSON.stringify(options.body) : undefined }); }
+    catch { throw new YingxiangClientError("NETWORK_ERROR", 0, "当前无法连接迎香服务。杯测本地记录仍可继续使用。"); }
     let payload: unknown;
     try { payload = await response.json(); }
     catch { throw new YingxiangClientError("INVALID_SERVER_RESPONSE", response.status, "迎香服务返回了无法解析的数据。"); }
@@ -134,7 +88,6 @@ export class YingxiangClient {
     }
     return value;
   }
-
   private requireObject(value: Record<string, unknown>, key: string): Record<string, unknown> {
     const candidate = value[key];
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new YingxiangClientError("INVALID_SERVER_RESPONSE", 200);
@@ -155,6 +108,8 @@ function messageForYingxiangError(code: string): string {
     YINGXIANG_INVITE_EXHAUSTED: "该邀请的可用次数已经用完。",
     YINGXIANG_INVITE_STALE_REVISION: "活动已更新，这个旧邀请已失效。",
     YINGXIANG_EVENT_NOT_JOINABLE: "当前活动不能再加入。",
+    YINGXIANG_JOIN_REQUEST_ID_INVALID: "加入请求标识无效，请重新打开邀请。",
+    YINGXIANG_JOIN_IDEMPOTENCY_CONFLICT: "该加入请求与之前记录不一致，已停止重复写入。",
     YINGXIANG_PARTICIPANT_NAME_INVALID: "参与名称不符合主办方设定的规则。",
     YINGXIANG_PARTICIPANT_NAME_CONFLICT: "该参与名称在本次活动中已经被使用。",
     YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME: "选择个人账户名称参与时必须先登录。",
