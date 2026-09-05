@@ -45,24 +45,22 @@ function embeddedBook(html) {
   const runtimeMatch = html.match(runtimeRegex);
   if (runtimeMatch) return JSON.parse(JSON.parse(runtimeMatch[1]));
 
-  // Retain a legacy parser only to make failures diagnostic when an old build
-  // accidentally bypasses the hardening step. The loop below still requires
-  // the runtime-memory marker, so a legacy-only artifact cannot pass CI.
-  const legacyRegex = new RegExp(
+  const cacheRegex = new RegExp(
     `localStorage\\.setItem\\(${JSON.stringify(recognitionCacheKey).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,\\s*${encodedJsonString}\\)`
   );
-  const legacyMatch = html.match(legacyRegex);
-  if (legacyMatch) return JSON.parse(JSON.parse(legacyMatch[1]));
+  const cacheMatch = html.match(cacheRegex);
+  if (cacheMatch) return JSON.parse(JSON.parse(cacheMatch[1]));
 
   throw new Error(`Recognition bootstrap for ${recognitionCacheKey} not found`);
 }
 
-function assertHardenedBootstrap(html, label) {
-  if (!html.includes(`globalThis.${recognitionRuntimeKey}=JSON.parse(raw)`)) {
-    throw new Error(`${label}: in-memory recognition book bootstrap is missing`);
+function assertLazyBootstrap(html, label) {
+  if (html.includes(`globalThis.${recognitionRuntimeKey}=JSON.parse(raw)`)) {
+    throw new Error(`${label}: recognition book must not be parsed into the JS heap during startup`);
   }
-  if (!html.includes(`localStorage.setItem(${JSON.stringify(recognitionCacheKey)},raw)`)) {
-    throw new Error(`${label}: durable recognition book cache fallback is missing`);
+  const marker = `localStorage.setItem(${JSON.stringify(recognitionCacheKey)},`;
+  if (!html.includes(marker)) {
+    throw new Error(`${label}: durable serialized recognition-book cache is missing`);
   }
 }
 
@@ -192,7 +190,7 @@ const source = await fetchJson(codebookUrl);
 for (const output of outputs) {
   const html = await readFile(output, "utf8");
   const label = output.replace(`${root}/`, "");
-  assertHardenedBootstrap(html, label);
+  assertLazyBootstrap(html, label);
   const book = embeddedBook(html);
   if (book?.coffeeKnowledgeMeta?.qrIndexesChanged !== false) {
     throw new Error(`${label}: Coffee Knowledge compatibility marker missing`);
@@ -207,5 +205,5 @@ for (const output of outputs) {
   assertEntityResolutionSafety(book, label);
   assertKnowledgeOnlySubset(book, label);
   assertKnowledgeOnlyRuntime(book, label);
-  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; knowledgeOnlyVarieties=${book.coffeeKnowledgeMeta.knowledgeOnlyVarietyCount}; pipeline=${RECOGNITION_PIPELINE_VERSION}; runtimeMemory=true; localCacheFallback=true; QR indexes unchanged`);
+  console.log(`${label}: Coffee Knowledge ${book.coffeeKnowledgeMeta.version} verified; aliases=${book.coffeeKnowledgeMeta.aliasesApplied}; blockedEntities=${book.coffeeKnowledgeMeta.blockedAutomaticEntityResolutionCount}; knowledgeOnlyVarieties=${book.coffeeKnowledgeMeta.knowledgeOnlyVarietyCount}; pipeline=${RECOGNITION_PIPELINE_VERSION}; runtimeMemory=lazy; localCacheFallback=true; QR indexes unchanged`);
 }
