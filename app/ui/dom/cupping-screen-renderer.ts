@@ -416,7 +416,8 @@ export class CuppingScreenRenderer {
   }
 
   private applySampleLock(locked: boolean): void {
-    this.editorRoot.toggleAttribute("aria-readonly", locked);
+    if (locked) this.editorRoot.setAttribute("aria-readonly", "true");
+    else this.editorRoot.removeAttribute("aria-readonly");
     if (!locked) return;
     for (const control of this.editorRoot.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>("input, textarea, select, button")) {
       control.disabled = true;
