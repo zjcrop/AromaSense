@@ -52,11 +52,13 @@ test("Homepage header keeps only account while list actions and expandable recor
   assert.match(home, /min-height:68px!important/);
 });
 
-test("Homepage account and records stay in centered blurred modals after a record scope is selected", () => {
+test("Homepage account and records stay in centered lightweight modals after a record scope is selected", () => {
   assert.match(app, /onOpenAccount: \(\) => this\.showHomeAccountModal\(\)/);
   assert.match(app, /onOpenRecords: \(\) => this\.showHomeRecordsModal\(\)/);
-  assert.match(app, /\.home-modal\{position:fixed;inset:0;z-index:2200;display:grid;place-items:center/);
-  assert.match(app, /backdrop-filter:blur\(9px\)/);
+  const modalStyle = app.match(/\.home-modal\{[^}]+\}/)?.[0] ?? "";
+  assert.match(modalStyle, /position:fixed;inset:0;z-index:2200;display:grid;place-items:center/);
+  assert.match(modalStyle, /background:rgba\(0,0,0,\.74\)/);
+  assert.doesNotMatch(modalStyle, /backdrop-filter/);
   assert.match(app, /if \(event\.target === overlay\) close\(\)/);
   assert.match(app, /if \(event\.key === "Escape"\) close\(\)/);
   assert.match(app, /session-records__tool/);
