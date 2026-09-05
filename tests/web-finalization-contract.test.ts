@@ -6,6 +6,7 @@ const startup = readFileSync("app/ui/dom/startup-renderer.ts", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 const home = readFileSync("app/ui/dom/batch-setup-renderer.ts", "utf8");
 const app = readFileSync("app/runtime/dom-app.ts", "utf8");
+const records = readFileSync("app/ui/dom/session-records-renderer.ts", "utf8");
 const cupping = readFileSync("app/ui/dom/cupping-screen-renderer.ts", "utf8");
 const stableCupping = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");
 const cuppingCss = readFileSync("app/ui/dom/aromasense-cupping.css", "utf8");
@@ -32,11 +33,16 @@ test("Web homepage is a real four-section layout instead of legacy DOM with cosm
   assert.match(home, /actions\.replaceChildren\(\)/);
 });
 
-test("Homepage header only keeps account and records while import moves into the cupping list", () => {
+test("Homepage header keeps only account while list actions and records follow the requested hierarchy", () => {
   assert.match(home, /account\.textContent = "账户"/);
   assert.match(home, /records\.textContent = "记录"/);
-  assert.match(home, /captureActions\.append\(importButton\)/);
-  assert.match(home, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(home, /photo\?\.remove\(\)/);
+  assert.match(home, /clear\.textContent = "清空列表"/);
+  assert.match(home, /captureActions\.replaceChildren\(\.\.\.\[batch, manual, clear, importButton\]/);
+  assert.match(home, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(home, /footer\.append\(start\);\s*if \(this\.recordsButton\) footer\.append\(this\.recordsButton\)/);
+  assert.match(home, /font-size:23px!important/);
+  assert.match(home, /min-height:68px!important/);
 });
 
 test("Homepage account and records stay in centered blurred modals", () => {
@@ -46,15 +52,16 @@ test("Homepage account and records stay in centered blurred modals", () => {
   assert.match(app, /backdrop-filter:blur\(9px\)/);
   assert.match(app, /if \(event\.target === overlay\) close\(\)/);
   assert.match(app, /if \(event\.key === "Escape"\) close\(\)/);
-  assert.match(app, /importButton\.textContent = "导入"/);
   assert.match(app, /session-records__tool/);
 });
 
-test("Web home keeps mutually exclusive unfinished and completed history groups", () => {
-  assert.match(home, /"unfinished", "未完成记录"/);
-  assert.match(home, /"completed", "已完成记录"/);
-  assert.match(home, /this\.openHistoryGroup = opening \? key : undefined/);
-  assert.match(app, /onOpenRecent: \(sessionId, readOnly\) => readOnly \? this\.showReplay\(sessionId\) : this\.openSession\(sessionId\)/);
+test("Homepage hides direct history and records modal owns unfinished/completed navigation", () => {
+  assert.doesNotMatch(home, /buildRecentSessions\(/);
+  assert.match(home, /this\.root\.querySelector\("\.batch-setup__recent"\)\?\.remove\(\)/);
+  assert.match(home, /this\.root\.querySelector\("\.batch-setup__history"\)\?\.remove\(\)/);
+  assert.match(records, /addScope\("unfinished", "未完成记录"/);
+  assert.match(records, /addScope\("completed", "已完成记录"/);
+  assert.match(records, /this\.statusScope === "unfinished" \? isUnfinished\(record\) : !isUnfinished\(record\)/);
 });
 
 test("Production Web blind editor can edit true bean identity at any stage without revealing it", () => {

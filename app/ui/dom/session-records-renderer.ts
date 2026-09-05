@@ -16,6 +16,7 @@ export interface SessionRecordsRendererOptions {
 
 type FilterKey = "all" | "date" | "organizer" | "participants" | "target" | "eventName";
 type GroupKey = "none" | "date" | "organizer" | "participants" | "target" | "eventName";
+type StatusScope = "unfinished" | "completed";
 
 const FILTER_LABELS: Record<Exclude<FilterKey, "all">, string> = {
   date: "日期", organizer: "组织方", participants: "参与对象", target: "杯测目标", eventName: "杯测会名称"
@@ -25,6 +26,10 @@ const LONG_PRESS_DELETE_MS = 650;
 
 function includes(value: unknown, query: string): boolean {
   return String(value ?? "").toLocaleLowerCase("zh-CN").includes(query.toLocaleLowerCase("zh-CN"));
+}
+
+function isUnfinished(record: SessionRecordSummary): boolean {
+  return record.status === "draft" || record.status === "active";
 }
 
 function statusLabel(record: SessionRecordSummary): string {
@@ -61,15 +66,41 @@ async function copyText(value: string): Promise<void> {
   input.remove();
 }
 
+function installStatusScopeStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-record-scopes]")) return;
+  const style = document.createElement("style");
+  style.dataset.aromasenseRecordScopes = "true";
+  style.textContent = `
+    .session-records__scopes{
+      display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;
+      margin:4px 0 14px;padding:4px;border:1px solid rgba(185,153,90,.18);border-radius:10px;background:#171717;
+    }
+    .session-records__scope{
+      min-height:42px;border:0;border-radius:7px;background:transparent;color:#918d86;
+      font:inherit;font-size:13px;font-weight:650;letter-spacing:.04em;
+    }
+    .session-records__scope.is-active{
+      background:rgba(185,153,90,.13);color:#d6c394;box-shadow:inset 0 0 0 1px rgba(185,153,90,.26);
+    }
+    .session-records__scope-count{margin-left:6px;color:#77726b;font-size:10px;font-weight:600}
+    .session-records__scope.is-active .session-records__scope-count{color:#b99c68}
+  `;
+  document.head.append(style);
+}
+
 export class SessionRecordsRenderer {
   private management = false;
   private filterKey: FilterKey = "all";
   private filterText = "";
   private groupKey: GroupKey = "none";
+  private statusScope: StatusScope;
   private readonly selected = new Set<string>();
   private ordered: SessionRecordSummary[] = [];
 
-  constructor(private readonly root: HTMLElement, private readonly options: SessionRecordsRendererOptions) {}
+  constructor(private readonly root: HTMLElement, private readonly options: SessionRecordsRendererOptions) {
+    installStatusScopeStyles();
+    this.statusScope = options.records.some(isUnfinished) ? "unfinished" : "completed";
+  }
 
   async render(): Promise<void> {
     clearElement(this.root);
@@ -82,16 +113,19 @@ export class SessionRecordsRenderer {
       element("h1", "session-records__title", "杯测记录"),
       element("span", "session-records__version", "B0.2.a")
     );
-    this.root.append(header, this.renderToolbar());
+    this.root.append(header, this.renderStatusScopes(), this.renderToolbar());
 
     const controls = this.renderFilterAndGroupControls();
     if (controls.childElementCount) this.root.append(controls);
 
     const list = element("div", "session-records__list");
+    list.dataset.recordScope = this.statusScope;
     const filtered = this.filteredRecords();
-    if (!filtered.length) list.append(element("p", "session-records__empty", "没有符合条件的杯测记录。"));
-    else if (this.groupKey === "none") for (const record of filtered) list.append(this.renderRecord(record));
-    else {
+    if (!filtered.length) {
+      list.append(element("p", "session-records__empty", this.statusScope === "unfinished" ? "没有未完成记录。" : "没有已完成记录。"));
+    } else if (this.groupKey === "none") {
+      for (const record of filtered) list.append(this.renderRecord(record));
+    } else {
       const groups = new Map<string, SessionRecordSummary[]>();
       for (const record of filtered) {
         const key = groupValue(record, this.groupKey);
@@ -113,6 +147,31 @@ export class SessionRecordsRenderer {
       );
       this.root.append(batch);
     }
+  }
+
+  private renderStatusScopes(): HTMLElement {
+    const unfinishedCount = this.options.records.filter(isUnfinished).length;
+    const completedCount = this.options.records.length - unfinishedCount;
+    const scopes = element("nav", "session-records__scopes");
+    scopes.setAttribute("aria-label", "记录状态");
+
+    const addScope = (scope: StatusScope, label: string, count: number): void => {
+      const node = button(`session-records__scope${this.statusScope === scope ? " is-active" : ""}`, "", () => {
+        if (this.statusScope === scope) return;
+        this.statusScope = scope;
+        this.selected.clear();
+        this.management = false;
+        void this.render();
+      });
+      node.dataset.recordScopeTab = scope;
+      node.setAttribute("aria-pressed", String(this.statusScope === scope));
+      node.append(document.createTextNode(label), element("span", "session-records__scope-count", String(count)));
+      scopes.append(node);
+    };
+
+    addScope("unfinished", "未完成记录", unfinishedCount);
+    addScope("completed", "已完成记录", completedCount);
+    return scopes;
   }
 
   private async applySavedOrder(records: SessionRecordSummary[]): Promise<SessionRecordSummary[]> {
@@ -179,9 +238,10 @@ export class SessionRecordsRenderer {
   }
 
   private filteredRecords(): SessionRecordSummary[] {
-    if (this.filterKey === "all" || !this.filterText.trim()) return [...this.ordered];
+    const scoped = this.ordered.filter((record) => this.statusScope === "unfinished" ? isUnfinished(record) : !isUnfinished(record));
+    if (this.filterKey === "all" || !this.filterText.trim()) return scoped;
     const query = this.filterText.trim();
-    return this.ordered.filter((record) => includes(record.metadata[this.filterKey as keyof typeof record.metadata], query));
+    return scoped.filter((record) => includes(record.metadata[this.filterKey as keyof typeof record.metadata], query));
   }
 
   private renderGroup(label: string, records: readonly SessionRecordSummary[]): HTMLElement {
@@ -206,6 +266,7 @@ export class SessionRecordsRenderer {
   private renderRecord(record: SessionRecordSummary): HTMLElement {
     const row = element("article", "session-record");
     row.dataset.sessionId = record.sessionId;
+    row.dataset.sessionStatus = record.status;
     if (this.selected.has(record.sessionId)) row.classList.add("is-selected");
 
     if (this.management) {
@@ -314,7 +375,7 @@ export class SessionRecordsRenderer {
         this.selected.has(record.sessionId) ? this.selected.delete(record.sessionId) : this.selected.add(record.sessionId);
         void this.render();
       } else {
-        void this.options.onOpen(record.sessionId, record.status === "completed" || record.status === "archived");
+        void this.options.onOpen(record.sessionId, !isUnfinished(record));
       }
     });
 
