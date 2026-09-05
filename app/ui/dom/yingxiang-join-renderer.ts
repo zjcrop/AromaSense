@@ -48,38 +48,46 @@ export class YingxiangJoinRenderer {
     const shell = document.createElement("section");
     shell.className = "yingxiang-join";
     const loading = Object.assign(document.createElement("p"), { className: "yingxiang-join__status", textContent: "正在读取迎香邀请…" });
-    shell.append(loading); this.root.append(shell);
+    shell.append(loading);
+    this.root.append(shell);
     try {
       this.preview = await this.service.preview(this.options.token);
       this.renderReady(shell);
     } catch (error) {
       loading.textContent = error instanceof Error ? error.message : String(error);
       const close = Object.assign(document.createElement("button"), { type: "button", className: "yingxiang-join__action", textContent: "返回香迹" });
-      close.addEventListener("click", () => this.options.onClose()); shell.append(close);
+      close.addEventListener("click", () => this.options.onClose());
+      shell.append(close);
     }
   }
 
   private renderReady(shell: HTMLElement): void {
-    const preview = this.preview!; shell.replaceChildren();
-    const head = document.createElement("div"); head.className = "yingxiang-join__head";
+    const preview = this.preview!;
+    shell.replaceChildren();
+    const head = document.createElement("div");
+    head.className = "yingxiang-join__head";
     const titleWrap = document.createElement("div");
     titleWrap.append(Object.assign(document.createElement("h2"), { className: "yingxiang-join__title", textContent: "迎香 · 加入杯测" }));
     const close = Object.assign(document.createElement("button"), { type: "button", className: "yingxiang-join__close", textContent: "取消" });
-    close.addEventListener("click", () => this.options.onClose()); head.append(titleWrap, close);
+    close.addEventListener("click", () => this.options.onClose());
+    head.append(titleWrap, close);
 
-    const event = document.createElement("section"); event.className = "yingxiang-join__event";
+    const event = document.createElement("section");
+    event.className = "yingxiang-join__event";
     event.append(Object.assign(document.createElement("h3"), { textContent: preview.event.title }));
     event.append(Object.assign(document.createElement("div"), {
       className: "yingxiang-join__meta",
       textContent: `${preview.event.manifest.organizerName} · ${cuppingModeLabel(preview.event.manifest.cuppingMode)} · ${preview.event.manifest.samples.length} 个样品 · revision ${preview.event.eventRevision}`
     }));
-    const samples = document.createElement("div"); samples.className = "yingxiang-join__samples";
+    const samples = document.createElement("div");
+    samples.className = "yingxiang-join__samples";
     for (const sample of [...preview.event.manifest.samples].sort((a, b) => a.order - b.order)) {
       samples.append(Object.assign(document.createElement("span"), { className: "yingxiang-join__sample", textContent: sample.sampleCode }));
     }
     event.append(samples);
 
-    const form = document.createElement("section"); form.className = "yingxiang-join__form";
+    const form = document.createElement("section");
+    form.className = "yingxiang-join__form";
     const status = Object.assign(document.createElement("p"), { className: "yingxiang-join__status", textContent: "" });
     const naming = preview.event.policy.participantName;
     const joinRequestId = this.options.getJoinRequestId(preview.invite.inviteId);
@@ -89,22 +97,62 @@ export class YingxiangJoinRenderer {
 
     if (naming.mode === "organizer_assigned") {
       const assigned = preview.invite.assignedName || "主办方已分配";
-      form.append(Object.assign(document.createElement("p"), { className: "yingxiang-join__notice", textContent: `本次参与名称：${assigned}。活动期间香迹只显示该临时身份。` }));
+      form.append(Object.assign(document.createElement("p"), {
+        className: "yingxiang-join__notice",
+        textContent: `本次参与名称：${assigned}。活动期间香迹只显示该临时身份。`
+      }));
     } else {
-      const choices = document.createElement("div"); choices.className = "yingxiang-join__choices";
-      const customRadio = document.createElement("input"); customRadio.type = "radio"; customRadio.name = "yingxiang-name-source"; customRadio.checked = true;
-      const customChoice = document.createElement("label"); customChoice.className = "yingxiang-join__choice"; customChoice.append(customRadio, document.createTextNode("本次活动名称"));
-      const accountRadio = document.createElement("input"); accountRadio.type = "radio"; accountRadio.name = "yingxiang-name-source"; accountRadio.disabled = !naming.allowAccountDisplayName;
-      const accountChoice = document.createElement("label"); accountChoice.className = "yingxiang-join__choice"; accountChoice.append(accountRadio, document.createTextNode("使用个人账户名称"));
-      choices.append(customChoice, accountChoice); form.append(choices);
+      const choices = document.createElement("div");
+      choices.className = "yingxiang-join__choices";
+      const customRadio = document.createElement("input");
+      customRadio.type = "radio";
+      customRadio.name = "yingxiang-name-source";
+      customRadio.checked = true;
+      const customChoice = document.createElement("label");
+      customChoice.className = "yingxiang-join__choice";
+      customChoice.append(customRadio, document.createTextNode("本次活动名称"));
+      const accountRadio = document.createElement("input");
+      accountRadio.type = "radio";
+      accountRadio.name = "yingxiang-name-source";
+      accountRadio.disabled = !naming.allowAccountDisplayName;
+      const accountChoice = document.createElement("label");
+      accountChoice.className = "yingxiang-join__choice";
+      accountChoice.append(accountRadio, document.createTextNode("使用个人账户名称"));
+      choices.append(customChoice, accountChoice);
+      form.append(choices);
 
-      customName = document.createElement("input"); customName.type = "text"; customName.maxLength = naming.maxLength; customName.placeholder = naming.requiredPrefix ? `需以 ${naming.requiredPrefix} 开头` : "输入本次活动使用的名称";
-      const customField = document.createElement("label"); customField.className = "yingxiang-join__field"; customField.append(document.createTextNode("活动名称"), customName); form.append(customField);
+      customName = document.createElement("input");
+      customName.type = "text";
+      customName.maxLength = naming.maxLength;
+      customName.placeholder = naming.requiredPrefix ? `需以 ${naming.requiredPrefix} 开头` : "输入本次活动使用的名称";
+      const customField = document.createElement("label");
+      customField.className = "yingxiang-join__field";
+      customField.append(document.createTextNode("活动名称"), customName);
+      form.append(customField);
 
-      accountName = document.createElement("input"); accountName.type = "text"; accountName.maxLength = 64; accountName.placeholder = "输入并保存为你的账户显示名称";
-      const accountField = document.createElement("label"); accountField.className = "yingxiang-join__field"; accountField.hidden = true; accountField.append(document.createTextNode("个人账户显示名称"), accountName); form.append(accountField);
-      customRadio.addEventListener("change", () => { if (customRadio.checked) { source = "custom"; customField.hidden = false; accountField.hidden = true; } });
-      accountRadio.addEventListener("change", () => { if (accountRadio.checked) { source = "account"; customField.hidden = true; accountField.hidden = false; } });
+      accountName = document.createElement("input");
+      accountName.type = "text";
+      accountName.maxLength = 64;
+      accountName.placeholder = "输入并保存为你的账户显示名称";
+      const accountField = document.createElement("label");
+      accountField.className = "yingxiang-join__field";
+      accountField.hidden = true;
+      accountField.append(document.createTextNode("个人账户显示名称"), accountName);
+      form.append(accountField);
+      customRadio.addEventListener("change", () => {
+        if (customRadio.checked) {
+          source = "custom";
+          customField.hidden = false;
+          accountField.hidden = true;
+        }
+      });
+      accountRadio.addEventListener("change", () => {
+        if (accountRadio.checked) {
+          source = "account";
+          customField.hidden = true;
+          accountField.hidden = false;
+        }
+      });
     }
 
     form.append(Object.assign(document.createElement("p"), {
@@ -113,7 +161,8 @@ export class YingxiangJoinRenderer {
     }));
     const join = Object.assign(document.createElement("button"), { type: "button", className: "yingxiang-join__action", textContent: "加入并开始杯测" });
     join.addEventListener("click", () => void this.join({ join, status, joinRequestId, source, customName, accountName }));
-    form.append(join, status); shell.append(head, event, form);
+    form.append(join, status);
+    shell.append(head, event, form);
   }
 
   private async join(view: {
@@ -125,13 +174,13 @@ export class YingxiangJoinRenderer {
     accountName?: HTMLInputElement;
   }): Promise<void> {
     const preview = this.preview!;
-    view.join.disabled = true; view.status.textContent = "正在建立活动身份和本地杯测…";
+    view.join.disabled = true;
+    view.status.textContent = "正在建立活动身份和本地杯测…";
     try {
       let displayName: string | undefined;
       let nameSource: "custom" | "account" | undefined;
       if (preview.event.policy.participantName.mode === "participant_choice") {
-        const selectedAccount = this.root.querySelector<HTMLInputElement>("input[name='yingxiang-name-source']:checked")?.nextSibling?.textContent?.includes("个人账户") === true;
-        nameSource = selectedAccount ? "account" : "custom";
+        nameSource = view.source;
         if (nameSource === "account") {
           const value = view.accountName?.value.normalize("NFKC").trim() || "";
           if (!value) throw new Error("请输入个人账户显示名称。未登录账户不能使用此选项。");
@@ -141,7 +190,12 @@ export class YingxiangJoinRenderer {
           if (!displayName) throw new Error("请输入本次活动名称。");
         }
       }
-      const result = await this.service.join({ token: this.options.token, joinRequestId: view.joinRequestId, displayName, nameSource });
+      const result = await this.service.join({
+        token: this.options.token,
+        joinRequestId: view.joinRequestId,
+        displayName,
+        nameSource
+      });
       view.status.textContent = result.resumed ? "已恢复本次迎香杯测。" : "活动身份和本地杯测已建立。";
       await this.options.onJoined(result.sessionId);
     } catch (error) {
