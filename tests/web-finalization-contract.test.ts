@@ -61,7 +61,7 @@ test("Homepage account and records stay in centered blurred modals after a recor
   assert.match(app, /if \(event\.key === "Escape"\) close\(\)/);
   assert.match(app, /session-records__tool/);
   assert.match(home, /await this\.options\.onOpenRecords\?\.\(\)/);
-  assert.match(home, /data-record-scope-tab=\\"\$\{scope\}\\"/);
+  assert.match(home, /data-record-scope-tab="\$\{scope\}"/);
 });
 
 test("Homepage hides direct history and record submenu owns unfinished/completed navigation", () => {
