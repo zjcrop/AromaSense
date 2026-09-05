@@ -178,7 +178,7 @@ function inviteUnavailableReason(invite: InviteRow, event: EventRow, now: string
   if (invite.expires_at <= now) return "YINGXIANG_INVITE_EXPIRED";
   if (invite.max_uses !== null && invite.use_count >= invite.max_uses) return "YINGXIANG_INVITE_EXHAUSTED";
   if (invite.event_revision !== event.event_revision) return "YINGXIANG_INVITE_STALE_REVISION";
-  if (event.status === "completed" || event.status === "cancelled") return "YINGXIANG_EVENT_NOT_JOINABLE";
+  if (event.status === "draft" || event.status === "completed" || event.status === "cancelled") return "YINGXIANG_EVENT_NOT_JOINABLE";
   return undefined;
 }
 
@@ -214,7 +214,10 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
     displayName = validateDisplayName(resolved.invite.assigned_name, naming);
     if (!displayName) return json({ ok: false, error: "YINGXIANG_ASSIGNED_NAME_MISSING" }, 409);
   } else {
-    if (body.nameSource === "account" && !naming.allowAccountDisplayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED" }, 403);
+    if (body.nameSource === "account") {
+      if (!user) return json({ ok: false, error: "YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME" }, 401);
+      if (!naming.allowAccountDisplayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED" }, 403);
+    }
     displayName = validateDisplayName(body.displayName, naming);
     if (!displayName) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_INVALID" }, 400);
   }
@@ -229,6 +232,7 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("YINGXIANG_INVITE_")) return json({ ok: false, error: message.match(/YINGXIANG_INVITE_[A-Z_]+/u)?.[0] ?? "YINGXIANG_INVITE_UNAVAILABLE" }, 410);
+    if (message.includes("YINGXIANG_PARTICIPANT_NAME_CONFLICT")) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_CONFLICT" }, 409);
     if (message.toLowerCase().includes("unique")) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_CONFLICT" }, 409);
     return json({ ok: false, error: "YINGXIANG_JOIN_FAILED" }, 409);
   }
@@ -258,7 +262,7 @@ async function handleEventCreate(request: Request, db: D1Database, user: Yingxia
   if (!title || Array.from(title).length > 120 || !policy) return json({ ok: false, error: "YINGXIANG_EVENT_PAYLOAD_INVALID" }, 400);
   const now = new Date().toISOString();
   const eventId = crypto.randomUUID();
-  const status = body.publish === true ? "published" : "draft";
+  const status = body.publish === false ? "draft" : "published";
   await db.prepare(`INSERT INTO yingxiang_events
     (event_id, owner_user_id, event_revision, title, status, policy_json, created_at, updated_at)
     VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?6)`)
@@ -270,7 +274,7 @@ async function handleEventCreate(request: Request, db: D1Database, user: Yingxia
 async function handleInviteCreate(eventId: string, request: Request, db: D1Database, user: YingxiangAuthenticatedUser, publicAppUrl?: string): Promise<Response> {
   const event = await eventById(db, eventId);
   if (!event || event.owner_user_id !== user.userId) return json({ ok: false, error: "YINGXIANG_EVENT_NOT_FOUND" }, 404);
-  if (event.status === "completed" || event.status === "cancelled") return json({ ok: false, error: "YINGXIANG_EVENT_NOT_SHAREABLE" }, 409);
+  if (event.status !== "published" && event.status !== "active") return json({ ok: false, error: "YINGXIANG_EVENT_NOT_SHAREABLE" }, 409);
   const policy = parsePolicy(JSON.parse(event.policy_json));
   if (!policy) return json({ ok: false, error: "YINGXIANG_EVENT_POLICY_CORRUPT" }, 500);
   const body = await parseJsonObject(request) ?? {};
@@ -282,8 +286,10 @@ async function handleInviteCreate(eventId: string, request: Request, db: D1Datab
   if (maxUsesValue !== null && (!Number.isSafeInteger(maxUsesValue) || maxUsesValue < 1 || maxUsesValue > 10000)) {
     return json({ ok: false, error: "YINGXIANG_INVITE_MAX_USES_INVALID" }, 400);
   }
-  const expiresAt = isNonEmptyString(body.expiresAt, 64) ? String(body.expiresAt) : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-  if (!Number.isFinite(Date.parse(expiresAt)) || expiresAt <= new Date().toISOString()) return json({ ok: false, error: "YINGXIANG_INVITE_EXPIRY_INVALID" }, 400);
+  const rawExpiry = isNonEmptyString(body.expiresAt, 64) ? String(body.expiresAt) : undefined;
+  const expiryMs = rawExpiry ? Date.parse(rawExpiry) : Date.now() + 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(expiryMs) || expiryMs <= Date.now()) return json({ ok: false, error: "YINGXIANG_INVITE_EXPIRY_INVALID" }, 400);
+  const expiresAt = new Date(expiryMs).toISOString();
 
   const inviteId = crypto.randomUUID();
   const token = randomHex(24);
