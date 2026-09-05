@@ -113,7 +113,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Assemble 0.1C debug APK
+      - name: Assemble B0.2.a debug APK
         env:
           AROMASENSE_CLOUD_URL: ${{ vars.AROMASENSE_CLOUD_URL }}
           AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
@@ -122,6 +122,6 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: AromaSense-0.1C-debug
+          name: AromaSense-B0.2.a-debug
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

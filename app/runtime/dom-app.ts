@@ -4,9 +4,11 @@ import { CuppingSessionController, type ObservationIdFactory } from "../core/cup
 import { CuppingSetupService } from "../core/cupping-setup-service";
 import { RevisionCheckpointService } from "../core/revision-checkpoint-service";
 import { SampleRecognitionService } from "../core/sample-recognition-service";
-import { SessionRecordService } from "../core/session-record-service";
+import { SessionRecordService, type CuppingRecordSnapshot } from "../core/session-record-service";
 import { SessionShareClient } from "../core/session-share-client";
+import { buildSubmissionBundle, completeCsv } from "../core/submission-bundle";
 import { CloudflareSyncRepository } from "../core/sync-repository";
+import { createCoffeeFoundationGateway } from "../core/coffee-foundation-runtime";
 import { SyncEngine, type SyncRunResult } from "../core/sync-engine";
 import { LocalAuthSessionStore, LocalPendingRegistrationStore } from "../storage/auth-session-store";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
@@ -16,6 +18,9 @@ import { SampleSummaryReader } from "../storage/sample-summary-reader";
 import { SessionRecordsReader } from "../storage/session-records-reader";
 import { StageProgressReader } from "../storage/stage-progress-reader";
 import { SyncQueueStore } from "../storage/sync-queue-store";
+import { ComparisonMappingStore } from "../storage/comparison-mapping-store";
+import { EventCacheStore } from "../storage/event-cache-store";
+import { mapComparison } from "../core/comparison-bundle";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { CuppingScreenController } from "../ui/cupping-screen-controller";
 import { FlavorGroupPreferenceService } from "../ui/flavor-group-preferences";
@@ -134,7 +139,9 @@ export class AromaSenseDomApp {
       syncLabel: "账户",
       loadDraft: () => this.preferences.get<BatchSetupDraft>(BATCH_SETUP_DRAFT_KEY),
       saveDraft: (draft) => this.preferences.set(BATCH_SETUP_DRAFT_KEY, draft, this.options.now()),
-      clearDraft: () => this.preferences.remove(BATCH_SETUP_DRAFT_KEY)
+      clearDraft: () => this.preferences.remove(BATCH_SETUP_DRAFT_KEY),
+      foundationGateway: createCoffeeFoundationGateway(this.options.cloudBaseUrl, async () => (await this.authClient?.current())?.token),
+      cacheEvent: async (manifest) => { await new EventCacheStore(this.db).put(manifest, this.options.now()); }
     });
     await setup.render();
   }
@@ -176,7 +183,7 @@ export class AromaSenseDomApp {
         const snapshot = await recordService.snapshot(sessionId);
         return (await shareClient.create(snapshot)).shareUrl;
       },
-      onExport: async (sessionId) => { this.downloadRecord(await recordService.snapshot(sessionId)); },
+      onExport: async (sessionId) => { await this.downloadRecord(await recordService.snapshot(sessionId)); },
       loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY),
       saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
     });
@@ -187,7 +194,16 @@ export class AromaSenseDomApp {
     this.closeHomeModal();
     this.screen?.dispose(); this.screen = undefined; this.setRootMode("replay");
     const snapshot = await new SessionRecordService(new LocalCuppingRepository(this.db), this.options.now).snapshot(sessionId);
-    new RecordReplayRenderer(this.root, snapshot, () => this.showRecords()).render();
+    const store = new ComparisonMappingStore(this.db);
+    new RecordReplayRenderer(this.root, snapshot, () => this.showRecords(), {
+      initial: await store.get(sessionId),
+      onImport: async (bundle) => {
+        const value = { bundle, mapping: mapComparison(snapshot, bundle) };
+        await store.replace(sessionId, value, this.options.now());
+        return value;
+      },
+      onClear: () => store.clear(sessionId)
+    }).render();
   }
 
   async syncPending(sessionIds?: readonly string[]): Promise<SyncRunResult | undefined> {
@@ -310,15 +326,22 @@ export class AromaSenseDomApp {
     }
   }
 
-  private downloadRecord(snapshot: unknown): void {
-    const body = JSON.stringify(snapshot, null, 2);
-    const blob = new Blob([body], { type: "application/json;charset=utf-8" });
+  private downloadFile(filename: string, body: string, type: string): void {
+    const blob = new Blob([body], { type });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `AromaSense-0.1C-${this.options.now().slice(0, 10)}.json`;
+    anchor.download = filename;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  private async downloadRecord(snapshot: CuppingRecordSnapshot): Promise<void> {
+    const bundle = await buildSubmissionBundle(snapshot);
+    const prefix = `AromaSense-${snapshot.session.metadata.date}-${snapshot.session.sessionId.slice(0, 8)}`;
+    this.downloadFile(`${prefix}.json`, JSON.stringify(snapshot, null, 2), "application/json;charset=utf-8");
+    this.downloadFile(`${prefix}.csv`, completeCsv(snapshot, bundle), "text/csv;charset=utf-8");
+    this.downloadFile(`${prefix}.submission.json`, JSON.stringify(bundle, null, 2), "application/json;charset=utf-8");
   }
 
   private hasCloudAuthConfiguration(): boolean {

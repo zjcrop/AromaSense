@@ -55,10 +55,28 @@ test("full offline session remains local then synchronizes after network recover
     await editor.completeActiveStage("2026-08-24T22:02:00+08:00");
     await revisions.checkpointStage(session.sessionId, "sample-a", "high_temp", "2026-08-24T22:02:00+08:00");
 
-    // This test is about durable offline revision/sync behavior rather than the
-    // UI finish gate. Keep the existing direct final-state fixture so the
-    // network recovery path remains isolated from the end-to-end workflow test.
-    await repository.setStageState(session.sessionId, "sample-a", "final", "completed", "2026-08-24T22:03:00+08:00", "2026-08-24T22:03:00+08:00", "2026-08-24T22:03:00+08:00");
+    const completeStep = async (stageId: "aroma" | "mid_temp" | "low_temp" | "flavor" | "overall" | "scoring", fields: Record<string, unknown>) => {
+      await editor.open({ sessionId: session.sessionId, sampleId: "sample-a", stageId }, "2026-08-24T22:03:00+08:00");
+      for (const [field, value] of Object.entries(fields)) await editor.saveField(field, value, "2026-08-24T22:03:10+08:00");
+      await editor.completeActiveStage("2026-08-24T22:03:20+08:00");
+    };
+    await completeStep("aroma", { wet_aroma_intensity: 7, flavor_tags: ["jasmine"] });
+    await completeStep("mid_temp", {
+      flavor_tags: ["jasmine"], acidity_intensity: 8, sweetness_intensity: 8,
+      bitterness_intensity: 2, mouthfeel_intensity: 7, finish_intensity: 8
+    });
+    await completeStep("low_temp", {
+      flavor_tags: ["citrus"], acidity_intensity: 7, sweetness_intensity: 8,
+      bitterness_intensity: 2, mouthfeel_intensity: 7, finish_intensity: 7
+    });
+    await completeStep("flavor", { flavor_tags: ["jasmine", "citrus"] });
+    await completeStep("overall", {
+      quality_flavor: 7, quality_aftertaste: 7, quality_acidity: 8, quality_sweetness: 8,
+      quality_body: 7, quality_clean: 8, quality_uniformity: 8, quality_balance: 7
+    });
+    await completeStep("scoring", { score_confirmed: true });
+    const completedSteps = (await repository.listStageStates(session.sessionId)).filter((state) => state.status === "completed");
+    assert.deepEqual(completedSteps.map((state) => state.stageId).sort(), ["aroma", "flavor", "high_temp", "low_temp", "mid_temp", "overall", "scoring"]);
     session = completeSession(session, "2026-08-24T22:04:00+08:00");
     await repository.saveSession(session);
     await revisions.finalSession(session.sessionId, "2026-08-24T22:04:00+08:00");

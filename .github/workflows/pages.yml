@@ -1,4 +1,4 @@
-name: Manual AromaSense Web Deploy B0.1.a
+name: Manual AromaSense Web Deploy B0.2.a
 
 on:
   workflow_dispatch:

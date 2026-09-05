@@ -141,6 +141,13 @@ function normalizeMetadata(value: unknown): Partial<CuppingSessionMetadata> {
   const targetMode = modeFromTarget(target);
   result.cuppingMode = targetMode ?? normalizeCuppingMode(source.cuppingMode, source.blindMode);
   if (target && !targetMode) result.target = target;
+  const eventId = stringValue(source.eventId);
+  if (eventId) result.eventId = eventId;
+  const eventRevision = Number(source.eventRevision);
+  if (Number.isInteger(eventRevision) && eventRevision > 0) result.eventRevision = eventRevision;
+  if (source.lowPrecisionLocation && typeof source.lowPrecisionLocation === "object") {
+    result.lowPrecisionLocation = source.lowPrecisionLocation as CuppingSessionMetadata["lowPrecisionLocation"];
+  }
   return result;
 }
 
@@ -180,6 +187,34 @@ function normalizeSession(value: unknown, fallbackGroup: string): ImportSessionD
 export function normalizeImportBundle(value: unknown, source: ImportSource): ImportBundle | undefined {
   const root = object(value);
   if (!root) return undefined;
+  if (root.schemaVersion === "aromasense-submission/1.0") {
+    const record = object(root.record);
+    const session = object(record?.session);
+    const manifest = object(root.eventManifest);
+    const bindings = Array.isArray(root.eventBindings) ? root.eventBindings.map(object).filter(Boolean) as Record<string, unknown>[] : [];
+    const rawSamples = Array.isArray(record?.samples) ? record.samples : [];
+    const samples = rawSamples.map((item) => {
+      const sample = object(item) ?? {};
+      const metadata = { ...(object(sample.metadata) ?? {}) };
+      const binding = bindings.find((candidate) => candidate.localSampleId === sample.sampleId);
+      if (binding) {
+        for (const key of ["eventSampleId", "sampleCode", "sampleIndex"] as const) if (binding[key] !== undefined) metadata[key] = binding[key];
+      }
+      return { ...sample, metadata, requiresReview: false };
+    });
+    const metadata = normalizeMetadata({
+      ...(object(session?.metadata) ?? {}),
+      eventId: manifest?.eventId,
+      eventRevision: manifest?.eventRevision,
+      eventName: manifest?.name ?? session?.title,
+      date: manifest?.date,
+      time: manifest?.time,
+      organizer: manifest?.organizer,
+      lowPrecisionLocation: manifest?.lowPrecisionLocation
+    });
+    const normalized = normalizeSession({ title: session?.title ?? manifest?.name, metadata, samples }, "Submission Bundle");
+    return normalized ? { schema: IMPORT_BUNDLE_SCHEMA, source, sessions: [normalized], warnings: [] } : undefined;
+  }
   if (root.schema === IMPORT_BUNDLE_SCHEMA && Array.isArray(root.sessions)) {
     const sessions = root.sessions.flatMap((item, index) => {
       const normalized = normalizeSession(item, `组 ${index + 1}`);

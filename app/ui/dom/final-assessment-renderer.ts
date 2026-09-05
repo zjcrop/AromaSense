@@ -10,6 +10,7 @@ import type { RadarAxisValue } from "../sample-summary-model";
 import { button, clearElement, element, setPressed } from "./dom-helpers";
 import { renderRadarSummary } from "./radar-renderer";
 import { renderSensoryEditor } from "./sensory-editor-renderer";
+import { DEFECT_ITEMS, defectPenalty } from "../../core/defect-dictionary";
 
 export type { FinalAssessmentPhase } from "../../core/cupping-progress-policy";
 
@@ -23,6 +24,7 @@ export interface FinalAssessmentInput {
   flavorPreferences: FlavorGroupPreferences;
   callbacks: FinalAssessmentCallbacks;
   scoreProfile?: CuppingScoreProfile;
+  phase?: FinalAssessmentPhase;
 }
 
 const PROFILE_AXES = [
@@ -60,7 +62,8 @@ function scoreFromMap(map: Map<string, unknown>): number {
     + (map.get("defect_overt_bad_fermentation") === true ? 5 : 0);
   const latentPenalty = map.get("defect_latent_mild_astringency") === true ? 2 : 0;
   const offFlavorPenalty = map.get("off_flavor_present") === true ? 3 : 0;
-  return Math.max(0, Math.min(100, Math.round((base - overtPenalty - latentPenalty - offFlavorPenalty) * 10) / 10));
+  const canonicalDefectPenalty = defectPenalty(Array.isArray(map.get("defect_ids")) ? map.get("defect_ids") as string[] : []);
+  return Math.max(0, Math.min(100, Math.round((base - overtPenalty - latentPenalty - offFlavorPenalty - canonicalDefectPenalty) * 10) / 10));
 }
 
 export function calculateCuppingScore(
@@ -101,16 +104,6 @@ function renderScale(
   input.addEventListener("change", () => void callbacks.saveField(key, Number(input.value)));
   field.append(header, input, output);
   return field;
-}
-
-function renderChoice(map: Map<string, unknown>, key: string, label: string, callbacks: FinalAssessmentCallbacks): HTMLButtonElement {
-  const selected = map.get(key) === true;
-  const control = button("final-assessment__choice", label, () => {
-    void callbacks.saveField(key, control.getAttribute("aria-pressed") !== "true");
-  });
-  setPressed(control, selected);
-  control.dataset.choiceKey = key;
-  return control;
 }
 
 function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
@@ -162,25 +155,23 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
 
   const defect = element("section", "final-assessment__section final-assessment__defects");
   defect.append(element("h3", "final-assessment__section-title", "缺陷与异味"));
-  const overt = element("div", "final-assessment__choice-group");
-  overt.append(
-    element("strong", "final-assessment__choice-heading", "明缺陷"),
-    renderChoice(map, "defect_overt_mold", "霉腐", input.callbacks),
-    renderChoice(map, "defect_overt_bad_fermentation", "坏发酵", input.callbacks)
-  );
-  const latent = element("div", "final-assessment__choice-group");
-  latent.append(
-    element("strong", "final-assessment__choice-heading", "暗缺陷"),
-    renderChoice(map, "defect_latent_mild_astringency", "轻微涩", input.callbacks)
-  );
-  const off = element("div", "final-assessment__choice-group");
-  off.append(element("strong", "final-assessment__choice-heading", "异味"), renderChoice(map, "off_flavor_present", "存在异味", input.callbacks));
+  const selectedDefects = new Set(Array.isArray(map.get("defect_ids")) ? map.get("defect_ids") as string[] : []);
+  const canonical = element("div", "final-assessment__choice-group");
+  canonical.append(element("strong", "final-assessment__choice-heading", "基座缺陷词典"));
+  for (const item of DEFECT_ITEMS) {
+    const control = button("final-assessment__choice", item.names["zh-Hans"], () => {
+      if (selectedDefects.has(item.id)) selectedDefects.delete(item.id); else selectedDefects.add(item.id);
+      void input.callbacks.saveField("defect_ids", [...selectedDefects]);
+    });
+    setPressed(control, selectedDefects.has(item.id));
+    canonical.append(control);
+  }
   const offNotes = element("textarea", "final-assessment__notes");
   offNotes.rows = 2;
-  offNotes.placeholder = "异味说明（可选）";
+  offNotes.placeholder = "缺陷 / 异味补充说明（可选）";
   offNotes.value = typeof map.get("off_flavor_notes") === "string" ? String(map.get("off_flavor_notes")) : "";
   offNotes.addEventListener("change", () => void input.callbacks.saveField("off_flavor_notes", offNotes.value));
-  defect.append(overt, latent, off, offNotes);
+  defect.append(canonical, offNotes);
   root.append(defect);
 
   const summary = element("section", "final-assessment__section");
@@ -219,14 +210,19 @@ function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
   if (map.get("defect_overt_bad_fermentation") === true) penalties.append(element("span", "final-assessment__penalty", "坏发酵 −5"));
   if (map.get("defect_latent_mild_astringency") === true) penalties.append(element("span", "final-assessment__penalty", "轻微涩 −2"));
   if (map.get("off_flavor_present") === true) penalties.append(element("span", "final-assessment__penalty", "异味 −3"));
+  const selectedDefects = Array.isArray(map.get("defect_ids")) ? map.get("defect_ids") as string[] : [];
+  for (const item of DEFECT_ITEMS.filter((candidate) => selectedDefects.includes(candidate.id))) {
+    penalties.append(element("span", "final-assessment__penalty", `${item.names["zh-Hans"]} −${item.severity === "overt" ? 5 : 2}`));
+  }
   if (!penalties.childElementCount) penalties.append(element("span", "final-assessment__penalty is-none", "无缺陷扣分"));
   root.append(penalties);
 
-  const confirmed = map.get("final_score_confirmed") === true;
+  const confirmationKey = input.phase === "score" ? "score_confirmed" : "final_score_confirmed";
+  const confirmed = map.get(confirmationKey) === true;
   const confirm = button(
     `final-assessment__next final-assessment__score-confirm${confirmed ? " is-confirmed" : ""}`,
     confirmed ? "评分已确认" : "确认评分",
-    () => void input.callbacks.saveField("final_score_confirmed", true)
+    () => void input.callbacks.saveField(confirmationKey, true)
   );
   confirm.disabled = confirmed;
   confirm.setAttribute("aria-pressed", String(confirmed));
@@ -236,12 +232,13 @@ function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
 
 export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentInput): void {
   clearElement(root);
-  const phase = finalAssessmentPhase(input.observations);
+  const phase = input.phase ?? finalAssessmentPhase(input.observations);
   const nav = element("nav", "final-assessment__phase-nav");
   const phaseSpec: Array<[FinalAssessmentPhase, string]> = [["flavor", "风味描述"], ["overall", "综评"], ["score", "评分"]];
   for (const [id, label] of phaseSpec) {
     const status = deriveFinalPhaseStatus(id, input.observations);
     const item = button(`final-assessment__phase is-${status}${phase === id ? " is-current" : ""}`, label, () => void input.callbacks.saveField("final_phase", id));
+    if (input.phase) item.disabled = true;
     item.setAttribute("aria-current", phase === id ? "step" : "false");
     item.title = `${status === "completed" ? "已完成" : status === "active" ? "已开始" : "未开始"}；完成标准：${FINAL_PHASE_COMPLETION_HINTS[id]}`;
     nav.append(item);
@@ -253,27 +250,31 @@ export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentI
 
   if (phase === "flavor") {
     renderSensoryEditor(body, {
-      stageId: "final",
+      stageId: input.phase === "flavor" ? "flavor" : "final",
       observations: input.observations,
       flavorPreferences: input.flavorPreferences,
       callbacks: input.callbacks,
       fieldFilter: new Set(["flavor_tags"])
     });
-    body.append(button("final-assessment__next", "下一环节 · 综评", () => void input.callbacks.saveField("final_phase", "overall")));
+    if (!input.phase) body.append(button("final-assessment__next", "下一环节 · 综评", () => void input.callbacks.saveField("final_phase", "overall")));
     return;
   }
 
   if (phase === "overall") {
     renderOverall(body, input);
-    const actions = element("div", "final-assessment__phase-actions");
-    actions.append(
-      button("final-assessment__previous", "返回风味描述", () => void input.callbacks.saveField("final_phase", "flavor")),
-      button("final-assessment__next", "下一环节 · 评分", () => void input.callbacks.saveField("final_phase", "score"))
-    );
-    body.append(actions);
+    if (!input.phase) {
+      const actions = element("div", "final-assessment__phase-actions");
+      actions.append(
+        button("final-assessment__previous", "返回风味描述", () => void input.callbacks.saveField("final_phase", "flavor")),
+        button("final-assessment__next", "下一环节 · 评分", () => void input.callbacks.saveField("final_phase", "score"))
+      );
+      body.append(actions);
+    }
     return;
   }
 
   renderScore(body, input);
-  body.append(button("final-assessment__previous", "返回综评", () => void input.callbacks.saveField("final_phase", "overall")));
+  if (!input.phase) {
+    body.append(button("final-assessment__previous", "返回综评", () => void input.callbacks.saveField("final_phase", "overall")));
+  }
 }

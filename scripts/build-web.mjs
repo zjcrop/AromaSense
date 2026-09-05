@@ -1,11 +1,13 @@
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   assertCoffeeKnowledgeConsumerSubset,
   buildCoffeeKnowledgeConsumerSubset
 } from "./coffee-knowledge-consumer-subset.mjs";
+import { FOUNDATION_RELEASE_ID, materializeCoffeeFoundation } from "./sync-coffee-foundation.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const androidOut = resolve(root, "mobile/android/app/src/main/assets/www");
@@ -311,6 +313,10 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
   if (/1\.24B-compat|luckyBeanCompat|parseLuckyBeanSemanticText/.test(appSource)) {
     throw new Error("Deprecated AromaSense LuckyBean compatibility parser leaked into production artifact");
   }
+  const foundationSource = await readFile(resolve(out, "coffee-foundation-runtime.js"), "utf8");
+  if (!foundationSource.includes("coffee-foundation-candidate/1.0") || !foundationSource.includes("ai-enrichment-result/1.0") || !foundationSource.includes("buildRecognitionBook")) {
+    throw new Error(`Coffee Foundation browser runtime missing or invalid: ${FOUNDATION_RELEASE_ID}`);
+  }
 }
 
 async function buildTarget(out, { android = false } = {}) {
@@ -329,6 +335,23 @@ async function buildTarget(out, { android = false } = {}) {
     sourcemap: true,
     legalComments: "none"
   });
+
+  const foundationTemp = await mkdtemp(resolve(tmpdir(), "aromasense-foundation-"));
+  try {
+    const foundation = await materializeCoffeeFoundation(resolve(foundationTemp, "foundation"));
+    await build({
+      entryPoints: [foundation.entry],
+      outfile: resolve(out, "coffee-foundation-runtime.js"),
+      bundle: true,
+      platform: "browser",
+      target: ["chrome110"],
+      format: "iife",
+      globalName: "CoffeeFoundation",
+      legalComments: "none"
+    });
+  } finally {
+    await rm(foundationTemp, { recursive: true, force: true });
+  }
 
   await build({
     entryPoints: [resolve(root, "app/runtime/web-entry.ts")],
@@ -368,7 +391,7 @@ async function buildTarget(out, { android = false } = {}) {
     .replaceAll("__BUILD_ID__", escapeAttribute(buildId))
     .replace(
       "  <script src=\"app.js\"></script>",
-      `${recognitionBootstrap ? `  ${recognitionBootstrap}\n` : ""}  <script src=\"luckybean-recognition-core.js?v=${encodeURIComponent(buildId)}\"></script>\n  <script src=\"app.js?v=${encodeURIComponent(buildId)}\"></script>`
+      `${recognitionBootstrap ? `  ${recognitionBootstrap}\n` : ""}  <script src=\"luckybean-recognition-core.js?v=${encodeURIComponent(buildId)}\"></script>\n  <script src=\"coffee-foundation-runtime.js?v=${encodeURIComponent(buildId)}\"></script>\n  <script src=\"app.js?v=${encodeURIComponent(buildId)}\"></script>`
     );
   await writeFile(resolve(out, "index.html"), html, "utf8");
   await writeFile(resolve(out, ".nojekyll"), "", "utf8");

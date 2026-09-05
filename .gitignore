@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Integrity-verified Coffee Foundation runtime, materialized during builds.
+cloud/worker/.foundation/

@@ -20,6 +20,9 @@ export interface CuppingSessionMetadata {
   blindMode?: BlindMode;
   semiBlindVisibleFields?: readonly string[];
   revealedAt?: string;
+  eventId?: string;
+  eventRevision?: number;
+  lowPrecisionLocation?: { latitude: number; longitude: number; accuracyKm: number };
 }
 
 function normalizeOptional(value: unknown): string | undefined {
@@ -31,6 +34,14 @@ function normalizeFieldList(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const fields = [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))];
   return fields.length ? fields : undefined;
+}
+
+function normalizeLocation(value: unknown): CuppingSessionMetadata["lowPrecisionLocation"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const latitude = Number(row.latitude), longitude = Number(row.longitude), accuracyKm = Number(row.accuracyKm);
+  if (![latitude, longitude, accuracyKm].every(Number.isFinite) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || accuracyKm < 1) return undefined;
+  return { latitude: Math.round(latitude * 10) / 10, longitude: Math.round(longitude * 10) / 10, accuracyKm: Math.max(1, Math.round(accuracyKm)) };
 }
 
 export function normalizeBlindMode(value: unknown): BlindMode {
@@ -81,7 +92,10 @@ export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>)
     eventName: normalizeOptional(value.eventName),
     cuppingMode: normalizeCuppingMode(value.cuppingMode, value.blindMode),
     semiBlindVisibleFields: normalizeFieldList(value.semiBlindVisibleFields),
-    revealedAt: normalizeOptional(value.revealedAt)
+    revealedAt: normalizeOptional(value.revealedAt),
+    eventId: normalizeOptional(value.eventId),
+    eventRevision: Number.isInteger(value.eventRevision) && Number(value.eventRevision) > 0 ? Number(value.eventRevision) : undefined,
+    lowPrecisionLocation: normalizeLocation(value.lowPrecisionLocation)
   };
 }
 

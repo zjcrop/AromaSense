@@ -1,6 +1,6 @@
 {
   "name": "aromasense",
-  "version": "0.1.3",
+  "version": "0.2.0-alpha.1",
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -10,7 +10,7 @@
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "luckybean-static-app": "github:zjcrop/luckybean#fc02304d4872d889ae33e0ed06b48f71bd38ea52",
+    "luckybean-static-app": "github:zjcrop/luckybean#47d112778ca29d22bdeef5ef8b6bfc110de8de90",
     "qrcode": "^1.5.4",
     "sql.js": "1.14.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

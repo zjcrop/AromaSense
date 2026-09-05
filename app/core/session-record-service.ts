@@ -1,11 +1,12 @@
 import type { LocalCuppingRepository } from "../storage/local-cupping-repository";
 
 export interface CuppingRecordSnapshot {
-  version: "AromaSense-0.1C";
+  version: "AromaSense-B0.2.a";
   exportedAt: string;
   session: Awaited<ReturnType<LocalCuppingRepository["getSession"]>>;
   samples: Awaited<ReturnType<LocalCuppingRepository["listSamples"]>>;
   observations: Awaited<ReturnType<LocalCuppingRepository["listObservationsForSession"]>>;
+  stageStates: Awaited<ReturnType<LocalCuppingRepository["listStageStates"]>>;
 }
 
 export class SessionRecordService {
@@ -15,12 +16,13 @@ export class SessionRecordService {
   ) {}
 
   async snapshot(sessionId: string): Promise<CuppingRecordSnapshot> {
-    const [session, samples, observations] = await Promise.all([
+    const [session, samples, observations, stageStates] = await Promise.all([
       this.repository.getSession(sessionId),
       this.repository.listSamples(sessionId),
-      this.repository.listObservationsForSession(sessionId)
+      this.repository.listObservationsForSession(sessionId),
+      this.repository.listStageStates(sessionId)
     ]);
-    return { version: "AromaSense-0.1C", exportedAt: this.now(), session, samples, observations };
+    return { version: "AromaSense-B0.2.a", exportedAt: this.now(), session, samples, observations, stageStates };
   }
 
   async delete(sessionId: string): Promise<void> {

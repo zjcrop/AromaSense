@@ -55,7 +55,7 @@ function preferredStage(item: SampleRailItemViewState): StageId {
   return item.stages.find((stage) => stage.status === "active")?.stageId
     ?? item.stages.find((stage) => stage.status === "not_started")?.stageId
     ?? item.stages[item.stages.length - 1]?.stageId
-    ?? "preparation";
+    ?? "aroma";
 }
 
 function currentStage(item: SampleRailItemViewState) {

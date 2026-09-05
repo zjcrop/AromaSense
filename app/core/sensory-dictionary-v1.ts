@@ -62,7 +62,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "风味描述",
     valueKind: "tags",
     assessmentLayer: "descriptive",
-    stages: ["aroma", ...TEMPERATURE_STAGES, "final"]
+    stages: ["aroma", ...TEMPERATURE_STAGES, "flavor", "final"]
   },
   {
     key: "acidity_intensity",
@@ -101,7 +101,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "余韵强度",
     valueKind: "intensity",
     assessmentLayer: "descriptive",
-    stages: ["mid_temp", "low_temp", "final"],
+    stages: ["mid_temp", "low_temp", "overall", "final"],
     ...DESCRIPTIVE_SCALE
   },
   {
@@ -109,14 +109,14 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "感官缺陷存在",
     valueKind: "boolean",
     assessmentLayer: "descriptive",
-    stages: ["aroma", ...TEMPERATURE_STAGES, "final"]
+    stages: ["aroma", ...TEMPERATURE_STAGES, "overall", "final"]
   },
   {
     key: "affective_fragrance_aroma",
     label: "香气质量印象",
     valueKind: "score",
     assessmentLayer: "affective",
-    stages: ["final"],
+    stages: ["overall", "final"],
     ...AFFECTIVE_SCALE
   },
   {
@@ -124,7 +124,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "风味 / 余韵质量印象",
     valueKind: "score",
     assessmentLayer: "affective",
-    stages: ["final"],
+    stages: ["overall", "final"],
     ...AFFECTIVE_SCALE
   },
   {
@@ -132,7 +132,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "酸质质量印象",
     valueKind: "score",
     assessmentLayer: "affective",
-    stages: ["final"],
+    stages: ["overall", "final"],
     ...AFFECTIVE_SCALE
   },
   {
@@ -140,7 +140,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "甜感质量印象",
     valueKind: "score",
     assessmentLayer: "affective",
-    stages: ["final"],
+    stages: ["overall", "final"],
     ...AFFECTIVE_SCALE
   },
   {
@@ -148,7 +148,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "口感质量印象",
     valueKind: "score",
     assessmentLayer: "affective",
-    stages: ["final"],
+    stages: ["overall", "final"],
     ...AFFECTIVE_SCALE
   },
   {
@@ -156,7 +156,7 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     label: "备注",
     valueKind: "text",
     assessmentLayer: "notes",
-    stages: ["preparation", "aroma", ...TEMPERATURE_STAGES, "final"]
+    stages: ["preparation", "aroma", ...TEMPERATURE_STAGES, "flavor", "overall", "final"]
   }
 ] as const;
 

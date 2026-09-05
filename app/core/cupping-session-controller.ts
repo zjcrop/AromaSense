@@ -14,10 +14,10 @@ export interface ActiveEditingState {
   slice: EditingSlice;
 }
 
-const FINAL_FIELD_PREFIXES = ["final_", "profile_", "quality_", "defect_", "overall_", "off_flavor_"] as const;
+const FINAL_FIELD_PREFIXES = ["final_", "profile_", "quality_", "defect_", "overall_", "off_flavor_", "score_"] as const;
 
 function isFinalExtensionField(stageId: StageId, fieldKey: string): boolean {
-  return stageId === "final" && FINAL_FIELD_PREFIXES.some((prefix) => fieldKey.startsWith(prefix));
+  return ["final", "flavor", "overall", "scoring"].includes(stageId) && FINAL_FIELD_PREFIXES.some((prefix) => fieldKey.startsWith(prefix));
 }
 
 function replaceObservation(
@@ -74,6 +74,9 @@ export class CuppingSessionController {
     };
 
     return this.enqueueWrite(async () => {
+      if (active.slice.stageStatus === "not_started") {
+        await this.repository.setStageState(active.context.sessionId, active.context.sampleId, active.context.stageId, "active", now, now);
+      }
       await this.repository.saveObservation(observation);
       let observations = replaceObservation(this.active?.slice.observations ?? active.slice.observations, observation);
 
@@ -96,6 +99,33 @@ export class CuppingSessionController {
           };
           await this.repository.saveObservation(invalidated);
           observations = replaceObservation(observations, invalidated);
+        }
+      }
+
+      if (observation.stageId === "overall" && scoreAffectingField(fieldKey)) {
+        const scoringObservations = await this.repository.listObservationsForStage(observation.sampleId, "scoring");
+        const scoreConfirmation = scoringObservations.find((item) => item.fieldKey === "score_confirmed");
+        if (scoreConfirmation?.value === true) {
+          const scoringContext: EditingContext = { ...active.context, stageId: "scoring" };
+          const invalidated: SensoryObservation = {
+            observationId: this.observationIdFactory(scoringContext, "score_confirmed"),
+            sessionId: active.context.sessionId,
+            sampleId: active.context.sampleId,
+            stageId: "scoring",
+            fieldKey: "score_confirmed",
+            value: false,
+            dictionaryVersion: "sensory-flow/2.0",
+            updatedAt: now
+          };
+          await this.repository.saveObservation(invalidated);
+          await this.repository.setStageState(
+            observation.sessionId,
+            observation.sampleId,
+            "scoring",
+            "active",
+            now,
+            now
+          );
         }
       }
 

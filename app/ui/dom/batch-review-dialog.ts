@@ -9,6 +9,7 @@ export interface BatchReviewField {
   confidence?: number;
   multiline?: boolean;
   date?: boolean;
+  tier?: "core" | "detail";
 }
 
 export interface BatchReviewValue {
@@ -74,16 +75,6 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   header.append(copy, exit);
   panel.append(header);
 
-  if (options.previewUrl) {
-    const figure = element("figure", "batch-review__figure");
-    const image = element("img", "batch-review__image");
-    image.src = options.previewUrl;
-    image.alt = "当前样品来源图片";
-    figure.append(image);
-    if (options.recognitionStatus) figure.append(element("figcaption", "batch-review__image-caption", options.recognitionStatus));
-    panel.append(figure);
-  }
-
   const form = element("form", "batch-review__form");
   form.addEventListener("submit", (event) => event.preventDefault());
   const nameField = element("label", "batch-review__field batch-review__field--name");
@@ -96,14 +87,13 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   nameField.append(nameInput);
   form.append(nameField);
 
-  const groups = [...new Set(options.fields.map((field) => field.group))];
   let listIndex = 0;
-  for (const group of groups) {
+  const renderSection = (group: string, fields: readonly BatchReviewField[], core: boolean): HTMLElement => {
     const section = element("fieldset", "batch-review__section");
     section.append(element("legend", "batch-review__section-title", group));
-    const grid = element("div", "batch-review__grid");
-    for (const field of options.fields.filter((item) => item.group === group)) {
-      const wrapper = element("label", `batch-review__field${field.candidates?.length ? " is-review" : ""}`);
+    const grid = element("div", `batch-review__grid${core ? " batch-review__grid--core" : ""}`);
+    for (const field of fields) {
+      const wrapper = element("label", `batch-review__field${field.multiline ? " batch-review__field--wide" : ""}${field.candidates?.length ? " is-review" : ""}`);
       wrapper.append(element("span", "batch-review__label", field.label));
       const control = field.multiline
         ? element("textarea", "batch-review__control")
@@ -124,24 +114,58 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
         control.setAttribute("list", list.id);
         wrapper.append(list);
       }
-      if (field.candidates?.length || field.confidence !== undefined) {
+      grid.append(wrapper);
+    }
+    section.append(grid);
+    return section;
+  };
+
+  const coreFields = options.fields.filter((field) => field.tier !== "detail");
+  if (coreFields.length) form.append(renderSection("关键字段", coreFields, true));
+
+  const detailFields = options.fields.filter((field) => field.tier === "detail");
+  if (detailFields.length) {
+    const detailBox = element("details", "batch-review__details");
+    detailBox.append(element("summary", "batch-review__details-title", "更多信息"));
+    for (const group of [...new Set(detailFields.map((field) => field.group))]) {
+      detailBox.append(renderSection(group, detailFields.filter((field) => field.group === group), false));
+    }
+    form.append(detailBox);
+  }
+
+  if (options.previewUrl || options.rawText?.trim() || options.recognitionStatus || options.fields.some((field) => field.candidates?.length || field.confidence !== undefined)) {
+    const source = element("details", "batch-review__source");
+    source.append(element("summary", "batch-review__details-title", "来源与识别证据"));
+    if (options.previewUrl) {
+      const figure = element("figure", "batch-review__figure");
+      const image = element("img", "batch-review__image");
+      image.src = options.previewUrl;
+      image.alt = "当前样品来源图片";
+      figure.append(image);
+      if (options.recognitionStatus) figure.append(element("figcaption", "batch-review__image-caption", options.recognitionStatus));
+      source.append(figure);
+    } else if (options.recognitionStatus) {
+      source.append(element("p", "batch-review__image-caption", options.recognitionStatus));
+    }
+    const evidence = options.fields.filter((field) => field.candidates?.length || field.confidence !== undefined);
+    if (evidence.length) {
+      const list = element("ul", "batch-review__evidence-list");
+      for (const field of evidence) {
         const hint = [
           field.candidates?.length ? `候选：${field.candidates.join(" / ")}` : "OCR 待核对",
           field.confidence !== undefined ? `置信度 ${Math.round(field.confidence * 100)}%` : ""
         ].filter(Boolean).join(" · ");
-        wrapper.append(element("small", "batch-review__field-hint", hint));
+        list.append(element("li", "batch-review__evidence-item", `${field.label} · ${hint}`));
       }
-      grid.append(wrapper);
+      source.append(list);
     }
-    section.append(grid);
-    form.append(section);
-  }
-
-  if (options.rawText?.trim()) {
-    const details = element("details", "batch-review__raw");
-    details.append(element("summary", "batch-review__raw-title", "查看 OCR 原文"));
-    details.append(element("pre", "batch-review__raw-text", options.rawText.trim()));
-    form.append(details);
+    if (options.rawText?.trim()) {
+      const details = element("details", "batch-review__raw");
+      details.append(element("summary", "batch-review__raw-title", "查看 OCR 原文"));
+      details.append(element("pre", "batch-review__raw-text", options.rawText.trim()));
+      source.append(details);
+    }
+    form.append(source);
   }
   const validation = element("p", "batch-review__validation");
   validation.hidden = true;

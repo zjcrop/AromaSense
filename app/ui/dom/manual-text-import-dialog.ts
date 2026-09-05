@@ -37,7 +37,7 @@ export function openManualTextImportDialog(options: ManualTextImportDialogOption
     }
     parse.disabled = true;
     status.hidden = false;
-    status.textContent = "正在使用 LuckyBean 识别核心解析文本…";
+    status.textContent = "正在本地解析并通过基座 Dictionary / Recognition 规范化；多样品将尝试可选 AI 增强…";
     try {
       await options.onParse(text);
       overlay.remove();
