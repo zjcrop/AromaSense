@@ -25,11 +25,13 @@ async function main(): Promise<void> {
   if (!root) throw new Error("APP_ROOT_NOT_FOUND");
 
   let app: AromaSenseDomApp | undefined;
+  let yingxiang: YingxiangBrowserBootstrap | undefined;
   const startup = new StartupRenderer(root, {
     onEnter: async () => {
       if (!app) return;
       startup.setEntering();
       await app.start();
+      await yingxiang?.openPendingInvite();
     }
   });
   root.classList.add("startup-screen");
@@ -54,17 +56,26 @@ async function main(): Promise<void> {
 
   const now = () => new Date().toISOString();
   const cloudBaseUrl = document.documentElement.dataset.cloudBaseUrl || undefined;
+  const createSessionId = () => crypto.randomUUID();
+  const createSampleId = () => crypto.randomUUID();
   app = new AromaSenseDomApp(root, db, {
     now,
-    createSessionId: () => crypto.randomUUID(),
-    createSampleId: () => crypto.randomUUID(),
+    createSessionId,
+    createSampleId,
     observationIdFactory: (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`,
     cloudBaseUrl,
     firebaseApiKey: document.documentElement.dataset.firebaseApiKey || undefined,
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
 
-  new YingxiangBrowserBootstrap(root, db, { now, cloudBaseUrl }).start();
+  yingxiang = new YingxiangBrowserBootstrap(root, db, {
+    now,
+    createSessionId,
+    createSampleId,
+    onOpenSession: (sessionId) => app?.openSession(sessionId),
+    cloudBaseUrl
+  });
+  yingxiang.start();
 
   startup.setStatus("recognition", "ready", "图像识别按需加载；首次识别时初始化");
   startup.allowEnter();
