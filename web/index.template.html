@@ -21,6 +21,106 @@
   <link rel="stylesheet" href="release-0.1c.css?v=__BUILD_ID__" />
   <link rel="stylesheet" href="import-0.1c.css?v=__BUILD_ID__" />
   <link rel="stylesheet" href="mobile-ocr-emergency.css?v=__BUILD_ID__" />
+  <style data-aromasense-current-round-visual-closure>
+    /* B0.2.a user-facing workflow closure.
+       Stage identity no longer carries its own color. Progress is the only
+       color semantic: gray = untouched, light blue = started, green = complete. */
+    .cupping-main__stage,
+    .cupping-main__stage--orange,
+    .cupping-main__stage--pink,
+    .cupping-main__stage--blue,
+    .cupping-main__stage--white,
+    .cupping-main__stage--neutral {
+      color: var(--as-muted) !important;
+    }
+
+    .cupping-main__stage-strip {
+      position: relative;
+      padding-bottom: 34px !important;
+    }
+    .cupping-stage-step {
+      position: static;
+      border-bottom: 3px solid var(--as-progress-not-started) !important;
+      color: var(--as-progress-not-started) !important;
+      opacity: 1 !important;
+    }
+    .cupping-stage-step.is-not_started {
+      border-bottom-color: var(--as-progress-not-started) !important;
+      color: var(--as-progress-not-started) !important;
+    }
+    .cupping-stage-step.is-active {
+      border-bottom-color: var(--as-progress-active) !important;
+      color: var(--as-progress-active) !important;
+    }
+    .cupping-stage-step.is-completed {
+      border-bottom-color: var(--as-progress-completed) !important;
+      color: var(--as-progress-completed) !important;
+    }
+    .cupping-stage-step.is-current {
+      box-shadow: none !important;
+      font-weight: 800;
+    }
+    .cupping-stage-step.is-current::after {
+      content: attr(title);
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      bottom: 4px;
+      min-height: 22px;
+      color: #8f9397;
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.25;
+      text-align: left;
+      white-space: normal;
+      pointer-events: none;
+    }
+
+    /* Legacy chip/near-complete inputs are collapsed into the same three visual
+       states so old sessions cannot reintroduce stage-specific or fourth-state colors. */
+    .stage-chip--active,
+    .sample-rail__stage-token[data-state="active"] .sample-rail__stage-line,
+    .sample-rail__stage-token[data-state="near_complete"] .sample-rail__stage-line {
+      border-color: var(--as-progress-active) !important;
+      color: var(--as-progress-active) !important;
+      background: var(--as-progress-active) !important;
+    }
+    .stage-chip--completed,
+    .sample-rail__stage-token[data-state="completed"] .sample-rail__stage-line {
+      border-color: var(--as-progress-completed) !important;
+      color: var(--as-progress-completed) !important;
+      background: var(--as-progress-completed) !important;
+    }
+    .stage-chip:not(.stage-chip--active):not(.stage-chip--completed),
+    .sample-rail__stage-token[data-state="not_started"] .sample-rail__stage-line {
+      border-color: var(--as-progress-not-started) !important;
+      color: var(--as-progress-not-started) !important;
+      background: var(--as-progress-not-started) !important;
+    }
+
+    .cupping-progress-legend__item {
+      color: #92969a !important;
+    }
+    .cupping-progress-legend__dot.is-not-started {
+      background: var(--as-progress-not-started) !important;
+    }
+    .cupping-progress-legend__dot.is-active {
+      background: var(--as-progress-active) !important;
+    }
+    .cupping-progress-legend__dot.is-completed {
+      background: var(--as-progress-completed) !important;
+    }
+
+    @media (max-width: 720px) {
+      .cupping-main__stage-strip {
+        padding-bottom: 42px !important;
+      }
+      .cupping-stage-step.is-current::after {
+        font-size: 9px;
+        line-height: 1.3;
+      }
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>
