@@ -60,7 +60,7 @@ function policySignature(policy: YingxiangEventPolicy): string {
       uniqueWithinEvent: policy.participantName.uniqueWithinEvent,
       minLength: policy.participantName.minLength,
       maxLength: policy.participantName.maxLength,
-      requiredPrefix: policy.participantName.requiredPrefix ?? null
+      ...(policy.participantName.requiredPrefix ? { requiredPrefix: policy.participantName.requiredPrefix } : {})
     },
     revealSampleIdentity: policy.revealSampleIdentity,
     calibrationRepeatEnabled: policy.calibrationRepeatEnabled
