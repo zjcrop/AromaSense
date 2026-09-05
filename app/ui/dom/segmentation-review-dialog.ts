@@ -80,7 +80,7 @@ function replaceRegions(model: SegmentationReviewModel, regions: readonly Segmen
   return { ...model, regions: regions.map(cloneRegion) };
 }
 
-function boundControl(labelText: string, value: number, onInput: (value: number) => void): HTMLElement {
+function boundControl(labelText: string, value: number, onCommit: (value: number) => void): HTMLElement {
   const wrapper = element("label", "seg-review__bound");
   wrapper.append(element("span", "", labelText));
   const input = element("input", "");
@@ -93,8 +93,8 @@ function boundControl(labelText: string, value: number, onInput: (value: number)
   input.addEventListener("input", () => {
     const normalized = Number(input.value) / 100;
     output.textContent = `${Math.round(normalized * 100)}%`;
-    onInput(normalized);
   });
+  input.addEventListener("change", () => onCommit(Number(input.value) / 100));
   wrapper.append(input, output);
   return wrapper;
 }
