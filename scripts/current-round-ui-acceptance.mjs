@@ -10,8 +10,9 @@ const site = resolve(root, "site");
 const TIMEOUT_MS = 45_000;
 const MIME = new Map([
   [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"],
-  [".css", "text/css; charset=utf-8"], [".json", "application/json; charset=utf-8"],
-  [".wasm", "application/wasm"], [".webp", "image/webp"], [".png", "image/png"]
+  [".mjs", "text/javascript; charset=utf-8"], [".css", "text/css; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"], [".wasm", "application/wasm"],
+  [".webp", "image/webp"], [".png", "image/png"]
 ]);
 
 function requireCondition(condition, message) {
