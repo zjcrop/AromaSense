@@ -37,20 +37,31 @@
 - `minLength` / `maxLength`：长度约束；
 - `requiredPrefix`：可选固定前缀。
 
-B0.1 不允许主办方下发任意正则表达式作为命名规则，避免客户端正则拒绝服务和多端实现差异。
+B0.1 不允许主办方下发任意正则表达式作为命名规则，避免客户端正则拒绝服务和多端实现差异。云端名称唯一性由 D1 trigger 按活动 policy 原子校验，避免并发加入绕过客户端检查。
 
 ## 4. 分享链接与邀请
 
-云端预留 `yingxiang_invites`：
+云端 `yingxiang_invites` 与第一批 Worker API 已接入：
 
-- 分享链接携带一次活动 invite token；
+- 分享链接携带活动 invite token；
 - D1 只保存 token 的 SHA-256 hash，不保存明文 token；
 - invite 绑定 `event_id + event_revision`；
-- 支持过期、撤销、最大使用次数和累计使用次数；
-- 参与者打开链接后先取得活动公开 manifest / policy，再建立本地 Event Principal；
-- 未注册参与者仍可进入活动，不应被注册流程阻断。
+- 支持过期、最大使用次数、累计使用次数以及活动完成后的统一撤销；
+- D1 trigger 在写入 participant 前原子检查 invite 的活动归属、revision、有效期和剩余使用次数，并在成功加入后递增 `use_count`；
+- 参与者打开链接后可先读取活动公开 manifest / policy，再建立 Event Principal；
+- 未注册参与者允许以 guest principal 加入，不被注册流程阻断；
+- 已登录账户可形成 account principal，但活动显示名仍由活动规则决定；个人账户名不能被隐式暴露。
 
-邀请 API 与 UI 在 B0.1 后续阶段接入；本批首先锁定数据库与领域约束，避免后续接口返工。
+当前 Worker 路由：
+
+- `POST /api/v1/yingxiang/events`：主账户创建并默认发布活动；显式 `publish=false` 可创建草稿；
+- `POST /api/v1/yingxiang/events/:eventId/invites`：活动所有者生成邀请；
+- `GET /api/v1/yingxiang/invites/:token`：公开读取有效邀请与活动规则；
+- `POST /api/v1/yingxiang/invites/:token/join`：游客或已登录账户加入；
+- `POST /api/v1/yingxiang/events/:eventId/calibration-groups`：主办方建立重复校准映射；
+- `POST /api/v1/yingxiang/events/:eventId/complete`：完成活动、递增 event revision、释放全部 active principal 并撤销邀请。
+
+B0.1 后续仍需补齐活动编辑/再次发布、单个参与者释放、主办方参与进度读取和 Submission 汇总 API。
 
 ## 5. 同一只豆子的重复校准
 
@@ -76,12 +87,14 @@ B0.1 不允许主办方下发任意正则表达式作为命名规则，避免客
 - 已完成 revision 不可静默覆盖；
 - 活动 revision 与个人 Submission revision 相互独立。
 
-## 7. B0.1 第一批落地文件
+## 7. B0.1 当前落地文件
 
 - `app/core/yingxiang-event.ts`
 - `app/storage/0006_yingxiang_event_context.sql`
 - `app/storage/yingxiang-event-store.ts`
 - `cloud/worker/migrations/0007_yingxiang_events.sql`
+- `cloud/worker/src/yingxiang-api.ts`
+- `cloud/worker/src/index.ts` 路由接入
 - `tests/yingxiang-event.test.ts`
 - `tests/yingxiang-event-store.test.ts`
 
@@ -89,11 +102,11 @@ Web / Android 启动迁移链已加入本地 migration 6。
 
 ## 8. 后续连续开发顺序
 
-1. Worker：主办方创建/更新活动、创建邀请、解析邀请、加入/释放活动；
-2. 客户端：迎香入口与“发布杯测”页；
-3. 分享策略页：名称规则、盲测策略、校准重复设置、二维码/链接；
-4. 参与端：链接进入 → Event Principal → 活动名称 → 本地 Session；
-5. 活动结束：批量释放 principal，上传 SubmissionBundle；
+1. 客户端：迎香入口与“发布杯测”页；
+2. 分享策略页：名称规则、盲测策略、校准重复设置、二维码/链接；
+3. 参与端：链接进入 → Event Principal → 活动名称 → 本地 Session；
+4. 活动 API 补齐：编辑/发布、单人释放、参与进度与 Submission 汇总；
+5. 活动结束：SubmissionBundle 回收与主办方汇总；
 6. 主办方看板：参与进度、回收结果、重复校准统计；
 7. Web/Android 响应式统一验收。
 
