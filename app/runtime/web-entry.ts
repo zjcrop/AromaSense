@@ -3,6 +3,7 @@ import localSchema from "../storage/0001_local_schema.sql";
 import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import workflowMigration from "../storage/0003_workflow_event_comparison.sql";
 import submissionMigration from "../storage/0004_submission_revisions.sql";
+import sessionTimingMigration from "../storage/0005_session_timing.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
@@ -11,8 +12,6 @@ import { AromaSenseDomApp } from "./dom-app";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
   if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
-  // Keep the established browser database name so 0.1C migrates existing local
-  // sessions in place instead of silently creating an empty versioned database.
   return BrowserSQLiteDriver.open({
     databaseName: "aromasense-web-B0.1.a",
     wasmUrl: "./sql-wasm.wasm"
@@ -43,7 +42,8 @@ async function main(): Promise<void> {
       { id: 1, name: "local_schema_v1", sql: localSchema },
       { id: 2, name: "session_metadata_0_1c", sql: sessionMetadataMigration },
       { id: 3, name: "workflow_event_comparison_0_2", sql: workflowMigration },
-      { id: 4, name: "submission_revisions_0_2", sql: submissionMigration }
+      { id: 4, name: "submission_revisions_0_2", sql: submissionMigration },
+      { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration }
     ],
     new Date().toISOString()
   );
@@ -59,9 +59,6 @@ async function main(): Promise<void> {
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
 
-  // Recognition is intentionally not warmed during application startup. The OCR
-  // runtime and its large coffee recognition book are initialized on the first
-  // recognition action instead, keeping the normal homepage resident set small.
   startup.setStatus("recognition", "ready", "图像识别按需加载；首次识别时初始化");
   startup.allowEnter();
 
