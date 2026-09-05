@@ -285,8 +285,10 @@ async function runAcceptance(appUrl) {
     await waitForExpression(cdp, `typeof window.__aromasenseAcceptanceBeforeReload === 'undefined' && document.querySelector('#app')?.dataset.screen === 'setup'`, "setup after hard browser refresh", 60_000);
 
     await click(cdp, '[data-home-action="records"]');
+    await waitForExpression(cdp, `(() => { const menu=document.querySelector('[data-home-records-menu]'); return Boolean(menu && !menu.hidden); })()`, "records submenu after reload");
+    await click(cdp, '[data-home-record-scope="unfinished"]');
     await waitForExpression(cdp, `Boolean(document.querySelector('.home-modal .session-records__scopes'))`, "records modal after reload");
-    await click(cdp, '.home-modal [data-record-scope-tab="unfinished"]');
+    await waitForExpression(cdp, `document.querySelector('.home-modal [data-record-scope-tab="unfinished"]')?.getAttribute('aria-pressed') === 'true'`, "unfinished records scope after reload");
     const historyMeta = await waitForExpression(cdp, `(() => {
       const item = document.querySelector('.home-modal .session-records__list[data-record-scope="unfinished"] .session-record');
       if (!item) return false;
