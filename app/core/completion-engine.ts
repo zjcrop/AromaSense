@@ -30,8 +30,8 @@ function meaningful(value: unknown): boolean {
 export function completionForStage(stageId: StageId, observations: readonly SensoryObservation[]): CompletionResult {
   const values = new Map(observations.filter((item) => meaningful(item.value)).map((item) => [item.fieldKey, item.value] as const));
   if (stageId === "final") {
-    const required = ["flavor_tags", ...QUALITY_KEYS, "final_score_confirmed"];
-    const missing = required.filter((key) => key === "final_score_confirmed" ? values.get(key) !== true : !values.has(key));
+    const required = ["final_score_confirmed"] as const;
+    const missing = required.filter((key) => values.get(key) !== true);
     return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
   }
   const required = REQUIRED_FIELDS[stageId] ?? [];
