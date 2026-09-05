@@ -78,7 +78,7 @@ function manifestSignature(manifest: YingxiangEventManifest): string {
         eventSampleId: sample.eventSampleId,
         sampleCode: sample.sampleCode,
         order: sample.order,
-        label: sample.label ?? null
+        ...(sample.label ? { label: sample.label } : {})
       }))
   });
 }
