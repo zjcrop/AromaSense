@@ -66,8 +66,25 @@ test("browsing does not start a step; real input does, and next requires complet
     const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
 
     await screen.initialize(session.sessionId);
+    for (const stage of ["aroma", "high_temp", "mid_temp", "low_temp", "flavor", "overall", "scoring"] as const) {
+      await screen.select("sample-1", stage, now);
+      assert.equal(screen.current()?.sessionStatus, "draft");
+      assert.equal((await repository.getSession(session.sessionId)).status, "draft");
+    }
     await screen.select("sample-1", "aroma", now);
     assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "not_started");
+    await screen.saveField("notes", "   ", "2026-08-24T20:40:10+08:00");
+    assert.equal(screen.current()?.sessionStatus, "draft");
+    assert.equal((await repository.listStageStates(session.sessionId)).find((stage) => stage.stageId === "aroma")?.startedAt, undefined);
+    await screen.saveField("notes", "花香逐渐展开", "2026-08-24T20:40:20+08:00");
+    assert.equal(screen.current()?.sessionStatus, "active");
+    assert.equal(screen.current()?.active?.slice.stageStatus, "active");
+    assert.equal((await repository.getSession(session.sessionId)).status, "active");
+    assert.equal((await repository.listStageStates(session.sessionId)).find((stage) => stage.stageId === "aroma")?.startedAt, "2026-08-24T20:40:20+08:00");
+    await screen.leaveSession();
+    await screen.initialize(session.sessionId);
+    await screen.select("sample-1", "aroma", "2026-08-24T20:40:25+08:00");
+    assert.equal(screen.current()?.active?.slice.observations.find((item) => item.fieldKey === "notes")?.value, "花香逐渐展开");
     await screen.saveField("wet_aroma_intensity", 7, "2026-08-24T20:40:30+08:00");
     assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "active");
     await assert.rejects(() => screen.goNext("2026-08-24T20:40:40+08:00"), /STAGE_INCOMPLETE:aroma/);
@@ -120,6 +137,7 @@ test("blind identity edits persist during any browsed stage while rail identity 
     assert.equal(updated.rail[0]?.label, "Sample 01");
     assert.deepEqual(updated.rail[0]?.metadata, {});
     assert.equal(updated.rail[0]?.stages.find((stage) => stage.stageId === "mid_temp")?.status, "not_started");
+    assert.equal(updated.sessionStatus, "draft");
 
     const persisted = await repository.listSamples(session.sessionId);
     assert.equal(persisted[0]?.label, "Ethiopia Guji Lot 12");

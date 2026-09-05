@@ -5,7 +5,7 @@ import { scoreProfileForMetadata } from "../../core/cupping-score-profile";
 import { calculateCuppingScore } from "./final-assessment-renderer";
 import { renderRadarSummary } from "./radar-renderer";
 import { button, clearElement, element } from "./dom-helpers";
-import { comparisonFields, normalizeComparisonBundle, type ComparisonBundle, type ComparisonMapping } from "../../core/comparison-bundle";
+import { comparisonFieldKey, comparisonFields, normalizeComparisonBundle, type ComparisonBundle, type ComparisonMapping } from "../../core/comparison-bundle";
 
 export interface RecordReplayComparisonOptions {
   initial?: { bundle: ComparisonBundle; mapping: ComparisonMapping };
@@ -84,11 +84,11 @@ export class RecordReplayRenderer {
       section.append(element("div", "record-replay__score", `${scoreProfile.scoreLabel} ${score.toFixed(1)}`));
 
       const fields = element("dl", "record-replay__fields");
-      const comparison = this.comparison ? new Map(comparisonFields(this.snapshot, this.comparison.bundle, this.comparison.mapping, sample.sampleId).map((item) => [item.fieldKey, item] as const)) : new Map();
+      const comparison = this.comparison ? new Map(comparisonFields(this.snapshot, this.comparison.bundle, this.comparison.mapping, sample.sampleId).map((item) => [comparisonFieldKey(item.flowStep, item.fieldKey), item] as const)) : new Map();
       for (const observation of observations) {
         if (observation.fieldKey === "final_phase" || observation.fieldKey.startsWith("blind_guess_")) continue;
         const dt = element("dt", "record-replay__field-key", observation.fieldKey);
-        const compared = comparison.get(observation.fieldKey);
+        const compared = comparison.get(comparisonFieldKey(observation.stageId, observation.fieldKey));
         const dd = element("dd", "record-replay__field-value");
         if (Array.isArray(observation.value)) {
           for (const value of observation.value) dd.append(element("span", `record-replay__own-tag${compared?.overlappingTags?.includes(String(value)) ? " is-overlap" : ""}`, String(value)));
@@ -100,7 +100,7 @@ export class RecordReplayRenderer {
         fields.append(dt, dd);
       }
       for (const field of comparison.values()) {
-        if (observations.some((item) => item.fieldKey === field.fieldKey) || field.peer === undefined) continue;
+        if (observations.some((item) => comparisonFieldKey(item.stageId, item.fieldKey) === comparisonFieldKey(field.flowStep, field.fieldKey)) || field.peer === undefined) continue;
         fields.append(element("dt", "record-replay__field-key", field.fieldKey), element("dd", "record-replay__field-value is-peer-only", readable(field.peer)));
       }
       section.append(fields);

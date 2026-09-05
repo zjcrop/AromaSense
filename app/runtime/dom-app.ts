@@ -6,7 +6,7 @@ import { RevisionCheckpointService } from "../core/revision-checkpoint-service";
 import { SampleRecognitionService } from "../core/sample-recognition-service";
 import { SessionRecordService, type CuppingRecordSnapshot } from "../core/session-record-service";
 import { SessionShareClient } from "../core/session-share-client";
-import { buildSubmissionBundle, completeCsv } from "../core/submission-bundle";
+import { completeCsv } from "../core/submission-bundle";
 import { CloudflareSyncRepository } from "../core/sync-repository";
 import { createCoffeeFoundationGateway } from "../core/coffee-foundation-runtime";
 import { SyncEngine, type SyncRunResult } from "../core/sync-engine";
@@ -20,6 +20,7 @@ import { StageProgressReader } from "../storage/stage-progress-reader";
 import { SyncQueueStore } from "../storage/sync-queue-store";
 import { ComparisonMappingStore } from "../storage/comparison-mapping-store";
 import { EventCacheStore } from "../storage/event-cache-store";
+import { SubmissionBundleStore } from "../storage/submission-bundle-store";
 import { mapComparison } from "../core/comparison-bundle";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { CuppingScreenController } from "../ui/cupping-screen-controller";
@@ -67,6 +68,7 @@ export class AromaSenseDomApp {
   private readonly syncQueue: SyncQueueStore;
   private readonly syncEngine?: SyncEngine;
   private readonly revisions: RevisionCheckpointService;
+  private readonly submissions: SubmissionBundleStore;
   private readonly recognizer = new SampleRecognitionService();
   private preloadPromise?: Promise<AppPreloadState>;
   private homeModal?: HTMLElement;
@@ -76,6 +78,7 @@ export class AromaSenseDomApp {
     this.authStore = new LocalAuthSessionStore(this.preferences, options.now);
     this.pendingRegistrationStore = new LocalPendingRegistrationStore(this.preferences, options.now);
     this.syncQueue = new SyncQueueStore(db);
+    this.submissions = new SubmissionBundleStore(db);
     const repository = new LocalCuppingRepository(db);
     this.revisions = new RevisionCheckpointService(db, repository, this.syncQueue, { revisionId: () => crypto.randomUUID(), queueId: () => crypto.randomUUID() });
 
@@ -337,7 +340,7 @@ export class AromaSenseDomApp {
   }
 
   private async downloadRecord(snapshot: CuppingRecordSnapshot): Promise<void> {
-    const bundle = await buildSubmissionBundle(snapshot);
+    const bundle = await this.submissions.create(snapshot);
     const prefix = `AromaSense-${snapshot.session.metadata.date}-${snapshot.session.sessionId.slice(0, 8)}`;
     this.downloadFile(`${prefix}.json`, JSON.stringify(snapshot, null, 2), "application/json;charset=utf-8");
     this.downloadFile(`${prefix}.csv`, completeCsv(snapshot, bundle), "text/csv;charset=utf-8");

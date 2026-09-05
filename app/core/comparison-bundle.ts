@@ -1,6 +1,7 @@
 import { cuppingModeFromMetadata, type CuppingMode } from "./session-metadata";
 import type { SubmissionBundle } from "./submission-bundle";
 import type { CuppingRecordSnapshot } from "./session-record-service";
+import { sampleIndexFromMetadata } from "./sample-batch-service";
 
 export interface ComparisonBundle {
   schemaVersion: "aromasense-comparison/1.0";
@@ -11,7 +12,7 @@ export interface ComparisonBundle {
   samples: Array<{
     eventSampleId: string;
     sampleCode: string;
-    sampleIndex: number;
+    sampleIndex?: number;
     canonicalMetadata: Record<string, unknown>;
     observations: Array<{ flowStep: string; fieldKey: string; value: unknown }>;
   }>;
@@ -67,49 +68,60 @@ export function mapComparison(local: CuppingRecordSnapshot, peer: ComparisonBund
   const strict = cuppingModeFromMetadata(local.session.metadata) !== "open" || peer.mode !== "open";
   const entries: ComparisonMappingEntry[] = [];
   const used = new Set<number>();
-  for (const sample of local.samples) {
-    const eventSampleId = normalized(sample.metadata.eventSampleId);
-    const sampleCode = normalized(sample.metadata.sampleCode);
-    const storedSampleIndex = Number(sample.metadata.sampleIndex);
-    const sampleIndex = Number.isInteger(storedSampleIndex) && storedSampleIndex >= 0
-      ? storedSampleIndex
-      : local.samples.findIndex((item) => item.sampleId === sample.sampleId);
-    const canonical = canonicalFingerprint(sample.metadata);
-    const globalSampleId = normalized(sample.metadata.globalSampleId);
-    const candidates: Array<[ComparisonMappingEntry["matchedBy"], (item: ComparisonBundle["samples"][number]) => boolean]> = [
-      ["eventSampleId", (item) => Boolean(eventSampleId) && normalized(item.eventSampleId) === eventSampleId],
-      ["sampleCode", (item) => Boolean(sampleCode) && normalized(item.sampleCode) === sampleCode]
-    ];
-    if (strict) candidates.push(["sampleIndex", (item) => item.sampleIndex === sampleIndex]);
-    else {
-      candidates.push(["canonicalMetadata", (item) => Boolean(canonical) && canonicalFingerprint({ canonical: item.canonicalMetadata }) === canonical]);
-      candidates.push(["globalSampleId", (item) => Boolean(globalSampleId) && normalized(item.canonicalMetadata.globalSampleId) === globalSampleId]);
-    }
-    for (const [matchedBy, predicate] of candidates) {
-      const index = peer.samples.findIndex((item, peerIndex) => !used.has(peerIndex) && predicate(item));
-      if (index < 0) continue;
-      used.add(index); entries.push({ localSampleId: sample.sampleId, peerSampleIndex: index, matchedBy }); break;
+  const matched = new Set<string>();
+  type Sample = CuppingRecordSnapshot["samples"][number];
+  type PeerSample = ComparisonBundle["samples"][number];
+  const strategies: Array<[ComparisonMappingEntry["matchedBy"], (sample: Sample) => string, (sample: PeerSample) => string]> = [
+    ["eventSampleId", (item) => normalized(item.metadata.eventSampleId), (item) => normalized(item.eventSampleId)],
+    ["sampleCode", (item) => normalized(item.metadata.sampleCode), (item) => normalized(item.sampleCode)]
+  ];
+  if (strict) strategies.push(["sampleIndex", (item) => String(sampleIndexFromMetadata(item.metadata) ?? ""), (item) => String(sampleIndexFromMetadata({ sampleIndex: item.sampleIndex }) ?? "")]);
+  else strategies.push(
+    ["canonicalMetadata", (item) => canonicalFingerprint(item.metadata), (item) => canonicalFingerprint({ canonical: item.canonicalMetadata })],
+    ["globalSampleId", (item) => normalized(item.metadata.globalSampleId), (item) => normalized(item.canonicalMetadata.globalSampleId)]
+  );
+  // Apply each identity priority globally; ambiguous candidates remain unmatched.
+  for (const [matchedBy, ownKey, peerKey] of strategies) {
+    const candidates = local.samples.filter((sample) => !matched.has(sample.sampleId)).map((sample) => {
+      const key = ownKey(sample);
+      return { sample, indices: peer.samples.flatMap((item, index) => key && !used.has(index) && peerKey(item) === key ? [index] : []) };
+    });
+    const claims = new Map<number, number>();
+    for (const candidate of candidates) for (const index of candidate.indices) claims.set(index, (claims.get(index) ?? 0) + 1);
+    for (const { sample, indices } of candidates) {
+      if (indices.length !== 1 || claims.get(indices[0]) !== 1) continue;
+      used.add(indices[0]); matched.add(sample.sampleId);
+      entries.push({ localSampleId: sample.sampleId, peerSampleIndex: indices[0], matchedBy });
     }
   }
   return { schemaVersion: "aromasense-comparison-mapping/1.0", localSessionId: local.session.sessionId, comparisonSubjectId: peer.comparisonSubjectId, entries };
 }
 
-export interface ComparisonFieldView { fieldKey: string; own: unknown; peer?: unknown; peerOnlyTags?: string[]; overlappingTags?: string[]; }
+const COMPARISON_CONTROL_FIELDS = new Set(["final_phase", "score_confirmed", "final_score_confirmed", "status", "stageStatus", "stage_status", "flowStatus", "displayOrder", "completedAt", "startedAt", "completionColor"]);
+export function isComparisonField(fieldKey: string): boolean { return !COMPARISON_CONTROL_FIELDS.has(fieldKey) && !fieldKey.startsWith("blind_guess_") && !fieldKey.startsWith("ui_"); }
+
+export function comparisonFieldKey(flowStep: string, fieldKey: string): string {
+  const step = flowStep === "preparation" ? "aroma" : flowStep === "final"
+    ? (["flavor_tags", "notes"].includes(fieldKey) ? "flavor" : "overall") : flowStep;
+  return JSON.stringify([step, fieldKey]);
+}
+
+export interface ComparisonFieldView { flowStep: string; fieldKey: string; own: unknown; peer?: unknown; peerOnlyTags?: string[]; overlappingTags?: string[]; }
 
 export function comparisonFields(local: CuppingRecordSnapshot, peer: ComparisonBundle, mapping: ComparisonMapping, localSampleId: string): ComparisonFieldView[] {
   const entry = mapping.entries.find((item) => item.localSampleId === localSampleId);
   if (!entry) return [];
   const own = local.observations.filter((item) => item.sampleId === localSampleId);
   const other = peer.samples[entry.peerSampleIndex]?.observations ?? [];
-  const keys = [...new Set([...own.map((item) => item.fieldKey), ...other.map((item) => item.fieldKey)])]
-    .filter((key) => !["final_phase", "score_confirmed"].includes(key));
-  return keys.map((fieldKey) => {
-    const ownValue = own.find((item) => item.fieldKey === fieldKey)?.value;
-    const peerValue = other.find((item) => item.fieldKey === fieldKey)?.value;
+  const keys = [...new Set([...own.filter((item) => isComparisonField(item.fieldKey)).map((item) => comparisonFieldKey(item.stageId, item.fieldKey)), ...other.filter((item) => isComparisonField(item.fieldKey)).map((item) => comparisonFieldKey(item.flowStep, item.fieldKey))])];
+  return keys.map((key) => {
+    const [flowStep, fieldKey] = JSON.parse(key) as [string, string];
+    const ownValue = own.find((item) => comparisonFieldKey(item.stageId, item.fieldKey) === key)?.value;
+    const peerValue = other.find((item) => comparisonFieldKey(item.flowStep, item.fieldKey) === key)?.value;
     if (Array.isArray(ownValue) || Array.isArray(peerValue)) {
       const a = new Set(Array.isArray(ownValue) ? ownValue.map(String) : []); const b = new Set(Array.isArray(peerValue) ? peerValue.map(String) : []);
-      return { fieldKey, own: ownValue, peer: peerValue, overlappingTags: [...a].filter((item) => b.has(item)), peerOnlyTags: [...b].filter((item) => !a.has(item)) };
+      return { flowStep, fieldKey, own: ownValue, peer: peerValue, overlappingTags: [...a].filter((item) => b.has(item)), peerOnlyTags: [...b].filter((item) => !a.has(item)) };
     }
-    return { fieldKey, own: ownValue, peer: peerValue };
+    return { flowStep, fieldKey, own: ownValue, peer: peerValue };
   });
 }

@@ -1,6 +1,7 @@
 import { STAGE_IDS } from "../../shared/protocol/aromasense-v1";
 import type { CuppingRecordSnapshot } from "./session-record-service";
 import { canonicalJson, sha256Hex } from "./revision-builder";
+import { sampleIndexFromMetadata, type SampleRecord } from "./sample-batch-service";
 
 export interface EventManifest {
   schemaVersion: "aromasense-event-manifest/1.0";
@@ -20,7 +21,7 @@ export interface EventBinding {
   eventRevision: number;
   eventSampleId: string;
   sampleCode: string;
-  sampleIndex: number;
+  sampleIndex?: number;
   localSampleId: string;
 }
 
@@ -53,12 +54,18 @@ export function eventManifestFromSubmission(value: unknown): EventManifest | und
   return manifest as unknown as EventManifest;
 }
 
-function sampleEventId(metadata: Record<string, unknown>, eventId: string, index: number): string {
-  const explicit = String(metadata.eventSampleId ?? "").trim();
-  return explicit || `${eventId}:sample:${index + 1}`;
+function bindingForSample(sample: SampleRecord, eventId: string, eventRevision: number): EventBinding {
+  const sampleIndex = sampleIndexFromMetadata(sample.metadata);
+  const fallbackId = sampleIndex === undefined ? `local:${encodeURIComponent(sample.sampleId)}` : `sample:${sampleIndex + 1}`;
+  return {
+    eventId, eventRevision, localSampleId: sample.sampleId, sampleIndex,
+    eventSampleId: String(sample.metadata.eventSampleId ?? "").trim() || `${eventId}:${fallbackId}`,
+    sampleCode: String(sample.metadata.sampleCode ?? "").trim() || (sampleIndex === undefined ? `local:${sample.sampleId}` : `S${String(sampleIndex + 1).padStart(2, "0")}`)
+  };
 }
 
-export async function buildSubmissionBundle(snapshot: CuppingRecordSnapshot): Promise<SubmissionBundle> {
+export async function buildSubmissionBundle(snapshot: CuppingRecordSnapshot, revision = 1): Promise<SubmissionBundle> {
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("INVALID_SUBMISSION_REVISION");
   const metadata = snapshot.session.metadata;
   const eventId = metadata.eventId?.trim() || `local:${snapshot.session.sessionId}`;
   const eventRevision = metadata.eventRevision ?? 1;
@@ -73,19 +80,14 @@ export async function buildSubmissionBundle(snapshot: CuppingRecordSnapshot): Pr
       deepLink: `https://aromasense.invalid/event/${encodeURIComponent(eventId)}?revision=${eventRevision}`
     }
   };
-  const eventBindings = snapshot.samples.map((sample, index) => ({
-    eventId, eventRevision, eventSampleId: sampleEventId(sample.metadata, eventId, index),
-    sampleCode: String(sample.metadata.sampleCode ?? `S${String(sample.displayNumber).padStart(2, "0")}`),
-    sampleIndex: Number.isInteger(sample.metadata.sampleIndex) && Number(sample.metadata.sampleIndex) >= 0 ? Number(sample.metadata.sampleIndex) : index,
-    localSampleId: sample.sampleId
-  }));
+  const eventBindings = snapshot.samples.map((sample) => bindingForSample(sample, eventId, eventRevision));
   const progress: ProgressEnvelope = {
     schemaVersion: "aromasense-progress/1.0", sessionId: snapshot.session.sessionId,
     samples: snapshot.samples.map((sample) => ({ sampleId: sample.sampleId, steps: STAGE_IDS.map((flowStep) => ({
       flowStep, status: snapshot.stageStates.find((state) => state.sampleId === sample.sampleId && state.stageId === flowStep)?.status ?? "not_started"
     })) }))
   };
-  const content = { schemaVersion: "aromasense-submission/1.0" as const, revision: eventRevision, createdAt: snapshot.exportedAt, eventManifest, eventBindings, progress, record: snapshot };
+  const content = { schemaVersion: "aromasense-submission/1.0" as const, revision, createdAt: snapshot.exportedAt, eventManifest, eventBindings, progress, record: snapshot };
   const hashSource = { eventManifest, eventBindings, progress, record: { ...snapshot, exportedAt: undefined } };
   return { ...content, contentHash: await sha256Hex(canonicalJson(hashSource)) };
 }

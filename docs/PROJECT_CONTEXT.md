@@ -40,6 +40,14 @@ For blind/semi-blind Sessions, reveal occurs at the whole-Session completion bou
 
 These fields live in the existing `sessions.metadata_json` document. This does not add a physical table or schema column and therefore does not require a new SQLite migration.
 
+## Submission and comparison identity
+
+New samples persist their capture `sampleIndex` before any display reordering. Event bindings use explicit event identifiers/codes or that stable capture index; legacy samples with no recorded index keep `sampleIndex` absent and use a local-ID fallback in exports. Neither array order, `sortOrder` nor `displayNumber` may supply an identity match. Blind and semi-blind comparison never invent a missing index.
+
+Matching applies each priority across the whole sample set, reserves exact event matches before weaker matches, and leaves ambiguous candidates unmatched. Observation comparison keys include both the normalized FlowStep and field key, so repeated temperature observations cannot cross-match. Legacy preparation/final fields map to their corresponding current flow. Progress controls, confirmation flags and display state are excluded from comparison and local observations remain unchanged.
+
+Submission `revision` is independent of Event `eventRevision`. Migration `0004_submission_revisions.sql` records each Session's immutable export revision/hash in local SQLite. Re-exporting unchanged content reuses the latest revision; changed content increments it, including when reverting to an older content state. The transaction and uniqueness constraint prevent revision reuse with different hashes. Export time does not change the content hash. Web and Android apply the same numbered migration before enabling exports.
+
 ## Score-profile routing
 
 The sensory workflow, raw observations, flavor tags, radar data and defect observations remain shared across all three cupping modes. At the final scoring stage the Session mode routes to one explicit score profile:
@@ -56,6 +64,7 @@ The profile owns the scoring label, metadata policy and calculator version. The 
 - One active sample/stage editing context at a time.
 - Switching samples must not discard unfinished local edits.
 - Completed/recorded stages have clear visual progress states.
+- Browsing samples or workflow steps leaves both the Session and sensory stages unstarted. Empty edits, identity edits and legacy phase navigation do not start a Session. The first meaningful saved sensory input activates the Session; the first meaningful stage input records its start time. Completion still requires the stage's explicit criteria.
 - Voice prompts may signal preparation, high-temperature, mid-temperature, low-temperature, and completion stages.
 - Flavor labels can be grouped/collapsed and may support user ordering where defined by product requirements.
 - Blind visibility must be enforced by shared view/domain helpers rather than isolated CSS hiding, so web and Android use the same rule.

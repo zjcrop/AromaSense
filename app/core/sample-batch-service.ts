@@ -16,6 +16,13 @@ export interface SampleRecord {
 
 export type SampleIdFactory = (index: number, input: SampleDraftInput) => string;
 
+/** Capture identity never derives from the current rail/display order. */
+export function sampleIndexFromMetadata(metadata: Record<string, unknown>): number | undefined {
+  const value = metadata.sampleIndex;
+  const index = typeof value === "number" ? value : typeof value === "string" && /^\d+$/u.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(index) && index >= 0 ? index : undefined;
+}
+
 function cleanOptionalText(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
@@ -50,7 +57,7 @@ export function buildSampleBatch(
     displayNumber: index + 1,
     sortOrder: index + 1,
     label: cleanOptionalText(input.label),
-    metadata: { sampleIndex: index, ...(input.metadata ?? {}) },
+    metadata: { ...(input.metadata ?? {}), sampleIndex: sampleIndexFromMetadata(input.metadata ?? {}) ?? index },
     createdAt: now,
     updatedAt: now
   }));
