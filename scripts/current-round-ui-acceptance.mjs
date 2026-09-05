@@ -166,7 +166,7 @@ async function runAcceptance(appUrl) {
 
     await waitExpression(cdp, `document.querySelector('#app')?.dataset.screen==='setup'`, "setup screen");
 
-    await click(cdp, ".batch-setup__add");
+    await click(cdp, '[data-home-action="manual-entry"]');
     const manual = await cdp.evaluate(`(() => ({
       textarea: Boolean(document.querySelector('.manual-import__textarea')),
       hint: document.querySelector('.manual-import__hint')?.textContent?.trim() || ''

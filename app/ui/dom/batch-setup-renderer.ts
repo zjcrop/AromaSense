@@ -23,6 +23,7 @@ const PLACEHOLDERS: Readonly<Record<string, string>> = {
 
 const CUPPING_TARGET_VALUES = ["open", "blind", "semi_blind"] as const;
 type CuppingTargetValue = typeof CUPPING_TARGET_VALUES[number];
+type RecordScope = "unfinished" | "completed";
 
 const CUPPING_TARGET_LABELS: Readonly<Record<CuppingTargetValue, string>> = {
   open: "公开杯测",
@@ -107,10 +108,16 @@ function installHomeStyles(): void {
     }
     .batch-setup__samples-section{margin:0 0 28px}
     .batch-setup__capture-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:9px!important;margin:0 0 14px!important}
-    .batch-setup__capture-actions button{
-      min-height:44px!important;border-radius:8px!important;background:#1b1b1b!important;font-size:13px!important;
+    .batch-setup__capture-actions .batch-setup__home-capture-action{
+      min-height:44px!important;margin:0!important;padding:8px 10px!important;
+      border:1px solid rgba(185,153,90,.28)!important;border-radius:8px!important;
+      background:#1b1b1b!important;color:#c9bea4!important;box-shadow:none!important;
+      font:inherit!important;font-size:13px!important;font-weight:650!important;letter-spacing:.04em!important;
     }
-    .batch-setup__import-inline{border-color:rgba(185,153,90,.38)!important;color:#c9bea4!important}
+    .batch-setup__capture-actions .batch-setup__home-capture-action:hover,
+    .batch-setup__capture-actions .batch-setup__home-capture-action:focus-visible{
+      border-color:#b9995a!important;background:#202020!important;color:#e1cfaa!important;outline:none!important;
+    }
     .batch-setup__rows{margin-top:4px}
     .batch-setup__footer-section{display:grid;gap:10px;margin:10px 0 0;padding:22px 0 0;border-top:1px solid rgba(255,255,255,.065)}
     .batch-setup__footer-section .batch-setup__start{
@@ -123,6 +130,16 @@ function installHomeStyles(): void {
       background:#1b1b1b;color:#c9bea4;font:inherit;font-size:14px;font-weight:680;letter-spacing:.12em;
     }
     .batch-setup__records-footer:hover,.batch-setup__records-footer:focus-visible{border-color:#b9995a;color:#e1cfaa;outline:none}
+    .batch-setup__records-menu{
+      display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;
+      margin:-2px 0 0;padding:10px;border:1px solid rgba(185,153,90,.18);border-radius:10px;background:#171717;
+    }
+    .batch-setup__records-menu[hidden]{display:none!important}
+    .batch-setup__records-scope{
+      min-height:44px;margin:0;padding:8px 10px;border:1px solid rgba(185,153,90,.28);border-radius:8px;
+      background:#1b1b1b;color:#c9bea4;font:inherit;font-size:13px;font-weight:650;letter-spacing:.04em;
+    }
+    .batch-setup__records-scope:hover,.batch-setup__records-scope:focus-visible{border-color:#b9995a;background:#202020;color:#e1cfaa;outline:none}
     .batch-setup__file-input{display:none!important}
     @media(max-width:620px){
       .batch-setup{padding-top:20px!important}
@@ -151,6 +168,7 @@ export class BatchSetupRenderer {
   private readonly base: BaseBatchSetupRenderer;
   private targetObserver?: MutationObserver;
   private recordsButton?: HTMLButtonElement;
+  private recordsMenu?: HTMLElement;
 
   constructor(
     private readonly root: HTMLElement,
@@ -166,6 +184,7 @@ export class BatchSetupRenderer {
   async render(): Promise<void> {
     this.targetObserver?.disconnect();
     this.targetObserver = undefined;
+    this.recordsMenu = undefined;
     await this.base.render();
     this.flattenSessionMetadataFields();
     this.installDirectCuppingTarget();
@@ -201,10 +220,18 @@ export class BatchSetupRenderer {
     }
 
     if (records) {
-      records.textContent = "记录";
-      records.className = "batch-setup__records-footer";
-      records.dataset.homeAction = "records";
-      this.recordsButton = records;
+      const recordToggle = records.cloneNode(true) as HTMLButtonElement;
+      recordToggle.textContent = "记录";
+      recordToggle.className = "batch-setup__records-footer";
+      recordToggle.dataset.homeAction = "records";
+      recordToggle.setAttribute("aria-expanded", "false");
+      recordToggle.setAttribute("aria-controls", "batch-setup-records-menu");
+      recordToggle.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleRecordsMenu();
+      });
+      this.recordsButton = recordToggle;
     } else {
       this.recordsButton = undefined;
     }
@@ -224,11 +251,12 @@ export class BatchSetupRenderer {
     }
     if (importButton) {
       importButton.textContent = "导入数据";
-      importButton.className = "batch-setup__capture batch-setup__import-inline";
       importButton.dataset.homeAction = "import-data";
     }
 
-    captureActions.replaceChildren(...[batch, manual, clear, importButton].filter((button): button is HTMLButtonElement => Boolean(button)));
+    const homeActions = [batch, manual, clear, importButton].filter((button): button is HTMLButtonElement => Boolean(button));
+    for (const action of homeActions) action.className = "batch-setup__capture batch-setup__home-capture-action";
+    captureActions.replaceChildren(...homeActions);
   }
 
   private sectionTitle(text: string): HTMLElement {
@@ -236,6 +264,44 @@ export class BatchSetupRenderer {
     title.className = "batch-setup__home-section-title";
     title.textContent = text;
     return title;
+  }
+
+  private buildRecordsMenu(): HTMLElement {
+    const menu = document.createElement("nav");
+    menu.id = "batch-setup-records-menu";
+    menu.className = "batch-setup__records-menu";
+    menu.dataset.homeRecordsMenu = "true";
+    menu.setAttribute("aria-label", "记录分类");
+    menu.hidden = true;
+
+    const addScope = (scope: RecordScope, label: string): void => {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "batch-setup__records-scope";
+      action.dataset.homeRecordScope = scope;
+      action.textContent = label;
+      action.addEventListener("click", () => void this.openRecordScope(scope));
+      menu.append(action);
+    };
+
+    addScope("unfinished", "未完成记录");
+    addScope("completed", "已完成记录");
+    return menu;
+  }
+
+  private toggleRecordsMenu(): void {
+    if (!this.recordsButton || !this.recordsMenu) return;
+    const opening = this.recordsMenu.hidden;
+    this.recordsMenu.hidden = !opening;
+    this.recordsButton.setAttribute("aria-expanded", String(opening));
+  }
+
+  private async openRecordScope(scope: RecordScope): Promise<void> {
+    if (this.recordsMenu) this.recordsMenu.hidden = true;
+    this.recordsButton?.setAttribute("aria-expanded", "false");
+    await this.options.onOpenRecords?.();
+    const tab = document.querySelector<HTMLButtonElement>(`.home-modal [data-record-scope-tab="${scope}"]`);
+    if (tab && tab.getAttribute("aria-pressed") !== "true") tab.click();
   }
 
   private rebuildHomeLayout(): void {
@@ -267,7 +333,10 @@ export class BatchSetupRenderer {
     footer.className = "batch-setup__footer-section";
     footer.setAttribute("aria-label", "开始杯测与记录");
     footer.append(start);
-    if (this.recordsButton) footer.append(this.recordsButton);
+    if (this.recordsButton) {
+      this.recordsMenu = this.buildRecordsMenu();
+      footer.append(this.recordsButton, this.recordsMenu);
+    }
 
     const hiddenInputs = [...this.root.querySelectorAll<HTMLInputElement>(".batch-setup__file-input")];
     this.root.replaceChildren(header, metadata, samples, ...hiddenInputs, footer);
