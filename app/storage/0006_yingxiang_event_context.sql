@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS yingxiang_events (
   title TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('draft','published','active','completed','cancelled')),
   policy_json TEXT NOT NULL,
+  manifest_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS yingxiang_event_contexts (
   title TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('draft','published','active','completed','cancelled')),
   policy_json TEXT NOT NULL,
+  manifest_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   cached_at TEXT NOT NULL
