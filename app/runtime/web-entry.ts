@@ -59,13 +59,11 @@ async function main(): Promise<void> {
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
 
+  // Recognition is intentionally not warmed during application startup. The OCR
+  // runtime and its large coffee recognition book are initialized on the first
+  // recognition action instead, keeping the normal homepage resident set small.
+  startup.setStatus("recognition", "ready", "图像识别按需加载；首次识别时初始化");
   startup.allowEnter();
-  startup.setStatus("recognition", "loading", "正在后台预热图像识别…");
-  void app.warmRecognition().then((result) => {
-    startup.setStatus("recognition", result.ready ? "ready" : "degraded", result.message);
-  }).catch((error) => {
-    startup.setStatus("recognition", "degraded", `识别预热失败：${error instanceof Error ? error.message : String(error)}`);
-  });
 
   startup.setStatus("account", "loading", "正在读取本地账户状态…");
   startup.setStatus("sync", "loading", "正在恢复本地同步队列…");
