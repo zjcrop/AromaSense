@@ -5,6 +5,7 @@ import {
   type FinalAssessmentPhase
 } from "../../core/cupping-progress-policy";
 import { scoreProfileForMode, type CuppingScoreProfile } from "../../core/cupping-score-profile";
+import type { CuppingCompletionTiming } from "../../core/cupping-timing";
 import type { FlavorGroupPreferences } from "../flavor-group-preferences";
 import type { RadarAxisValue } from "../sample-summary-model";
 import { button, clearElement, element, setPressed } from "./dom-helpers";
@@ -25,6 +26,7 @@ export interface FinalAssessmentInput {
   callbacks: FinalAssessmentCallbacks;
   scoreProfile?: CuppingScoreProfile;
   phase?: FinalAssessmentPhase;
+  completionTiming?: CuppingCompletionTiming;
 }
 
 const PROFILE_AXES = [
@@ -36,6 +38,20 @@ const QUALITY_AXES = [
   ["quality_flavor", "风味"], ["quality_aftertaste", "余韵"], ["quality_acidity", "酸质"], ["quality_sweetness", "甜感"],
   ["quality_body", "醇厚度"], ["quality_clean", "干净度"], ["quality_uniformity", "一致性"], ["quality_balance", "平衡性"]
 ] as const;
+
+function ensureScoreConfirmationStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-score-confirmation]")) return;
+  const style = document.createElement("style");
+  style.dataset.aromasenseScoreConfirmation = "true";
+  style.textContent = `
+    .final-assessment__score-confirm{display:block;min-width:min(320px,90%);margin:24px auto 0;padding:14px 24px;text-align:center;font-size:18px!important;font-weight:800!important;letter-spacing:.04em}
+    .final-assessment__score-confirm.is-confirmed{font-weight:800!important}
+    .final-assessment__score-lock-note{display:block;margin:8px auto 0;max-width:520px;text-align:center;color:#989289;font-size:11px;line-height:1.55}
+    .cupping-completion-stamp{margin:9px auto 0;padding:7px 10px;max-width:520px;text-align:center;border:1px solid rgba(185,153,90,.18);border-radius:8px;background:rgba(185,153,90,.05);color:#aaa398;font-size:11px;line-height:1.45}
+    .cupping-completion-stamp strong{color:#c9bea4;font-weight:700}
+  `;
+  document.head.append(style);
+}
 
 function values(observations: readonly SensoryObservation[]): Map<string, unknown> {
   return new Map(observations.map((item) => [item.fieldKey, item.value] as const));
@@ -176,12 +192,12 @@ function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
 
   const summary = element("section", "final-assessment__section");
   summary.append(element("h3", "final-assessment__section-title", "总结行"));
-  const text = element("textarea", "final-assessment__notes");
-  text.rows = 3;
-  text.placeholder = "用一句或数句总结本样品的综合表现";
-  text.value = typeof map.get("overall_summary") === "string" ? String(map.get("overall_summary")) : "";
-  text.addEventListener("change", () => void input.callbacks.saveField("overall_summary", text.value));
-  summary.append(text);
+  const textArea = element("textarea", "final-assessment__notes");
+  textArea.rows = 3;
+  textArea.placeholder = "用一句或数句总结本样品的综合表现";
+  textArea.value = typeof map.get("overall_summary") === "string" ? String(map.get("overall_summary")) : "";
+  textArea.addEventListener("change", () => void input.callbacks.saveField("overall_summary", textArea.value));
+  summary.append(textArea);
   root.append(summary);
 }
 
@@ -221,16 +237,28 @@ function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
   const confirmed = map.get(confirmationKey) === true;
   const confirm = button(
     `final-assessment__next final-assessment__score-confirm${confirmed ? " is-confirmed" : ""}`,
-    confirmed ? "评分已确认" : "确认评分",
+    confirmed ? "得分已确认" : "确认得分",
     () => void input.callbacks.saveField(confirmationKey, true)
   );
   confirm.disabled = confirmed;
   confirm.setAttribute("aria-pressed", String(confirmed));
-  confirm.title = confirmed ? "评分已确认；若修改影响分数的综评或缺陷字段，将自动要求重新确认" : FINAL_PHASE_COMPLETION_HINTS.score;
-  root.append(confirm);
+  confirm.title = confirmed ? "得分已确认；本样品杯测记录已锁定为只读" : FINAL_PHASE_COMPLETION_HINTS.score;
+  root.append(
+    confirm,
+    element("small", "final-assessment__score-lock-note", "确认得分后，本样品杯测记录将被锁定，无法修改。")
+  );
+  if (input.completionTiming) {
+    const stamp = element("div", "cupping-completion-stamp");
+    stamp.append(
+      element("strong", "", "本分支完成"),
+      document.createTextNode(` · ${input.completionTiming.elapsedLabel} · ${input.completionTiming.clockLabel}`)
+    );
+    root.append(stamp);
+  }
 }
 
 export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentInput): void {
+  ensureScoreConfirmationStyles();
   clearElement(root);
   const phase = input.phase ?? finalAssessmentPhase(input.observations);
   const nav = element("nav", "final-assessment__phase-nav");
