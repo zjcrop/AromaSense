@@ -37,7 +37,7 @@ test("records sit below the dominant start action and expand unfinished/complete
 test("record submenu routes each entry to the corresponding records view scope", () => {
   const home = source("app/ui/dom/batch-setup-renderer.ts");
   assert.match(home, /await this\.options\.onOpenRecords\?\.\(\)/);
-  assert.match(home, /data-record-scope-tab=\\"\$\{scope\}\\"/);
+  assert.match(home, /data-record-scope-tab="\$\{scope\}"/);
   assert.match(home, /tab\.getAttribute\("aria-pressed"\) !== "true"/);
   assert.match(home, /tab\.click\(\)/);
 });
