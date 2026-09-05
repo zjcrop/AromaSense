@@ -56,6 +56,11 @@ function validConfirmedLabel(value: string): boolean {
   return Boolean(label) && !/^待确认样品\s+\d+$/u.test(label);
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  return String(error || "确认失败，请重试");
+}
+
 export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchReviewDialogHandle {
   const previous = options.root.querySelector<HTMLElement>(".batch-review");
   previous?.remove();
@@ -170,14 +175,20 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   const validation = element("p", "batch-review__validation");
   validation.hidden = true;
   form.append(validation);
-  form.addEventListener("input", () => options.onChange?.(readValue(overlay)));
+  form.addEventListener("input", () => {
+    validation.hidden = true;
+    options.onChange?.(readValue(overlay));
+  });
   panel.append(form);
 
   const footer = element("footer", "batch-review__footer");
   const previousButton = button("batch-review__secondary", "上一个", () => options.onPrevious?.(readValue(overlay)));
   previousButton.disabled = !options.onPrevious;
   const isFinalPending = options.finalPending ?? (options.confirmed >= options.total - 1 || options.index === options.total - 1);
-  const confirmButton = button("batch-review__primary", isFinalPending ? "确认并完成" : "确认并下一个", async () => {
+  const defaultConfirmText = isFinalPending ? "确认并完成" : "确认并下一个";
+  let confirming = false;
+  const confirmButton = button("batch-review__primary", defaultConfirmText, async () => {
+    if (confirming) return;
     const value = readValue(overlay);
     if (!validConfirmedLabel(value.label)) {
       validation.textContent = value.label
@@ -188,12 +199,32 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
       nameInput.select();
       return;
     }
+
+    confirming = true;
+    confirmButton.disabled = true;
+    previousButton.disabled = true;
+    exit.disabled = true;
+    confirmButton.textContent = "正在确认…";
     validation.hidden = true;
-    const accepted = await options.onConfirm(value);
-    if (accepted === false) {
-      validation.textContent = "仍有无效或冲突的信息，请检查样品名称和字段后再确认。";
+    try {
+      const accepted = await options.onConfirm(value);
+      if (accepted === false) {
+        validation.textContent = "仍有需要处理的信息。请检查样品名称或修正字段后再次确认。";
+        validation.hidden = false;
+        confirming = false;
+        confirmButton.disabled = false;
+        previousButton.disabled = !options.onPrevious;
+        exit.disabled = false;
+        confirmButton.textContent = defaultConfirmText;
+      }
+    } catch (error) {
+      validation.textContent = `确认失败：${errorMessage(error)}`;
       validation.hidden = false;
-      return;
+      confirming = false;
+      confirmButton.disabled = false;
+      previousButton.disabled = !options.onPrevious;
+      exit.disabled = false;
+      confirmButton.textContent = defaultConfirmText;
     }
   });
   footer.append(previousButton, confirmButton);
