@@ -7,107 +7,155 @@
 - 发布杯测的主办方必须是已注册并已登录的 AromaSense 用户。
 - `yingxiang_events.owner_user_id` 是活动唯一主账户所有权键。
 - 参与者可以登录自己的长期账户，也可以不注册，以访客身份加入。
-- 参与关系不写入 `users` 的永久父子关系；活动参与者使用 `yingxiang_participants` 表形成 event-scoped principal。
-- 未来迎香收费/授权应挂在活动 owner / entitlement 层，不改变参与者数据模型；B0.1 不引入任何付费服务或计费依赖。
+- 参与关系不写入 `users` 的永久父子关系；活动参与者使用 `yingxiang_participants` 形成 event-scoped principal。
+- 未来迎香收费 / 授权应挂在活动 owner / entitlement 层，不改变参与者数据模型；B0.1 不引入任何付费服务或计费依赖。
 
 ## 2. 双重身份与临时子账户
 
-已登录用户通过迎香分享链接加入活动时，可以同时存在：
+已登录用户通过迎香分享链接加入活动时，同时可以存在：
 
 1. Personal Account：用户自己的长期 AromaSense 身份；
 2. Event Principal：当前活动中的临时参与身份。
 
-活动进行中，Event Principal 的显示优先级高于 Personal Account：
+活动进行中 Event Principal 优先：
 
-- UI 只显示活动 `display_name`；
-- 个人账户昵称不会被自动带入活动；
-- 只有主办方分享策略允许，并且参与者明确选择使用个人账户名时，个人名称才可以成为活动 `display_name`；
-- `account_user_id` 只用于账户绑定、同步和后续数据归属，不作为活动公开称呼。
+- UI 使用活动 `display_name`；
+- 个人账户昵称不会自动带入活动；
+- 只有主办方允许且参与者主动选择时，个人账户显示名称才可成为活动名称；
+- 个人账户显示名称由服务器保存并验证，客户端不能以 `nameSource=account` 自报任意文本；
+- `account_user_id` 用于账户绑定和数据归属，不作为活动公开称呼。
 
-活动结束、退出或被主办方释放后，Event Principal 进入 `released`，界面恢复 Personal Account 身份。临时从属关系仅限该 `event_id`。
+活动结束、退出或被释放后，Event Principal 进入 `released`。临时从属关系仅限对应 `event_id`。
 
-## 3. 参与名称规则
+## 3. Event Policy 与 Event Manifest
 
-分享/发布活动时写入 `yingxiang-event-policy/0.1`：
+活动规则使用 `yingxiang-event-policy/0.1`：
 
-- `organizer_assigned`：只能使用主办方预先分配的参与名称；
-- `participant_choice`：参与者可在规则内填写活动名称；
-- `allowAccountDisplayName`：是否允许参与者主动选择个人账户名作为活动名称；
-- `uniqueWithinEvent`：活动内参与名称是否唯一；
-- `minLength` / `maxLength`：长度约束；
-- `requiredPrefix`：可选固定前缀。
+- `organizer_assigned` / `participant_choice`；
+- `allowAccountDisplayName`；
+- `uniqueWithinEvent`；
+- `minLength` / `maxLength`；
+- `requiredPrefix`；
+- `revealSampleIdentity`；
+- `calibrationRepeatEnabled`。
 
-B0.1 不允许主办方下发任意正则表达式作为命名规则，避免客户端正则拒绝服务和多端实现差异。云端名称唯一性由 D1 trigger 按活动 policy 原子校验，避免并发加入绕过客户端检查。
+参与端公开杯测数据使用 `yingxiang-event-manifest/0.1`：
+
+```text
+organizerName
+cuppingMode
+samples[]
+  ├─ eventSampleId
+  ├─ sampleCode
+  ├─ order
+  └─ participant-safe label (optional)
+```
+
+`eventSampleId` 是活动范围内稳定槽位 ID，不等同于真实咖啡身份。盲测 Manifest 不包含 `canonicalSampleId`。
 
 ## 4. 分享链接与邀请
 
-云端 `yingxiang_invites` 与第一批 Worker API 已接入：
-
-- 分享链接携带活动 invite token；
-- D1 只保存 token 的 SHA-256 hash，不保存明文 token；
+- D1 只保存 invite token 的 SHA-256 hash；
 - invite 绑定 `event_id + event_revision`；
-- 支持过期、最大使用次数、累计使用次数以及活动完成后的统一撤销；
-- D1 trigger 在写入 participant 前原子检查 invite 的活动归属、revision、有效期和剩余使用次数，并在成功加入后递增 `use_count`；
-- 参与者打开链接后可先读取活动公开 manifest / policy，再建立 Event Principal；
-- 未注册参与者允许以 guest principal 加入，不被注册流程阻断；
-- 已登录账户可形成 account principal，但活动显示名仍由活动规则决定；个人账户名不能被隐式暴露。
+- 支持过期、最大使用次数、累计使用次数和统一撤销；
+- D1 trigger 原子校验活动归属、revision、有效期和剩余次数；
+- 成功插入 participant 后才递增 `use_count`；
+- 未注册参与者可作为 guest principal 加入；
+- 已登录账户可形成 account principal；
+- 活动 revision 改变后旧邀请失效；
+- 活动完成后邀请统一撤销。
+
+加入接口要求客户端提交持久化的 `joinRequestId`。相同请求重复提交时返回原 participant，不再次消耗 invite，用于覆盖“服务器成功写入但响应途中断网”的现场网络故障。
 
 当前 Worker 路由：
 
-- `POST /api/v1/yingxiang/events`：主账户创建并默认发布活动；显式 `publish=false` 可创建草稿；
-- `POST /api/v1/yingxiang/events/:eventId/invites`：活动所有者生成邀请；
-- `GET /api/v1/yingxiang/invites/:token`：公开读取有效邀请与活动规则；
-- `POST /api/v1/yingxiang/invites/:token/join`：游客或已登录账户加入；
-- `POST /api/v1/yingxiang/events/:eventId/calibration-groups`：主办方建立重复校准映射；
-- `POST /api/v1/yingxiang/events/:eventId/complete`：完成活动、递增 event revision、释放全部 active principal 并撤销邀请。
+- `POST /api/v1/yingxiang/events`
+- `POST /api/v1/yingxiang/events/:eventId/invites`
+- `GET /api/v1/yingxiang/invites/:token`
+- `POST /api/v1/yingxiang/invites/:token/join`
+- `POST /api/v1/yingxiang/account-display-name`
+- `POST /api/v1/yingxiang/events/:eventId/calibration-groups`
+- `POST /api/v1/yingxiang/events/:eventId/complete`
 
-B0.1 后续仍需补齐活动编辑/再次发布、单个参与者释放、主办方参与进度读取和 Submission 汇总 API。
+## 5. 邀请进入香迹 Session：已实现
 
-## 5. 同一只豆子的重复校准
+网页邀请形式：
 
-重复校准采用 `yingxiang_calibration_groups`：
+```text
+https://zjcrop.github.io/AromaSense/?yingxiangInvite=<token>
+```
+
+进入流程：
+
+```text
+读取公开 invite / event manifest
+→ 显示组织方、模式和样品编号
+→ 按 policy 建立参与名称
+→ 服务器创建或恢复 Event Principal
+→ 本地缓存 participant-safe Event Context
+→ 本地保存 Event Principal
+→ 根据 Manifest 创建 AromaSense Session + Sample records
+→ 建立 event / participant / session 唯一绑定
+→ 打开香迹原有杯测 UI
+```
+
+本地 `yingxiang_event_contexts` 不保存主办方 `owner_user_id`，参与者无需获得主办方账户身份信息。
+
+Event Context、Principal、Session 和 `yingxiang_session_bindings` 在 SQLite 事务中写入。服务端已经加入但本地落盘中断时，可以使用同一 `joinRequestId` 重放服务器结果；本地已经存在绑定时直接恢复原 Session，不重复创建杯测记录。
+
+## 6. 同一只豆子的重复校准
+
+重复校准使用 `yingxiang_calibration_groups`：
 
 - `canonical_sample_id` 指向真实咖啡身份；
 - `event_sample_ids_json` 保存两个或以上活动样品槽位；
-- 多个槽位可以在盲测中呈现为不同样品，但实际指向同一只咖啡；
-- 参与侧不读取 `canonical_sample_id`，避免破盲；
+- 参与侧不读取 `canonical_sample_id`；
+- 本地和 D1 都验证引用槽位存在于 Event Manifest；
 - 揭示策略为 `after_event` 或 `organizer_only`；
-- 校准组不复制豆卡、不复制长期样品实体。
+- 不复制豆卡、不改写原始 observation。
 
-后续比较引擎以校准组计算同一参与者的重复性、离散程度和系统性偏差，但原始 observation 保持不变。
+后续比较引擎可以据此计算重复性、离散程度和系统性偏差。
 
-## 6. Local-first 与同步边界
+## 7. Local-first 与同步边界
 
-迎香必须继续遵循 AromaSense 的既有原则：
+- 活动感官编辑仍然首先写本地 SQLite；
+- 断网不能阻断已经建立的本地杯测；
+- 迎香只增加 event scope，不替代 Session / Sample / Stage；
+- 云端保存活动所有权、邀请、participant 和多人汇总所需关系；
+- 活动 revision 与 Submission revision 独立；
+- revision 不允许静默覆盖。
 
-- 活动中的感官编辑仍然先写本地 SQLite；
-- 断网不能阻断杯测记录；
-- 迎香活动身份只提供 event scope，不替代 Session / Sample / Stage 主数据；
-- 云端保存活动所有权、邀请和多人汇总所需关系；
-- 已完成 revision 不可静默覆盖；
-- 活动 revision 与个人 Submission revision 相互独立。
-
-## 7. B0.1 当前落地文件
+## 8. B0.1 当前落地文件
 
 - `app/core/yingxiang-event.ts`
+- `app/core/yingxiang-client.ts`
+- `app/core/yingxiang-participation-service.ts`
 - `app/storage/0006_yingxiang_event_context.sql`
 - `app/storage/yingxiang-event-store.ts`
+- `app/runtime/yingxiang-browser-bootstrap.ts`
+- `app/ui/dom/yingxiang-host-renderer.ts`
+- `app/ui/dom/yingxiang-join-renderer.ts`
 - `cloud/worker/migrations/0007_yingxiang_events.sql`
+- `cloud/worker/migrations/0008_account_display_name.sql`
 - `cloud/worker/src/yingxiang-api.ts`
-- `cloud/worker/src/index.ts` 路由接入
+- `cloud/worker/src/index.ts`
 - `tests/yingxiang-event.test.ts`
 - `tests/yingxiang-event-store.test.ts`
+- `tests/yingxiang-client.test.ts`
+- `tests/yingxiang-participation-service.test.ts`
 
-Web / Android 启动迁移链已加入本地 migration 6。
+Web / Android 共用启动迁移链已加入本地 migration 6。
 
-## 8. 后续连续开发顺序
+## 9. 下一开发范围
 
-1. 客户端：迎香入口与“发布杯测”页；
-2. 分享策略页：名称规则、盲测策略、校准重复设置、二维码/链接；
-3. 参与端：链接进入 → Event Principal → 活动名称 → 本地 Session；
-4. 活动 API 补齐：编辑/发布、单人释放、参与进度与 Submission 汇总；
-5. 活动结束：SubmissionBundle 回收与主办方汇总；
-6. 主办方看板：参与进度、回收结果、重复校准统计；
-7. Web/Android 响应式统一验收。
+当前 B0.1 已形成“发布 → 邀请 → 加入 → 香迹 Session”的测试闭环。下一层继续包括：
 
-页面以功能、兼容性和信息密度优先；移动端与网页端保持同一交互逻辑，使用响应式布局而不是两套业务流程。
+1. 活动编辑与 revision 再发布；
+2. 单个参与者释放；
+3. 主办方参与进度读取；
+4. SubmissionBundle 回收；
+5. 多参与者结果汇总；
+6. 重复校准统计与偏差分析；
+7. 主办方看板。
+
+页面仍以功能、系统兼容性和信息密度优先；移动与网页端保持同一业务流程，以响应式布局适配显示差异。
