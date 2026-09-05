@@ -224,12 +224,13 @@ export class AromaSenseDomApp {
     const style = document.createElement("style");
     style.dataset.aromasenseHomeModal = "true";
     style.textContent = `
-      .home-modal{position:fixed;inset:0;z-index:2200;display:grid;place-items:center;padding:22px;background:rgba(0,0,0,.68);backdrop-filter:blur(9px)}
-      .home-modal__content{width:min(860px,calc(100vw - 32px));max-height:min(86dvh,820px);overflow:auto;border:1px solid rgba(214,173,99,.28);border-radius:16px;background:#151515;box-shadow:0 24px 70px rgba(0,0,0,.52)}
+      .home-modal{position:fixed;inset:0;z-index:2200;display:grid;place-items:center;padding:22px;background:rgba(0,0,0,.74)}
+      .home-modal__content{width:min(860px,calc(100vw - 32px));max-height:min(86dvh,820px);overflow:auto;border:1px solid rgba(214,173,99,.28);border-radius:16px;background:#151515;box-shadow:0 16px 42px rgba(0,0,0,.44)}
       .home-modal__content.account-screen{min-height:0;padding:1px 0 24px}
       .home-modal__content .account-card{margin:28px auto 18px}
       .home-modal__content.session-records{min-height:0!important;max-width:none!important;margin:0!important;padding:18px!important}
       .home-modal__content .session-records__version{display:none!important}
+      .home-modal__loading{display:grid;place-items:center;min-height:180px;padding:24px;color:#b7b0a4;font-size:12px;letter-spacing:.06em}
       @media(max-width:620px){.home-modal{padding:10px}.home-modal__content{width:calc(100vw - 20px);max-height:92dvh;border-radius:12px}.home-modal__content.session-records{padding:12px!important}}
     `;
     document.head.append(style);
@@ -280,9 +281,20 @@ export class AromaSenseDomApp {
   private async showHomeRecordsModal(): Promise<void> {
     const modal = this.createHomeModal("杯测记录");
     modal.content.classList.add("session-records");
+    const loading = document.createElement("div");
+    loading.className = "home-modal__loading";
+    loading.textContent = "正在读取杯测记录…";
+    modal.content.append(loading);
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+      else setTimeout(resolve, 0);
+    });
+    if (this.homeModal !== modal.overlay) return;
+
     const repository = new LocalCuppingRepository(this.db);
     const recordService = new SessionRecordService(repository, this.options.now);
     const records = await new SessionRecordsReader(this.db).list(300);
+    if (this.homeModal !== modal.overlay) return;
     const shareClient = this.hasCloudAuthConfiguration()
       ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token)
       : undefined;
