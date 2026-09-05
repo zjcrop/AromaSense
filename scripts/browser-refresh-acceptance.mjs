@@ -295,7 +295,8 @@ async function runAcceptance(appUrl) {
     requireCondition(recovered?.currentStage === beforeReload?.currentStage, `Preferred active stage changed after reload: ${JSON.stringify({ beforeReload, recovered })}`);
 
     if (cdp.browserErrors.length) {
-      const relevant = cdp.browserErrors.filter((entry) => !/favicon|Failed to load resource.*404/i.test(entry));
+      const benignRuntimeNoise = /favicon|Failed to load resource.*404|onnxruntime:.*CleanUnusedInitializersAndNodeArgs/i;
+      const relevant = cdp.browserErrors.filter((entry) => !benignRuntimeNoise.test(entry));
       requireCondition(relevant.length === 0, `Browser runtime errors observed:\n${relevant.join("\n")}`);
     }
 
