@@ -28,7 +28,7 @@ export function openManualTextImportDialog(options: ManualTextImportDialogOption
   const status = element("div", "manual-import__status");
   status.hidden = true;
   const actions = element("footer", "manual-import__actions");
-  const parse = button("manual-import__primary", "解析并逐一确认", async () => {
+  const parse = button("manual-import__primary", "解析并导入", async () => {
     const text = textarea.value.trim();
     if (!text) {
       status.hidden = false;
@@ -37,7 +37,7 @@ export function openManualTextImportDialog(options: ManualTextImportDialogOption
     }
     parse.disabled = true;
     status.hidden = false;
-    status.textContent = "正在本地解析并通过基座 Dictionary / Recognition 规范化；多样品将尝试可选 AI 增强…";
+    status.textContent = "正在解析样品信息…";
     try {
       await options.onParse(text);
       overlay.remove();

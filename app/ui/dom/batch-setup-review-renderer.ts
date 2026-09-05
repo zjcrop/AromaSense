@@ -14,7 +14,7 @@ import {
 import type { CuppingSetupService } from "../../core/cupping-setup-service";
 import { normalizeImportBundle, type ImportBundle, type ImportSessionDraft } from "../../core/import-bundle";
 import { recognizeManualText } from "../../core/manual-text-recognizer";
-import { canonicalizeAndValidateImportBundle, type CoffeeFoundationGateway, type InputValidationResult } from "../../core/sample-input-pipeline";
+import { canonicalizeAndValidateImportBundle, canonicalizeSampleInput, validateSampleInput, type CoffeeFoundationGateway, type InputValidationResult } from "../../core/sample-input-pipeline";
 import {
   cuppingModeLabel,
   defaultSessionMetadata,
@@ -416,7 +416,7 @@ export class BatchSetupRenderer {
           : local;
         const samples = bundle.sessions.flatMap((session) => session.samples);
         for (const sample of samples) this.addRow(sample.label, sample.metadata, {
-          id: this.rowId(), status: "本地解析 · Dictionary/Recognition canonical 化", requiresReview: sample.requiresReview, confirmed: false
+          id: this.rowId(), status: "本地解析完成", requiresReview: sample.requiresReview, confirmed: !sample.requiresReview
         });
         await this.saveDraft();
         this.showStatus(`已自动导入 ${samples.length} 个样品${bundle.warnings.length ? ` · ${bundle.warnings.join("；")}` : ""}。`);
@@ -675,15 +675,22 @@ export class BatchSetupRenderer {
     return FIELD_SPECS.map(([key, labelText, group, kind, tier]) => ({ key, label: labelText, group, tier, value: String(metadata[key] ?? ""), candidates: candidates(metadata, key), confidence: confidence(metadata, key), multiline: kind === "multiline", date: kind === "date" }));
   }
 
-  private applyReviewValue(row: HTMLElement, value: BatchReviewValue, markDirty: boolean, confirm: boolean): void {
+  private applyReviewValue(row: HTMLElement, value: BatchReviewValue, markDirty: boolean, confirm: boolean): InputValidationResult | undefined {
     const state = this.state.get(row); if (!state) return;
     const metadata = { ...(this.metadata.get(row) ?? {}) };
     for (const [key] of FIELD_SPECS) delete metadata[key];
     for (const [key, fieldValue] of Object.entries(value.fields)) metadata[key] = fieldValue;
-    if (confirm) metadata.recognition = { ...(record(metadata.recognition) ?? {}), userConfirmedFields: { ...value.fields }, confirmedAt: this.options.now() };
-    this.metadata.set(row, metadata);
+    const sample = canonicalizeSampleInput({ label: value.label, metadata, requiresReview: state.requiresReview }, this.options.foundationGateway, `sample:${this.rows().indexOf(row) + 1}`);
+    const validation = validateSampleInput(sample);
+    const accepted = confirm && validation.state !== "invalid";
+    if (accepted) sample.metadata.recognition = { ...(record(metadata.recognition) ?? {}), userConfirmedFields: { ...value.fields }, confirmedAt: this.options.now() };
+    this.metadata.set(row, sample.metadata);
+    state.requiresReview = sample.requiresReview;
     const label = row.querySelector<HTMLInputElement>(".batch-setup__sample-label"); if (label) label.value = value.label;
-    if (markDirty && state.confirmed) state.confirmed = false; if (confirm) state.confirmed = true; this.refreshRow(row);
+    if (markDirty || validation.state === "invalid") state.confirmed = false;
+    if (accepted) state.confirmed = true;
+    this.refreshRow(row);
+    return validation;
   }
 
   private openReview(row: HTMLElement): void {
@@ -698,7 +705,8 @@ export class BatchSetupRenderer {
       onExit: async (value) => { this.applyReviewValue(row, value, false, false); await this.saveDraft(); this.review?.close(); this.review = undefined; },
       onPrevious: index > 0 ? async (value) => { this.applyReviewValue(row, value, false, false); await this.saveDraft(); this.openReview(rows[index - 1]); } : undefined,
       onConfirm: async (value) => {
-        this.applyReviewValue(row, value, false, true); await this.saveDraft();
+        const validation = this.applyReviewValue(row, value, false, true); await this.saveDraft();
+        if (validation?.state === "invalid") return false;
         const next = firstPendingItemIndex(this.items(), index);
         if (next >= 0) { const target = this.rows()[next]; if (target) this.openReview(target); return; }
         this.review?.close(); this.review = undefined;
@@ -779,6 +787,8 @@ export class BatchSetupRenderer {
       this.showStatus(this.cuppingMode === "semi_blind" ? "半盲测需要先录入至少一个样品。" : "请先录入至少一个样品。", true);
       return undefined;
     }
+    const invalid = rows.find((row) => validateSampleInput({ label: row.querySelector<HTMLInputElement>(".batch-setup__sample-label")?.value ?? "", metadata: this.metadata.get(row) ?? {} }).state === "invalid");
+    if (invalid) { this.showStatus("请先修正样品名称或存在冲突的字段。", true); this.openReview(invalid); return undefined; }
     const pending = rows.filter((row) => this.state.get(row)?.confirmed !== true);
     if (pending.length) { this.showStatus(`仍有 ${pending.length} 个样品未确认。`, true); this.openReview(pending[0]); return undefined; }
     const samples = this.sampleDrafts();

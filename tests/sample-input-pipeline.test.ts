@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalizeAndValidateImportBundle, validateSampleInput, type CoffeeFoundationGateway } from "../app/core/sample-input-pipeline";
+import { canonicalizeAndValidateImportBundle, canonicalizeSampleInput, validateSampleInput, type CoffeeFoundationGateway } from "../app/core/sample-input-pipeline";
 
 const gateway: CoffeeFoundationGateway = {
   resolve(field, value) {
@@ -32,4 +32,31 @@ test("validation exposes ! for invalid labels and ? for unresolved canonical fie
   assert.equal(validateSampleInput({ label: "", metadata: {} }).marker, "!");
   assert.equal(validateSampleInput({ label: "A", metadata: { canonical: { decisions: [{ field: "country", status: "unknown", reason: "no-match" }] } } }).marker, "?");
   assert.equal(validateSampleInput({ label: "A", metadata: {} }).marker, "");
+});
+
+test("editing a sample replaces stale canonical conflicts with current Foundation decisions", () => {
+  const edited = canonicalizeSampleInput({ label: "A", requiresReview: true, metadata: {
+    country: "Ethiopia", canonical: { decisions: [{ field: "country", status: "conflict", reason: "old-conflict" }] },
+    inputValidation: { state: "invalid", marker: "!" }
+  } }, gateway, "sample:1");
+  assert.equal(validateSampleInput(edited).state, "valid");
+  assert.equal(edited.requiresReview, false);
+  assert.equal((edited.metadata.inputValidation as { marker: string }).marker, "");
+});
+
+test("removing a field clears its obsolete decision without inventing a canonical identity", () => {
+  const edited = canonicalizeSampleInput({ label: "A", requiresReview: true, metadata: {
+    canonical: { decisions: [{ field: "country", status: "conflict", reason: "old-conflict" }] }
+  } }, gateway, "sample:1");
+  assert.deepEqual((edited.metadata.canonical as { decisions: unknown[] }).decisions, []);
+  assert.equal(validateSampleInput(edited).state, "valid");
+});
+
+test("current Foundation conflicts remain invalid and unavailable Foundation keeps local fields for review", () => {
+  const original = { label: "A", metadata: { country: "Unknown" }, requiresReview: false };
+  const invalid = canonicalizeSampleInput(original, { resolve: (field, value) => ({ field, rawValue: value, normalizedValue: value, status: "conflict", reason: "ambiguous-country" }) }, "sample:1");
+  assert.equal(validateSampleInput(invalid).state, "invalid");
+  const offline = canonicalizeSampleInput(original, undefined, "sample:1");
+  assert.equal(offline.metadata.country, "Unknown");
+  assert.equal(validateSampleInput(offline).state, "review");
 });
