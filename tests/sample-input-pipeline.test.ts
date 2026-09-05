@@ -52,10 +52,10 @@ test("removing a field clears its obsolete decision without inventing a canonica
   assert.equal(validateSampleInput(edited).state, "valid");
 });
 
-test("current Foundation conflicts remain invalid and unavailable Foundation keeps local fields for review", () => {
+test("current Foundation conflicts and unavailable Foundation both remain reviewable", () => {
   const original = { label: "A", metadata: { country: "Unknown" }, requiresReview: false };
-  const invalid = canonicalizeSampleInput(original, { resolve: (field, value) => ({ field, rawValue: value, normalizedValue: value, status: "conflict", reason: "ambiguous-country" }) }, "sample:1");
-  assert.equal(validateSampleInput(invalid).state, "invalid");
+  const conflict = canonicalizeSampleInput(original, { resolve: (field, value) => ({ field, rawValue: value, normalizedValue: value, status: "conflict", reason: "ambiguous-country" }) }, "sample:1");
+  assert.equal(validateSampleInput(conflict).state, "review");
   const offline = canonicalizeSampleInput(original, undefined, "sample:1");
   assert.equal(offline.metadata.country, "Unknown");
   assert.equal(validateSampleInput(offline).state, "review");

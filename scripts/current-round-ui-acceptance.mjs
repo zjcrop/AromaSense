@@ -188,17 +188,21 @@ async function runAcceptance(appUrl) {
     const initial = await cdp.evaluate(`(() => {
       const steps=[...document.querySelectorAll('.cupping-stage-step')];
       const current=document.querySelector('.cupping-stage-step[aria-current="step"]');
+      const timer=document.querySelector('[data-cupping-timer]');
       return {
         ids: steps.map(n=>n.dataset.stageId), labels: steps.map(n=>n.textContent?.trim()),
         currentId: current?.dataset.stageId, currentClass: current?.className,
         currentHint: current ? getComputedStyle(current,'::after').content : '',
-        currentBorder: current ? getComputedStyle(current).borderBottomColor : ''
+        currentBorder: current ? getComputedStyle(current).borderBottomColor : '',
+        timer: timer?.textContent?.replace(/\\s+/g,' ').trim() || '',
+        compactTimerLines: timer?.querySelectorAll('.cupping-rail-timer__compact-line').length || 0
       };
     })()`);
     requireCondition(JSON.stringify(initial?.ids) === JSON.stringify(["aroma","high_temp","mid_temp","low_temp","flavor","overall","scoring"]), `Wrong formal stages: ${JSON.stringify(initial)}`);
     requireCondition(JSON.stringify(initial?.labels) === JSON.stringify(["香气","高温","中温","低温","风味","综评","评分"]), `Wrong visible stage labels: ${JSON.stringify(initial)}`);
     requireCondition(initial?.currentId === "aroma" && /is-not_started/.test(initial?.currentClass || ""), `Browsing incorrectly started aroma: ${JSON.stringify(initial)}`);
     requireCondition(/未开始/.test(initial?.currentHint || "") && /完成标准/.test(initial?.currentHint || ""), `Current completion criterion is not visibly rendered: ${JSON.stringify(initial)}`);
+    requireCondition(/杯测计时/.test(initial?.timer || "") && initial?.compactTimerLines === 2, `Cupping timer/compact two-line contract missing: ${JSON.stringify(initial)}`);
 
     await click(cdp, "[data-rail-toggle]");
     const legend = await waitExpression(cdp, `(() => {
@@ -232,23 +236,49 @@ async function runAcceptance(appUrl) {
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-completed')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma completed state");
     const completedBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(completedBorder !== activeBorder, `Completed state did not visibly change progress color: ${completedBorder}`);
+    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\\s+/g,' ').trim() || ''`);
+    requireCondition(/本进程完成/.test(aromaStamp) && /分\s*\d{2}秒/.test(aromaStamp) && /\d{2}:\d{2}/.test(aromaStamp), `Aroma completion timestamp missing: ${aromaStamp}`);
 
     await click(cdp, '[data-stage-id="scoring"]');
     await waitExpression(cdp, `document.querySelector('[data-stage-id="scoring"]')?.getAttribute('aria-current')==='step'`, "scoring selection");
-    const scoring = await cdp.evaluate(`document.querySelector('.cupping-main__editor')?.textContent || ''`);
-    requireCondition(/确认评分/.test(scoring), `Scoring step does not expose explicit confirmation: ${scoring}`);
+    const scoring = await cdp.evaluate(`(() => {
+      const editor=document.querySelector('.cupping-main__editor');
+      const confirm=editor?.querySelector('.final-assessment__score-confirm');
+      const style=confirm ? getComputedStyle(confirm) : null;
+      return {
+        body: editor?.textContent || '',
+        label: confirm?.textContent?.trim() || '',
+        fontSize: style?.fontSize || '',
+        fontWeight: style?.fontWeight || '',
+        textAlign: style?.textAlign || ''
+      };
+    })()`);
+    requireCondition(/确认得分/.test(scoring?.label || ""), `Scoring step does not expose explicit score confirmation: ${JSON.stringify(scoring)}`);
+    requireCondition(/确认得分后，本样品杯测记录将被锁定，无法修改/.test(scoring?.body || ""), `Score lock warning is missing: ${JSON.stringify(scoring)}`);
+    requireCondition(parseFloat(scoring?.fontSize || "0") >= 18 && Number(scoring?.fontWeight || 0) >= 700 && scoring?.textAlign === "center", `Score confirmation is not large/bold/centered: ${JSON.stringify(scoring)}`);
+
+    await click(cdp, ".final-assessment__score-confirm");
+    await waitExpression(cdp, `document.querySelector('.cupping-main__lock-status')?.textContent?.includes('已锁定为只读')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "score-confirmed sample lock");
+    const locked = await cdp.evaluate(`(() => ({
+      banner: document.querySelector('.cupping-main__lock-status')?.textContent?.trim() || '',
+      confirm: document.querySelector('.final-assessment__score-confirm')?.textContent?.trim() || '',
+      stamp: document.querySelector('.cupping-completion-stamp')?.textContent?.replace(/\\s+/g,' ').trim() || '',
+      readonly: document.querySelector('.cupping-main__editor')?.getAttribute('aria-readonly') || ''
+    }))()`);
+    requireCondition(/得分已确认/.test(locked?.confirm || "") && locked?.readonly === "true", `Score confirmation did not lock the sample: ${JSON.stringify(locked)}`);
+    requireCondition(/本分支完成/.test(locked?.stamp || "") && /\d{2}:\d{2}/.test(locked?.stamp || ""), `Score branch completion timestamp missing: ${JSON.stringify(locked)}`);
 
     const relevantErrors = cdp.errors.filter((entry) => !/favicon|Failed to load resource.*404|onnxruntime/i.test(entry));
     requireCondition(relevantErrors.length === 0, `Browser errors:\n${relevantErrors.join("\n")}`);
 
     console.log("AromaSense current-round visible UI acceptance: PASS");
-    console.log(JSON.stringify({ initial, legend, overallClass: overall.cls, activeBorder, completedBorder }, null, 2));
+    console.log(JSON.stringify({ initial, legend, overallClass: overall.cls, activeBorder, completedBorder, aromaStamp, scoring, locked }, null, 2));
   } finally {
     cdp?.close();
     chrome.kill("SIGTERM");
     await Promise.race([new Promise((resolveExit) => chrome.once("exit", resolveExit)), delay(3000)]);
     if (chrome.exitCode === null) chrome.kill("SIGKILL");
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     if (stderr && process.env.AROMASENSE_ACCEPTANCE_DEBUG === "1") console.error(stderr);
   }
 }

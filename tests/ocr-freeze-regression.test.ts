@@ -17,7 +17,7 @@ const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesse
 
 test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", () => {
   assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
-  assert.match(packageJson, /2efa52e2cc4e0f4c4d71b51a0bf60104d47f9b6c/);
+  assert.match(packageJson, /ff2db954a27aba1adc882e0f0c5392af0cd082f3/);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);

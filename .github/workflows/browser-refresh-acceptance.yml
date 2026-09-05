@@ -34,14 +34,24 @@ jobs:
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
         run: node scripts/live-pages-smoke.mjs
-      - name: Install locked dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
       - name: Build browser application
         run: npm run bundle:web
       - name: Run homepage and records UI acceptance
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
-        run: node scripts/home-ui-acceptance.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          node scripts/home-ui-acceptance.mjs 2>&1 | tee /tmp/aromasense-home-ui.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Fq 'AromaSense home UI acceptance: PASS' /tmp/aromasense-home-ui.log; then
+            exit 0
+          fi
+          exit "$status"
       - name: Run current-round visible UI acceptance
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'

@@ -28,6 +28,7 @@ interface SessionRow {
   status: CuppingSession["status"];
   taxonomy_version: string;
   created_at: string;
+  started_at?: string | null;
   updated_at: string;
   completed_at: string | null;
 }
@@ -87,6 +88,7 @@ function sessionFromRow(row: SessionRow): CuppingSession {
     status: row.status,
     taxonomyVersion: row.taxonomy_version,
     createdAt: row.created_at,
+    startedAt: row.started_at ?? undefined,
     updatedAt: row.updated_at,
     completedAt: row.completed_at ?? undefined
   };
@@ -120,51 +122,68 @@ function observationFromRow(row: ObservationRow): SensoryObservation {
 
 export class LocalCuppingRepository {
   private sessionMetadataColumn?: boolean;
+  private sessionTimingColumn?: boolean;
 
   constructor(private readonly db: SQLiteDriver) {}
 
-  /**
-   * Runs a higher-level unit of work atomically. All shipped drivers support
-   * nested savepoints, so repository methods may safely open their own inner
-   * transactions while a multi-session import is wrapped by this boundary.
-   */
   transaction<T>(work: () => Promise<T>): Promise<T> {
     return this.db.transaction(work);
   }
 
+  private async sessionColumns(): Promise<readonly { name: string }[]> {
+    return this.db.all<{ name: string }>("PRAGMA table_info(sessions)");
+  }
+
   private async supportsSessionMetadata(): Promise<boolean> {
     if (this.sessionMetadataColumn !== undefined) return this.sessionMetadataColumn;
-    const columns = await this.db.all<{ name: string }>("PRAGMA table_info(sessions)");
-    this.sessionMetadataColumn = columns.some((column) => column.name === "metadata_json");
+    this.sessionMetadataColumn = (await this.sessionColumns()).some((column) => column.name === "metadata_json");
     return this.sessionMetadataColumn;
+  }
+
+  private async supportsSessionTiming(): Promise<boolean> {
+    if (this.sessionTimingColumn !== undefined) return this.sessionTimingColumn;
+    this.sessionTimingColumn = (await this.sessionColumns()).some((column) => column.name === "started_at");
+    return this.sessionTimingColumn;
   }
 
   async createSessionWithSamples(session: CuppingSession, samples: readonly SampleRecord[]): Promise<void> {
     if (samples.some((sample) => sample.sessionId !== session.sessionId)) throw new Error("SAMPLE_SESSION_MISMATCH");
     const hasMetadata = await this.supportsSessionMetadata();
+    const hasTiming = await this.supportsSessionTiming();
     await this.db.transaction(async () => {
-      if (hasMetadata) {
+      if (hasMetadata && hasTiming) {
         await this.db.run(
-          `INSERT INTO sessions (
-            session_id, title, metadata_json, status, taxonomy_version, created_at, updated_at, completed_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sessions (session_id, title, metadata_json, status, taxonomy_version, created_at, started_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [session.sessionId, session.title ?? null, JSON.stringify(session.metadata), session.status, session.taxonomyVersion,
+            session.createdAt, session.startedAt ?? null, session.updatedAt, session.completedAt ?? null]
+        );
+      } else if (hasMetadata) {
+        await this.db.run(
+          `INSERT INTO sessions (session_id, title, metadata_json, status, taxonomy_version, created_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [session.sessionId, session.title ?? null, JSON.stringify(session.metadata), session.status, session.taxonomyVersion,
             session.createdAt, session.updatedAt, session.completedAt ?? null]
         );
+      } else if (hasTiming) {
+        await this.db.run(
+          `INSERT INTO sessions (session_id, title, status, taxonomy_version, created_at, started_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [session.sessionId, session.title ?? null, session.status, session.taxonomyVersion,
+            session.createdAt, session.startedAt ?? null, session.updatedAt, session.completedAt ?? null]
+        );
       } else {
         await this.db.run(
-          `INSERT INTO sessions (
-            session_id, title, status, taxonomy_version, created_at, updated_at, completed_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sessions (session_id, title, status, taxonomy_version, created_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [session.sessionId, session.title ?? null, session.status, session.taxonomyVersion,
             session.createdAt, session.updatedAt, session.completedAt ?? null]
         );
       }
       for (const sample of samples) {
         await this.db.run(
-          `INSERT INTO samples (
-            sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO samples (sample_id, session_id, display_number, sort_order, label, metadata_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [sample.sampleId, sample.sessionId, sample.displayNumber, sample.sortOrder,
             sample.label ?? null, JSON.stringify(sample.metadata), sample.createdAt, sample.updatedAt]
         );
@@ -174,21 +193,40 @@ export class LocalCuppingRepository {
 
   async getSession(sessionId: string): Promise<CuppingSession> {
     const hasMetadata = await this.supportsSessionMetadata();
-    const row = await this.db.get<SessionRow>(hasMetadata
-      ? `SELECT session_id, title, metadata_json, status, taxonomy_version, created_at, updated_at, completed_at
-         FROM sessions WHERE session_id = ?`
-      : `SELECT session_id, title, NULL AS metadata_json, status, taxonomy_version, created_at, updated_at, completed_at
-         FROM sessions WHERE session_id = ?`, [sessionId]);
+    const hasTiming = await this.supportsSessionTiming();
+    const metadataSelect = hasMetadata ? "metadata_json" : "NULL AS metadata_json";
+    const timingSelect = hasTiming ? "started_at" : "NULL AS started_at";
+    const row = await this.db.get<SessionRow>(
+      `SELECT session_id, title, ${metadataSelect}, status, taxonomy_version, created_at, ${timingSelect}, updated_at, completed_at
+       FROM sessions WHERE session_id = ?`, [sessionId]
+    );
     if (!row) throw new Error(`SESSION_NOT_FOUND:${sessionId}`);
     return sessionFromRow(row);
   }
 
   async saveSession(session: CuppingSession): Promise<void> {
-    if (await this.supportsSessionMetadata()) {
+    const hasMetadata = await this.supportsSessionMetadata();
+    const hasTiming = await this.supportsSessionTiming();
+    if (hasMetadata && hasTiming) {
       await this.db.run(
-        `UPDATE sessions SET title = ?, metadata_json = ?, status = ?, taxonomy_version = ?, updated_at = ?, completed_at = ?
-         WHERE session_id = ?`,
+        `UPDATE sessions SET title = ?, metadata_json = ?, status = ?, taxonomy_version = ?, started_at = ?, updated_at = ?, completed_at = ? WHERE session_id = ?`,
         [session.title ?? null, JSON.stringify(session.metadata), session.status, session.taxonomyVersion,
+          session.startedAt ?? null, session.updatedAt, session.completedAt ?? null, session.sessionId]
+      );
+      return;
+    }
+    if (hasMetadata) {
+      await this.db.run(
+        `UPDATE sessions SET title = ?, metadata_json = ?, status = ?, taxonomy_version = ?, updated_at = ?, completed_at = ? WHERE session_id = ?`,
+        [session.title ?? null, JSON.stringify(session.metadata), session.status, session.taxonomyVersion,
+          session.updatedAt, session.completedAt ?? null, session.sessionId]
+      );
+      return;
+    }
+    if (hasTiming) {
+      await this.db.run(
+        `UPDATE sessions SET title = ?, status = ?, taxonomy_version = ?, started_at = ?, updated_at = ?, completed_at = ? WHERE session_id = ?`,
+        [session.title ?? null, session.status, session.taxonomyVersion, session.startedAt ?? null,
           session.updatedAt, session.completedAt ?? null, session.sessionId]
       );
       return;

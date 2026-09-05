@@ -1,21 +1,34 @@
-import type { StageId } from "../../shared/protocol/aromasense-v1";
+import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import { CuppingSessionController, type ActiveEditingState } from "../core/cupping-session-controller";
 import type { RevisionCheckpointService } from "../core/revision-checkpoint-service";
 import { reorderSamples, type SampleRecord } from "../core/sample-batch-service";
 import { activateSession, completeSession, type SessionStatus } from "../core/session-lifecycle";
 import type { CuppingSessionMetadata } from "../core/session-metadata";
 import type { LocalCuppingRepository } from "../storage/local-cupping-repository";
-import type { StageProgressReader } from "../storage/stage-progress-reader";
+import type { SampleStageProgress, StageProgressReader } from "../storage/stage-progress-reader";
 import { buildSampleRailViewState, nextStage, previousStage, type SampleRailItemViewState } from "./cupping-view-model";
 
 export interface CuppingScreenState {
   sessionId: string;
   sessionStatus: SessionStatus;
   sessionMetadata: CuppingSessionMetadata;
+  sessionStartedAt?: string;
+  sessionCompletedAt?: string;
   samples: readonly SampleRecord[];
+  progress: readonly SampleStageProgress[];
+  lockedSampleIds: readonly string[];
   rail: readonly SampleRailItemViewState[];
   active?: ActiveEditingState;
   finalRevisionId?: string;
+}
+
+function sampleLockIds(observations: readonly SensoryObservation[]): string[] {
+  const locked = new Set<string>();
+  for (const observation of observations) {
+    if (observation.value !== true) continue;
+    if (observation.fieldKey === "score_confirmed" || observation.fieldKey === "final_score_confirmed") locked.add(observation.sampleId);
+  }
+  return [...locked];
 }
 
 export class CuppingScreenController {
@@ -30,15 +43,26 @@ export class CuppingScreenController {
 
   current(): CuppingScreenState | undefined { return this.state; }
 
-  async initialize(sessionId: string): Promise<CuppingScreenState> {
-    const session = await this.repository.getSession(sessionId);
-    const samples = await this.repository.listSamples(sessionId);
-    const progress = await this.progressReader.listForSession(sessionId);
+  async initialize(sessionId: string, now: string): Promise<CuppingScreenState> {
+    let session = await this.repository.getSession(sessionId);
+    if (session.status === "draft" || (session.status === "active" && !session.startedAt)) {
+      session = activateSession(session, now);
+      await this.repository.saveSession(session);
+    }
+    const [samples, progress, observations] = await Promise.all([
+      this.repository.listSamples(sessionId),
+      this.progressReader.listForSession(sessionId),
+      this.repository.listObservationsForSession(sessionId)
+    ]);
     this.state = {
       sessionId,
       sessionStatus: session.status,
       sessionMetadata: session.metadata,
+      sessionStartedAt: session.startedAt,
+      sessionCompletedAt: session.completedAt,
       samples,
+      progress,
+      lockedSampleIds: sampleLockIds(observations),
       rail: buildSampleRailViewState(samples, progress, undefined, { metadata: session.metadata, status: session.status })
     };
     return this.state;
@@ -54,15 +78,12 @@ export class CuppingScreenController {
   }
 
   async saveField(fieldKey: string, value: unknown, now: string): Promise<CuppingScreenState> {
+    const activeBefore = this.requireActive();
+    const state = this.requireState();
+    if (state.lockedSampleIds.includes(activeBefore.context.sampleId)) throw new Error("SAMPLE_SCORE_LOCKED");
     await this.editor.saveField(fieldKey, value, now);
     const active = this.editor.current();
     if (!active) throw new Error("NO_ACTIVE_EDITING_CONTEXT");
-    const state = this.requireState();
-    if (state.sessionStatus === "draft" && active.slice.stageStatus !== "not_started") {
-      const activated = activateSession(await this.repository.getSession(state.sessionId), now);
-      await this.repository.saveSession(activated);
-      this.state = { ...state, sessionStatus: activated.status, sessionMetadata: activated.metadata };
-    }
     return this.refreshState(active);
   }
 
@@ -74,6 +95,7 @@ export class CuppingScreenController {
   ): Promise<CuppingScreenState> {
     const state = this.requireState();
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
+    if (state.lockedSampleIds.includes(sampleId)) throw new Error("SAMPLE_SCORE_LOCKED");
     const sample = state.samples.find((item) => item.sampleId === sampleId);
     if (!sample) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
 
@@ -95,10 +117,15 @@ export class CuppingScreenController {
     const samples = state.samples.map((item) => item.sampleId === sampleId ? saved : item);
     let active = this.editor.current();
     if (active?.context.sampleId === sampleId) active = await this.editor.refresh();
-    const progress = await this.progressReader.listForSession(state.sessionId);
+    const [progress, observations] = await Promise.all([
+      this.progressReader.listForSession(state.sessionId),
+      this.repository.listObservationsForSession(state.sessionId)
+    ]);
     this.state = {
       ...state,
       samples,
+      progress,
+      lockedSampleIds: sampleLockIds(observations),
       rail: buildSampleRailViewState(samples, progress, active?.context.sampleId, {
         metadata: state.sessionMetadata,
         status: state.sessionStatus
@@ -125,6 +152,7 @@ export class CuppingScreenController {
     this.state = {
       ...state,
       samples: reordered,
+      progress,
       rail: buildSampleRailViewState(reordered, progress, activeSampleId, {
         metadata: state.sessionMetadata,
         status: state.sessionStatus
@@ -168,11 +196,18 @@ export class CuppingScreenController {
     const completed = completeSession(session, now);
     await this.repository.saveSession(completed);
     const finalRevisionId = await this.revisions?.finalSession(state.sessionId, now);
-    const progress = await this.progressReader.listForSession(state.sessionId);
+    const [progress, observations] = await Promise.all([
+      this.progressReader.listForSession(state.sessionId),
+      this.repository.listObservationsForSession(state.sessionId)
+    ]);
     this.state = {
       ...state,
       sessionStatus: completed.status,
       sessionMetadata: completed.metadata,
+      sessionStartedAt: completed.startedAt,
+      sessionCompletedAt: completed.completedAt,
+      progress,
+      lockedSampleIds: sampleLockIds(observations),
       rail: buildSampleRailViewState(state.samples, progress, undefined, {
         metadata: completed.metadata,
         status: completed.status
@@ -196,12 +231,22 @@ export class CuppingScreenController {
 
   private async refreshState(active: ActiveEditingState): Promise<CuppingScreenState> {
     const state = this.requireState();
-    const progress = await this.progressReader.listForSession(state.sessionId);
+    const [session, progress, observations] = await Promise.all([
+      this.repository.getSession(state.sessionId),
+      this.progressReader.listForSession(state.sessionId),
+      this.repository.listObservationsForSession(state.sessionId)
+    ]);
     this.state = {
       ...state,
+      sessionStatus: session.status,
+      sessionMetadata: session.metadata,
+      sessionStartedAt: session.startedAt,
+      sessionCompletedAt: session.completedAt,
+      progress,
+      lockedSampleIds: sampleLockIds(observations),
       rail: buildSampleRailViewState(state.samples, progress, active.context.sampleId, {
-        metadata: state.sessionMetadata,
-        status: state.sessionStatus
+        metadata: session.metadata,
+        status: session.status
       }),
       active
     };

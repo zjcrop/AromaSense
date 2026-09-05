@@ -1,6 +1,7 @@
 import type { StageId } from "../../../shared/protocol/aromasense-v1";
 import type { FinalAssessmentPhase } from "../../core/cupping-progress-policy";
 import { scoreProfileForMetadata } from "../../core/cupping-score-profile";
+import { cuppingCompletionTiming, cuppingElapsedSeconds, formatCuppingDuration } from "../../core/cupping-timing";
 import {
   blindModeDescription,
   blindModeLabel,
@@ -31,14 +32,29 @@ const SAMPLE_DETAIL_FIELDS: readonly [string, string][] = [
   ["process", "处理法"], ["roast", "烘焙度"], ["roastDate", "烘焙日期"], ["altitude", "海拔"], ["flavorNotes", "风味"]
 ];
 
-function ensureBlindStatusStyles(): void {
-  if (document.head.querySelector("style[data-aromasense-blind-status]")) return;
+function ensureCuppingRuntimeStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-cupping-runtime]")) return;
   const style = document.createElement("style");
-  style.dataset.aromasenseBlindStatus = "true";
+  style.dataset.aromasenseCuppingRuntime = "true";
   style.textContent = `
     .cupping-main__blind-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:7px 10px;border:1px solid rgba(185,153,90,.25);border-radius:9px;background:rgba(185,153,90,.07)}
     .cupping-main__blind-mode{color:#d4bc82;font-size:12px}
     .cupping-main__blind-copy{color:#9c968c;font-size:10px;line-height:1.45}
+    .cupping-main__lock-status{display:block;width:100%;margin-top:7px;padding:7px 10px;border:1px solid rgba(102,170,132,.28);border-radius:8px;background:rgba(102,170,132,.08);color:#a9c9b6;font-size:11px;font-weight:700;text-align:center}
+    .cupping-rail-timer{margin-top:10px;padding:8px 7px;border-top:1px solid rgba(185,153,90,.16);color:#a9a196;text-align:center;font-variant-numeric:tabular-nums}
+    .cupping-rail-timer__expanded{display:grid;gap:2px}
+    .cupping-rail-timer__label{font-size:9px;color:#7f796f;letter-spacing:.08em}
+    .cupping-rail-timer__value{font-size:13px;font-weight:700;color:#c9bea4}
+    .cupping-rail-timer__compact{display:none;gap:2px}
+    .cupping-rail-timer__compact-line{display:grid;justify-items:center;line-height:1}
+    .cupping-rail-timer__compact-number{font-size:14px;font-weight:800;color:#c9bea4}
+    .cupping-rail-timer__compact-unit{margin-top:2px;font-size:8px;color:#817a70}
+    .is-rail-compact .cupping-rail-timer__expanded{display:none}
+    .is-rail-compact .cupping-rail-timer__compact{display:grid}
+    .is-rail-compact .cupping-rail-timer{padding-left:2px;padding-right:2px}
+    .cupping-completion-stamp{margin:10px auto 0;padding:7px 10px;max-width:520px;text-align:center;border:1px solid rgba(185,153,90,.18);border-radius:8px;background:rgba(185,153,90,.05);color:#aaa398;font-size:11px;line-height:1.45}
+    .cupping-completion-stamp strong{color:#c9bea4;font-weight:700}
+    .cupping-main__editor[aria-readonly="true"] input,.cupping-main__editor[aria-readonly="true"] textarea,.cupping-main__editor[aria-readonly="true"] select{opacity:.72}
   `;
   document.head.append(style);
 }
@@ -74,6 +90,7 @@ export class CuppingScreenRenderer {
   private disposeRailDrag?: () => void;
   private disposeFlavorDrag?: () => void;
   private disposeSelectedStackDrag?: () => void;
+  private timerId?: number;
   private railCompact = true;
   private readonly expandedSampleIds = new Set<string>();
   private readonly layoutRoot = element("div", "cupping-layout is-rail-compact");
@@ -93,7 +110,7 @@ export class CuppingScreenRenderer {
     private readonly summaryReader: SampleSummaryReader,
     private readonly options: CuppingScreenRendererOptions
   ) {
-    ensureBlindStatusStyles();
+    ensureCuppingRuntimeStyles();
     this.root.classList.add("aromasense-cupping");
     this.stageStripRoot.setAttribute("aria-label", "杯测流程");
     this.mainRoot.append(this.headerRoot, this.statusRoot, this.editorRoot, this.stageStripRoot, this.footerRoot);
@@ -107,11 +124,84 @@ export class CuppingScreenRenderer {
 
   async initialize(sessionId: string): Promise<void> {
     this.flavorPreferences = await this.flavorService.load();
-    this.state = await this.controller.initialize(sessionId);
+    this.state = await this.controller.initialize(sessionId, this.options.now());
+    this.startTimer();
     await this.render();
   }
 
-  dispose(): void { this.disposeDragHandlers(); }
+  dispose(): void {
+    this.disposeDragHandlers();
+    if (this.timerId !== undefined) window.clearInterval(this.timerId);
+    this.timerId = undefined;
+  }
+
+  private startTimer(): void {
+    if (this.timerId !== undefined) window.clearInterval(this.timerId);
+    this.timerId = window.setInterval(() => this.updateTimerDom(), 1000);
+  }
+
+  private timerSeconds(state: CuppingScreenState): number {
+    if (!state.sessionStartedAt) return 0;
+    const end = state.sessionCompletedAt ?? this.options.now();
+    return cuppingElapsedSeconds(state.sessionStartedAt, end);
+  }
+
+  private updateTimerDom(): void {
+    const state = this.state;
+    const timer = this.railRoot.querySelector<HTMLElement>("[data-cupping-timer]");
+    if (!state || !timer) return;
+    const duration = formatCuppingDuration(this.timerSeconds(state));
+    const expanded = timer.querySelector<HTMLElement>("[data-timer-expanded]");
+    const minutes = timer.querySelector<HTMLElement>("[data-timer-minutes]");
+    const seconds = timer.querySelector<HTMLElement>("[data-timer-seconds]");
+    if (expanded) expanded.textContent = duration.label;
+    if (minutes) minutes.textContent = String(duration.minutes);
+    if (seconds) seconds.textContent = String(duration.seconds).padStart(2, "0");
+  }
+
+  private renderRailTimer(state: CuppingScreenState): HTMLElement {
+    const duration = formatCuppingDuration(this.timerSeconds(state));
+    const timer = element("div", "cupping-rail-timer");
+    timer.dataset.cuppingTimer = "true";
+    timer.setAttribute("aria-label", `本次杯测已进行 ${duration.label}`);
+
+    const expanded = element("div", "cupping-rail-timer__expanded");
+    expanded.append(
+      element("span", "cupping-rail-timer__label", state.sessionCompletedAt ? "杯测总用时" : "杯测计时"),
+      element("strong", "cupping-rail-timer__value", duration.label)
+    );
+    expanded.lastElementChild?.setAttribute("data-timer-expanded", "true");
+
+    const compact = element("div", "cupping-rail-timer__compact");
+    const minuteLine = element("div", "cupping-rail-timer__compact-line");
+    const minuteValue = element("strong", "cupping-rail-timer__compact-number", String(duration.minutes));
+    minuteValue.dataset.timerMinutes = "true";
+    minuteLine.append(minuteValue, element("small", "cupping-rail-timer__compact-unit", "分"));
+    const secondLine = element("div", "cupping-rail-timer__compact-line");
+    const secondValue = element("strong", "cupping-rail-timer__compact-number", String(duration.seconds).padStart(2, "0"));
+    secondValue.dataset.timerSeconds = "true";
+    secondLine.append(secondValue, element("small", "cupping-rail-timer__compact-unit", "秒"));
+    compact.append(minuteLine, secondLine);
+    timer.append(expanded, compact);
+    return timer;
+  }
+
+  private stageCompletionTiming(state: CuppingScreenState, sampleId: string, stageId: StageId) {
+    const progress = state.progress.find((item) => item.sampleId === sampleId && item.stageId === stageId);
+    return cuppingCompletionTiming(state.sessionStartedAt, progress?.completedAt);
+  }
+
+  private appendStageCompletionStamp(state: CuppingScreenState, sampleId: string, stageId: StageId): void {
+    const timing = this.stageCompletionTiming(state, sampleId, stageId);
+    if (!timing) return;
+    const stamp = element("div", "cupping-completion-stamp");
+    stamp.dataset.stageCompletion = stageId;
+    stamp.append(
+      element("strong", "", "本进程完成"),
+      document.createTextNode(` · ${timing.elapsedLabel} · ${timing.clockLabel}`)
+    );
+    this.editorRoot.append(stamp);
+  }
 
   private disposeDragHandlers(): void {
     this.disposeRailDrag?.(); this.disposeRailDrag = undefined;
@@ -156,7 +246,7 @@ export class CuppingScreenRenderer {
     await this.run(async () => {
       const now = this.options.now();
       this.state = await this.controller.select(sampleId, "final", now);
-      this.state = await this.controller.saveField("final_phase", phase, now);
+      if (!this.state.lockedSampleIds.includes(sampleId)) this.state = await this.controller.saveField("final_phase", phase, now);
     });
   }
 
@@ -259,6 +349,7 @@ export class CuppingScreenRenderer {
     actions.append(exit, finish);
     controls.append(actions);
     if (!this.railCompact) controls.append(this.renderProgressLegend());
+    controls.append(this.renderRailTimer(state));
     this.railRoot.append(controls);
     this.updateRailToggleLabels();
   }
@@ -324,6 +415,15 @@ export class CuppingScreenRenderer {
     });
   }
 
+  private applySampleLock(locked: boolean): void {
+    if (locked) this.editorRoot.setAttribute("aria-readonly", "true");
+    else this.editorRoot.removeAttribute("aria-readonly");
+    if (!locked) return;
+    for (const control of this.editorRoot.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>("input, textarea, select, button")) {
+      control.disabled = true;
+    }
+  }
+
   private async render(): Promise<void> {
     const state = this.state; if (!state) return;
     this.disposeDragHandlers();
@@ -338,6 +438,7 @@ export class CuppingScreenRenderer {
     }
 
     clearElement(this.headerRoot); clearElement(this.editorRoot); clearElement(this.footerRoot);
+    this.editorRoot.removeAttribute("aria-readonly");
     this.footerRoot.classList.remove("is-two-action");
     this.renderStageStrip(state, state.active?.context.sampleId, state.active?.context.stageId);
     const blindStatus = this.renderBlindStatus(state); if (blindStatus) this.headerRoot.append(blindStatus);
@@ -358,6 +459,7 @@ export class CuppingScreenRenderer {
     }
 
     const active = state.active;
+    const sampleLocked = state.lockedSampleIds.includes(active.context.sampleId);
     const sampleTitle = visibleSampleLabel(
       active.slice.sample.label,
       active.slice.sample.displayNumber,
@@ -374,6 +476,7 @@ export class CuppingScreenRenderer {
     titleBlock.append(element("h1", "cupping-main__sample-title", sampleTitle), element("p", `cupping-main__stage cupping-main__stage--${stage?.tone ?? "neutral"}`, stageLabel ?? active.context.stageId));
     const details = renderSampleDetails(visibleMetadata); if (details) titleBlock.append(details);
     this.headerRoot.append(element("div", "cupping-main__sample-number", String(active.slice.sample.displayNumber).padStart(2, "0")), titleBlock);
+    if (sampleLocked) this.headerRoot.append(element("div", "cupping-main__lock-status", "得分已确认 · 本样品杯测记录已锁定为只读"));
 
     const preferences = this.flavorPreferences ?? await this.flavorService.load();
     const callbacks = {
@@ -392,7 +495,8 @@ export class CuppingScreenRenderer {
         observations: active.slice.observations,
         flavorPreferences: preferences,
         callbacks,
-        scoreProfile: scoreProfileForMetadata(state.sessionMetadata)
+        scoreProfile: scoreProfileForMetadata(state.sessionMetadata),
+        completionTiming: finalPhase === "score" ? this.stageCompletionTiming(state, active.context.sampleId, "final") : undefined
       });
     } else if (active.context.stageId === "flavor") {
       renderSensoryEditor(this.editorRoot, { stageId: "flavor", observations: active.slice.observations, flavorPreferences: preferences, callbacks, fieldFilter: new Set(["flavor_tags", "notes"]) });
@@ -413,24 +517,34 @@ export class CuppingScreenRenderer {
         flavorPreferences: preferences,
         callbacks,
         scoreProfile: scoreProfileForMetadata(state.sessionMetadata),
-        phase: active.context.stageId === "overall" ? "overall" : "score"
+        phase: active.context.stageId === "overall" ? "overall" : "score",
+        completionTiming: active.context.stageId === "scoring"
+          ? this.stageCompletionTiming(state, active.context.sampleId, "scoring")
+          : undefined
       });
     } else {
       renderSensoryEditor(this.editorRoot, { stageId: active.context.stageId, observations: active.slice.observations, flavorPreferences: preferences, callbacks });
     }
 
-    const flavorGroups = this.editorRoot.querySelector<HTMLElement>(".flavor-groups");
-    if (flavorGroups) {
-      this.disposeFlavorDrag = attachDragReorder(flavorGroups, {
-        itemSelector: ".flavor-group",
-        itemIdAttribute: "data-group-id",
-        onReorder: async (ids) => {
-          this.collapseRailForEditing();
-          await this.run(async () => { this.flavorPreferences = await this.flavorService.reorder(ids, this.options.now()); });
-        }
-      });
+    if (active.context.stageId !== "scoring" && !(active.context.stageId === "final" && finalPhase === "score")) {
+      this.appendStageCompletionStamp(state, active.context.sampleId, active.context.stageId);
     }
-    this.attachTagStackDrag();
+
+    if (!sampleLocked) {
+      const flavorGroups = this.editorRoot.querySelector<HTMLElement>(".flavor-groups");
+      if (flavorGroups) {
+        this.disposeFlavorDrag = attachDragReorder(flavorGroups, {
+          itemSelector: ".flavor-group",
+          itemIdAttribute: "data-group-id",
+          onReorder: async (ids) => {
+            this.collapseRailForEditing();
+            await this.run(async () => { this.flavorPreferences = await this.flavorService.reorder(ids, this.options.now()); });
+          }
+        });
+      }
+      this.attachTagStackDrag();
+    }
+    this.applySampleLock(sampleLocked);
 
     const previousAction = (): Promise<void> => {
       if (active.context.stageId === "final" && finalPhase === "score") return this.selectFinalPhase(active.context.sampleId, "overall");

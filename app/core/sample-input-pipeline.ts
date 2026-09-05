@@ -58,8 +58,14 @@ export function validateSampleInput(sample: Pick<ImportSampleDraft, "label" | "m
   const canonical = object(sample.metadata.canonical);
   const decisions = Array.isArray(canonical?.decisions) ? canonical.decisions as FoundationFieldDecision[] : [];
   for (const decision of decisions) {
-    if (decision.status === "conflict" || decision.status === "invalid") issues.push({ field: decision.field, code: decision.reason, severity: "error" });
-    else if (decision.status === "review" || decision.status === "unknown") issues.push({ field: decision.field, code: decision.reason, severity: "review" });
+    // Foundation conflict/invalid means machine resolution could not safely choose
+    // a canonical fact. It must remain visible for human review, but it must not
+    // make the review dialog impossible to finish after the user has explicitly
+    // accepted or corrected the displayed value. Structural errors such as a
+    // missing sample label remain true blocking errors.
+    if (["conflict", "invalid", "review", "unknown"].includes(decision.status)) {
+      issues.push({ field: decision.field, code: decision.reason, severity: "review" });
+    }
   }
   for (const key of DATE_KEYS) {
     const value = text(sample.metadata[key]);
@@ -106,6 +112,57 @@ export function canonicalizeSampleInput(
     schemaVersion: "coffee-canonical-record/1.0",
     foundationContract: "coffee-foundation/1.0",
     decisions
+  };
+  const validation = validateSampleInput(sample);
+  sample.metadata.inputValidation = validation;
+  sample.requiresReview = validation.state !== "valid";
+  return sample;
+}
+
+/**
+ * Final human confirmation is authoritative for the values visible in the review
+ * form. Recognition/Foundation conflict remains in the audit trail, but may not
+ * make a reviewed row impossible to finish. This never invents a canonical ID or
+ * core code: unresolved values are confirmed as user-entered display values only.
+ */
+export function confirmSampleInput(
+  original: ImportSampleDraft,
+  gateway: CoffeeFoundationGateway | undefined,
+  evidenceRef: string,
+  confirmedAt: string
+): ImportSampleDraft {
+  const sample = canonicalizeSampleInput(original, gateway, evidenceRef);
+  const canonical = object(sample.metadata.canonical) ?? {};
+  const decisions = Array.isArray(canonical.decisions) ? canonical.decisions as FoundationFieldDecision[] : [];
+  const overrides: Array<Record<string, unknown>> = [];
+  const confirmedDecisions = decisions.map((decision) => {
+    if (decision.status === "confirmed") return decision;
+    const value = text(sample.metadata[decision.field]) || text(decision.normalizedValue) || text(decision.rawValue);
+    if (!value) return decision;
+    overrides.push({
+      field: decision.field,
+      previousStatus: decision.status,
+      previousReason: decision.reason,
+      rawValue: decision.rawValue,
+      normalizedValue: decision.normalizedValue,
+      confirmedValue: value,
+      confirmedAt
+    });
+    return {
+      ...decision,
+      normalizedValue: value,
+      status: "confirmed" as const,
+      reason: "user-confirmed-override",
+      selected: decision.selected?.canonicalId || decision.selected?.coreCode
+        ? decision.selected
+        : { display: value, canonicalId: null, coreCode: null }
+    };
+  });
+  sample.metadata.canonical = {
+    ...canonical,
+    decisions: confirmedDecisions,
+    ...(overrides.length ? { manualOverrides: overrides } : {}),
+    userConfirmedAt: confirmedAt
   };
   const validation = validateSampleInput(sample);
   sample.metadata.inputValidation = validation;

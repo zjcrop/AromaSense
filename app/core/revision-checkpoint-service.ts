@@ -17,11 +17,15 @@ export class RevisionCheckpointService {
   ) {}
 
   async checkpointStage(sessionId: string, sampleId: string, stageId: StageId, now: string): Promise<string> {
-    const session = await this.repository.getSession(sessionId);
-    const samples = await this.repository.listSamples(sessionId);
+    const [session, samples, observations, stageStates] = await Promise.all([
+      this.repository.getSession(sessionId),
+      this.repository.listSamples(sessionId),
+      this.repository.listObservationsForStage(sampleId, stageId),
+      this.repository.listStageStates(sessionId)
+    ]);
     const sample = samples.find((item) => item.sampleId === sampleId);
     if (!sample) throw new Error(`SAMPLE_NOT_FOUND:${sampleId}`);
-    const observations = await this.repository.listObservationsForStage(sampleId, stageId);
+    const stageState = stageStates.find((item) => item.sampleId === sampleId && item.stageId === stageId);
     const sequence = await this.nextSequence(sessionId);
     const revision = await buildRevision({
       revisionId: this.ids.revisionId(),
@@ -34,6 +38,7 @@ export class RevisionCheckpointService {
       payload: {
         taxonomyVersion: session.taxonomyVersion,
         sessionStatus: session.status,
+        sessionStartedAt: session.startedAt ?? null,
         sample: {
           sampleId: sample.sampleId,
           displayNumber: sample.displayNumber,
@@ -41,6 +46,7 @@ export class RevisionCheckpointService {
           label: sample.label ?? null,
           metadata: sample.metadata
         },
+        stageState: stageState ?? null,
         observations
       }
     });
@@ -51,8 +57,11 @@ export class RevisionCheckpointService {
   async finalSession(sessionId: string, now: string): Promise<string> {
     const session = await this.repository.getSession(sessionId);
     if (session.status !== "completed") throw new Error("SESSION_MUST_BE_COMPLETED_BEFORE_FINAL_REVISION");
-    const samples = await this.repository.listSamples(sessionId);
-    const observations = await this.repository.listObservationsForSession(sessionId);
+    const [samples, observations, stageStates] = await Promise.all([
+      this.repository.listSamples(sessionId),
+      this.repository.listObservationsForSession(sessionId),
+      this.repository.listStageStates(sessionId)
+    ]);
     const sequence = await this.nextSequence(sessionId);
     const revision = await buildRevision({
       revisionId: this.ids.revisionId(),
@@ -63,6 +72,7 @@ export class RevisionCheckpointService {
       payload: {
         session,
         samples,
+        stageStates,
         observations
       }
     });
