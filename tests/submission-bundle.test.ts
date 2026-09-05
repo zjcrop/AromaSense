@@ -14,12 +14,13 @@ const snapshot: CuppingRecordSnapshot = {
 };
 
 test("submission bundle carries immutable matching interfaces and stable content hash", async () => {
-  const first = await buildSubmissionBundle(snapshot);
+  const first = await buildSubmissionBundle(snapshot, 2);
   const second = await buildSubmissionBundle({ ...snapshot, exportedAt: "2026-09-04T13:00:00Z" });
   assert.equal(first.contentHash, second.contentHash);
-  assert.equal(first.revision, 3);
+  assert.equal(first.revision, 2);
+  assert.equal(first.eventManifest.eventRevision, 3);
   assert.equal(first.eventBindings[0].eventSampleId, "es-1");
-  assert.equal(first.eventBindings[0].sampleIndex, 0);
+  assert.equal(first.eventBindings[0].sampleIndex, undefined);
   assert.match(first.eventManifest.interfaces.deepLink, /^https:/);
   assert.match(completeCsv(snapshot, first), /"jasmine, citrus"/);
   const imported = normalizeImportBundle(first, { kind: "json" });
@@ -29,4 +30,17 @@ test("submission bundle carries immutable matching interfaces and stable content
   assert.equal(imported?.sessions[0].samples[0].metadata.eventSampleId, "es-1");
   assert.equal(imported?.sessions[0].samples[0].metadata.sampleCode, "A01");
   assert.equal(comparisonBundleFromSubmission(first, "peer").samples[0].canonicalMetadata.globalSampleId, "global-42");
+});
+
+test("event bindings never change identity when sample display order changes", async () => {
+  const a = { ...snapshot.samples[0], metadata: { sampleIndex: 4 } };
+  const b = { ...a, sampleId: "sample-2", metadata: { sampleIndex: 8 } };
+  const first = await buildSubmissionBundle({ ...snapshot, samples: [a, b] });
+  const reordered = await buildSubmissionBundle({ ...snapshot, samples: [{ ...b, displayNumber: 99, sortOrder: 1 }, { ...a, displayNumber: 42, sortOrder: 2 }] });
+  for (const binding of first.eventBindings) assert.deepEqual(reordered.eventBindings.find((item) => item.localSampleId === binding.localSampleId), binding);
+  const legacy = { ...a, metadata: {} };
+  const original = await buildSubmissionBundle({ ...snapshot, samples: [legacy] });
+  const moved = await buildSubmissionBundle({ ...snapshot, samples: [b, { ...legacy, displayNumber: 77 }] });
+  assert.deepEqual(moved.eventBindings.find((item) => item.localSampleId === legacy.sampleId), original.eventBindings[0]);
+  assert.equal(original.eventBindings[0].sampleIndex, undefined);
 });
