@@ -1,4 +1,4 @@
-name: AromaSense verified signed release 0.1C
+name: AromaSense verified signed release B0.2.a
 
 on:
   push:
@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RELEASE_VERSION: 0.1C
-  RELEASE_TAG: v0.1C
-  ANDROID_VERSION_CODE: '10103'
+  RELEASE_VERSION: B0.2.a
+  RELEASE_TAG: vB0.2.a
+  ANDROID_VERSION_CODE: '10201'
   AROMASENSE_CLOUD_URL: https://aromasense-api.zj-crop.workers.dev
   AROMASENSE_FIREBASE_API_KEY: AIzaSyAsY_w3pxgBlnr0tFYKuAvNJUeEhN1RCU0
   AROMASENSE_FIREBASE_PROJECT_ID: romasense-f23eb
@@ -63,7 +63,7 @@ jobs:
           const response = await fetch(url, { cache: 'no-store' });
           const body = await response.json();
           console.log(body);
-          if (!response.ok || body.ok !== true || body.version !== '0.1C' || body.database !== 'configured' || body.authentication !== 'firebase-configured') {
+          if (!response.ok || body.ok !== true || body.version !== 'B0.2.a' || body.database !== 'configured' || body.authentication !== 'firebase-configured') {
             throw new Error(`production Worker health contract mismatch: ${JSON.stringify(body)}`);
           }
           NODE
@@ -118,7 +118,7 @@ jobs:
           unzip -p "$apk" assets/www/index.html > /tmp/aromasense-index.html
           unzip -p "$apk" assets/www/luckybean-recognition-core.js > /tmp/aromasense-recognition.js
           grep -Fq "data-cloud-base-url=\"${AROMASENSE_CLOUD_URL}\"" /tmp/aromasense-index.html
-          grep -Fq 'application-version" content="0.1C"' /tmp/aromasense-index.html
+          grep -Fq 'application-version" content="B0.2.a"' /tmp/aromasense-index.html
           grep -Fq '1.24P-recognition-pipeline.3' /tmp/aromasense-recognition.js
           grep -Fq 'knowledgeOnlyVariety' /tmp/aromasense-recognition.js
           expected_cert=$(tr -d '[:space:]:' < mobile/android/signing/CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')
