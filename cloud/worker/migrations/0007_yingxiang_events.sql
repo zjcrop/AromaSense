@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS yingxiang_events (
   title TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('draft','published','active','completed','cancelled')),
   policy_json TEXT NOT NULL,
+  manifest_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -97,3 +98,19 @@ CREATE TABLE IF NOT EXISTS yingxiang_calibration_groups (
 
 CREATE INDEX IF NOT EXISTS idx_yingxiang_calibration_event
   ON yingxiang_calibration_groups(event_id, created_at);
+
+CREATE TRIGGER IF NOT EXISTS trg_yingxiang_calibration_manifest_guard
+BEFORE INSERT ON yingxiang_calibration_groups
+BEGIN
+  SELECT CASE WHEN json_array_length(NEW.event_sample_ids_json) < 2
+    THEN RAISE(ABORT, 'YINGXIANG_CALIBRATION_REQUIRES_REPEAT') END;
+  SELECT CASE WHEN EXISTS (
+    SELECT 1
+    FROM json_each(NEW.event_sample_ids_json) requested
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM json_each((SELECT e.manifest_json FROM yingxiang_events e WHERE e.event_id = NEW.event_id), '$.samples') sample
+      WHERE json_extract(sample.value, '$.eventSampleId') = requested.value
+    )
+  ) THEN RAISE(ABORT, 'YINGXIANG_CALIBRATION_UNKNOWN_EVENT_SAMPLE') END;
+END;
