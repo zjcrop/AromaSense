@@ -46,8 +46,6 @@ CREATE INDEX IF NOT EXISTS idx_yingxiang_participants_event
   ON yingxiang_participants(event_id, status, joined_at);
 CREATE INDEX IF NOT EXISTS idx_yingxiang_participants_account
   ON yingxiang_participants(account_user_id, event_id, status);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_yingxiang_active_name_unique
-  ON yingxiang_participants(event_id, display_name) WHERE status = 'active';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_yingxiang_active_account_unique
   ON yingxiang_participants(event_id, account_user_id)
   WHERE status = 'active' AND account_user_id IS NOT NULL;
@@ -64,6 +62,21 @@ BEGIN
       AND (i.max_uses IS NULL OR i.use_count < i.max_uses)
       AND i.event_revision = (SELECT e.event_revision FROM yingxiang_events e WHERE e.event_id = NEW.event_id)
   ) THEN RAISE(ABORT, 'YINGXIANG_INVITE_UNAVAILABLE') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_yingxiang_participant_name_guard
+BEFORE INSERT ON yingxiang_participants
+WHEN COALESCE(json_extract(
+  (SELECT e.policy_json FROM yingxiang_events e WHERE e.event_id = NEW.event_id),
+  '$.participantName.uniqueWithinEvent'
+), 1) = 1
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM yingxiang_participants p
+    WHERE p.event_id = NEW.event_id
+      AND p.status = 'active'
+      AND p.display_name = NEW.display_name
+  ) THEN RAISE(ABORT, 'YINGXIANG_PARTICIPANT_NAME_CONFLICT') END;
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_yingxiang_participant_invite_consume
