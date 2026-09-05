@@ -5,9 +5,9 @@ import test from "node:test";
 import { STAGE_IDS } from "../shared/protocol/aromasense-v1";
 import { buildSampleRailViewState } from "../app/ui/cupping-view-model";
 
-// Tests execute from dist/tests after `tsc`; climb back to the repository root
-// before reading source/template files that are intentionally not copied to dist.
-const root = resolve(import.meta.dirname, "..", "..");
+// npm test executes compiled tests with the repository as cwd. Avoid import.meta
+// so this contract remains compatible with the project's existing module target.
+const root = process.cwd();
 
 const sample = {
   sampleId: "sample-visible-contract",
