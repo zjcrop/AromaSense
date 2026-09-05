@@ -130,12 +130,34 @@ async function runAcceptance(appUrl) {
       const footer=[...document.querySelectorAll('.batch-setup__footer-section > button')].map(n=>n.textContent?.trim());
       const header=[...document.querySelectorAll('.batch-setup__header-actions button')].map(n=>n.textContent?.trim());
       const start=document.querySelector('[data-home-action="start-cupping"]');
+      const brand=document.querySelector('.batch-setup__brand');
+      const chinese=document.querySelector('.batch-setup__brand-zh');
+      const english=document.querySelector('.batch-setup__brand-en');
+      const logo=document.querySelector('.batch-setup__brand-mark');
+      const headerActions=document.querySelector('.batch-setup__header-actions');
+      const viewportCenter=document.documentElement.clientWidth/2;
+      const centerOf=(node)=>node ? (node.getBoundingClientRect().left+node.getBoundingClientRect().right)/2 : NaN;
+      const logoRect=logo?.getBoundingClientRect();
       return {
         capture, captureStyles, footer, header,
         hasPhoto:capture.includes('拍摄录入'),
         hasDirectHistory:Boolean(document.querySelector('.batch-setup__history,.batch-setup__recent')),
         startFont:start ? parseFloat(getComputedStyle(start).fontSize) : 0,
-        startHeight:start ? start.getBoundingClientRect().height : 0
+        startHeight:start ? start.getBoundingClientRect().height : 0,
+        brandGeometry:{
+          viewportCenter,
+          brandCenter:centerOf(brand),
+          chineseCenter:centerOf(chinese),
+          englishCenter:centerOf(english),
+          brandError:Math.abs(centerOf(brand)-viewportCenter),
+          chineseError:Math.abs(centerOf(chinese)-viewportCenter),
+          englishError:Math.abs(centerOf(english)-viewportCenter),
+          chineseGlyphs:[...document.querySelectorAll('.batch-setup__brand-zh > span')].map(n=>n.textContent),
+          logoTag:logo?.tagName || '',
+          logoWidth:logoRect?.width || 0,
+          logoHeight:logoRect?.height || 0,
+          accountLayerPosition:headerActions ? getComputedStyle(headerActions).position : ''
+        }
       };
     })()`);
 
@@ -147,6 +169,10 @@ async function runAcceptance(appUrl) {
     requireCondition(home?.startFont >= 20 && home?.startHeight >= 60, `Start action is not visually dominant: ${JSON.stringify(home)}`);
     const styleKeys = (home?.captureStyles ?? []).map((item) => JSON.stringify({className:item.className,background:item.background,border:item.border,color:item.color,height:item.height}));
     requireCondition(styleKeys.length === 4 && new Set(styleKeys).size === 1, `Four home intake actions are not visually identical: ${JSON.stringify(home?.captureStyles)}`);
+    requireCondition(home?.brandGeometry?.logoTag?.toLowerCase() === "svg" && home?.brandGeometry?.logoWidth >= 80 && home?.brandGeometry?.logoHeight >= 65, `AromaSense logo is missing or too small: ${JSON.stringify(home?.brandGeometry)}`);
+    requireCondition(JSON.stringify(home?.brandGeometry?.chineseGlyphs) === JSON.stringify(["香","迹"]), `Chinese brand is not split into stable centered glyphs: ${JSON.stringify(home?.brandGeometry)}`);
+    requireCondition(home?.brandGeometry?.accountLayerPosition === "absolute", `Account action still participates in brand centering flow: ${JSON.stringify(home?.brandGeometry)}`);
+    requireCondition(home?.brandGeometry?.brandError <= 1.5 && home?.brandGeometry?.chineseError <= 1.5 && home?.brandGeometry?.englishError <= 1.5, `Homepage brand is not geometrically centered: ${JSON.stringify(home?.brandGeometry)}`);
 
     const opened = await cdp.evaluate(`(() => { const n=document.querySelector('[data-home-action="records"]'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
     requireCondition(opened === true, "Unable to expand records from footer");

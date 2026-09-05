@@ -35,6 +35,38 @@ function isCuppingTargetValue(value: string | undefined): value is CuppingTarget
   return CUPPING_TARGET_VALUES.includes(value as CuppingTargetValue);
 }
 
+function buildBrandMark(): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("batch-setup__brand-mark");
+  svg.setAttribute("viewBox", "0 0 180 150");
+  svg.setAttribute("role", "presentation");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="as-cup-gradient" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#d7d7d7"/>
+        <stop offset="0.46" stop-color="#999999"/>
+        <stop offset="1" stop-color="#454545"/>
+      </linearGradient>
+      <linearGradient id="as-coffee-gradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#a87957" stop-opacity="0.82"/>
+        <stop offset="1" stop-color="#69452f" stop-opacity="0.74"/>
+      </linearGradient>
+    </defs>
+    <path d="M53 54H127L119 104Q90 121 61 104Z" fill="url(#as-cup-gradient)" stroke="#d9d9d9" stroke-width="1.1"/>
+    <ellipse cx="90" cy="54" rx="37" ry="7" fill="url(#as-coffee-gradient)" stroke="#ededed" stroke-width="0.8"/>
+    <ellipse cx="90" cy="52.8" rx="31" ry="4.4" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="0.8"/>
+    <path d="M19 51C42 27 61 83 88 70C113 58 132 33 161 52" fill="none" stroke="#f2f2f2" stroke-opacity="0.72" stroke-width="1.15" stroke-linecap="round"/>
+    <path d="M17 60C42 34 62 91 89 76C115 62 134 41 163 61" fill="none" stroke="#eeeeee" stroke-opacity="0.78" stroke-width="1.35" stroke-linecap="round"/>
+    <path d="M16 69C42 43 63 98 90 82C116 67 136 49 164 70" fill="none" stroke="#f5f5f5" stroke-opacity="0.84" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M18 78C43 53 64 104 90 88C117 72 137 59 162 79" fill="none" stroke="#f6f6f6" stroke-opacity="0.9" stroke-width="1.9" stroke-linecap="round"/>
+    <path d="M22 87C46 65 66 109 91 94C117 79 136 69 158 88" fill="none" stroke="#ffffff" stroke-opacity="0.94" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="50" cy="132" r="10" fill="none" stroke="#d7d7d7" stroke-width="3.6"/>
+    <line x1="60" y1="132" x2="140" y2="132" stroke="#d7d7d7" stroke-width="3.6" stroke-linecap="round"/>
+  `;
+  return svg;
+}
+
 function installInlineFieldStyles(): void {
   if (document.head.querySelector("style[data-aromasense-inline-session-fields]")) return;
   const style = document.createElement("style");
@@ -72,17 +104,27 @@ function installHomeStyles(): void {
   style.textContent = `
     .batch-setup{max-width:760px!important;padding-top:28px!important}
     .batch-setup__header{
-      display:grid!important;justify-items:center!important;align-items:center!important;
+      position:relative!important;display:grid!important;grid-template-columns:1fr!important;
+      justify-items:center!important;align-items:start!important;
       gap:13px!important;margin:0 0 30px!important;padding:8px 0 2px!important;text-align:center!important;
     }
-    .batch-setup__header-copy{width:auto!important;justify-self:center!important;text-align:center!important}
-    .batch-setup__brand{display:grid;gap:8px;justify-items:center}
-    .batch-setup__brand-zh{
-      order:1;margin:0;color:#d6ad63;font-family:"Noto Serif SC","Songti SC",STSong,serif;
-      font-size:34px;line-height:1.08;font-weight:580;letter-spacing:.30em;text-indent:.30em;
+    .batch-setup__header-copy{
+      width:100%!important;min-width:0!important;justify-self:stretch!important;
+      display:grid!important;place-items:center!important;text-align:center!important;
     }
-    .batch-setup__brand-en{order:2;margin:0;color:#f4f1eb;font-size:17px;line-height:1;font-weight:640;letter-spacing:.09em}
-    .batch-setup__header-actions{display:flex!important;align-items:center!important;justify-content:center!important;gap:26px!important;min-width:0!important}
+    .batch-setup__brand{display:grid;gap:8px;justify-items:center;width:max-content;max-width:100%;margin:0 auto}
+    .batch-setup__brand-mark{order:1;display:block;width:96px;height:80px;overflow:visible}
+    .batch-setup__brand-zh{
+      order:2;display:flex;justify-content:center;align-items:center;gap:.30em;
+      margin:0;color:#d6ad63;font-family:"Noto Serif SC","Songti SC",STSong,serif;
+      font-size:34px;line-height:1.08;font-weight:580;letter-spacing:0;text-indent:0;
+    }
+    .batch-setup__brand-en{order:3;margin:0;color:#f4f1eb;font-size:17px;line-height:1;font-weight:640;letter-spacing:.09em}
+    .batch-setup__header-actions{
+      position:absolute!important;z-index:4!important;top:8px!important;right:0!important;
+      display:flex!important;align-items:center!important;justify-content:flex-end!important;
+      gap:26px!important;min-width:0!important;margin:0!important;
+    }
     .batch-setup__header-actions button{
       min-width:0!important;min-height:26px!important;margin:0!important;padding:3px 1px!important;
       border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;
@@ -144,6 +186,7 @@ function installHomeStyles(): void {
     @media(max-width:620px){
       .batch-setup{padding-top:20px!important}
       .batch-setup__header{margin-bottom:26px!important}
+      .batch-setup__brand-mark{width:88px;height:74px}
       .batch-setup__brand-zh{font-size:29px}
       .batch-setup__brand-en{font-size:15px}
       .batch-setup__session-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:11px 12px!important}
@@ -151,9 +194,10 @@ function installHomeStyles(): void {
       .batch-setup__footer-section .batch-setup__start{min-height:64px!important;font-size:21px!important}
     }
     @media(max-width:390px){
+      .batch-setup__brand-mark{width:82px;height:70px}
       .batch-setup__brand-zh{font-size:27px}
       .batch-setup__brand-en{font-size:14px}
-      .batch-setup__header-actions{gap:22px!important}
+      .batch-setup__header-actions{right:0!important;gap:22px!important}
       .batch-setup__session-meta-grid{grid-template-columns:1fr!important}
     }
   `;
@@ -203,8 +247,14 @@ export class BatchSetupRenderer {
     const brand = document.createElement("div");
     brand.className = "batch-setup__brand";
     brand.setAttribute("aria-label", "香迹 AromaSense");
+    const chinese = Object.assign(document.createElement("h1"), { className: "batch-setup__brand-zh", textContent: "香迹" });
+    chinese.replaceChildren(
+      Object.assign(document.createElement("span"), { textContent: "香" }),
+      Object.assign(document.createElement("span"), { textContent: "迹" })
+    );
     brand.append(
-      Object.assign(document.createElement("h1"), { className: "batch-setup__brand-zh", textContent: "香迹" }),
+      buildBrandMark(),
+      chinese,
       Object.assign(document.createElement("div"), { className: "batch-setup__brand-en", textContent: "AromaSense" })
     );
     copy.append(brand);
