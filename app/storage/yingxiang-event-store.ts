@@ -3,19 +3,42 @@ import {
   validateYingxiangEvent,
   type YingxiangCalibrationGroup,
   type YingxiangEvent,
-  type YingxiangEventPrincipal
+  type YingxiangEventPolicy,
+  type YingxiangEventPrincipal,
+  type YingxiangEventStatus
 } from "../core/yingxiang-event";
 import type { SQLiteDriver } from "./local-cupping-repository";
+
+export interface YingxiangEventContext {
+  eventId: string;
+  eventRevision: number;
+  title: string;
+  status: YingxiangEventStatus;
+  policy: YingxiangEventPolicy;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface EventRow {
   event_id: string;
   event_revision: number;
   host_user_id: string;
   title: string;
-  status: YingxiangEvent["status"];
+  status: YingxiangEventStatus;
   policy_json: string;
   created_at: string;
   updated_at: string;
+}
+
+interface EventContextRow {
+  event_id: string;
+  event_revision: number;
+  title: string;
+  status: YingxiangEventStatus;
+  policy_json: string;
+  created_at: string;
+  updated_at: string;
+  cached_at: string;
 }
 
 interface PrincipalRow {
@@ -39,6 +62,35 @@ interface CalibrationRow {
   created_at: string;
 }
 
+function policySignature(policy: YingxiangEventPolicy): string {
+  return JSON.stringify({
+    schemaVersion: policy.schemaVersion,
+    allowGuestParticipants: policy.allowGuestParticipants,
+    participantName: {
+      mode: policy.participantName.mode,
+      allowAccountDisplayName: policy.participantName.allowAccountDisplayName,
+      uniqueWithinEvent: policy.participantName.uniqueWithinEvent,
+      minLength: policy.participantName.minLength,
+      maxLength: policy.participantName.maxLength,
+      requiredPrefix: policy.participantName.requiredPrefix ?? null
+    },
+    revealSampleIdentity: policy.revealSampleIdentity,
+    calibrationRepeatEnabled: policy.calibrationRepeatEnabled
+  });
+}
+
+function eventContextFromEvent(event: YingxiangEvent): YingxiangEventContext {
+  return {
+    eventId: event.eventId,
+    eventRevision: event.eventRevision,
+    title: event.title,
+    status: event.status,
+    policy: event.policy,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt
+  };
+}
+
 function eventFromRow(row: EventRow): YingxiangEvent {
   return validateYingxiangEvent({
     schemaVersion: "yingxiang-event/0.1",
@@ -47,10 +99,32 @@ function eventFromRow(row: EventRow): YingxiangEvent {
     hostUserId: row.host_user_id,
     title: row.title,
     status: row.status,
-    policy: JSON.parse(row.policy_json) as YingxiangEvent["policy"],
+    policy: JSON.parse(row.policy_json) as YingxiangEventPolicy,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   });
+}
+
+function eventContextFromRow(row: EventContextRow): YingxiangEventContext {
+  const policy = JSON.parse(row.policy_json) as YingxiangEventPolicy;
+  validateEventContext({
+    eventId: row.event_id,
+    eventRevision: row.event_revision,
+    title: row.title,
+    status: row.status,
+    policy,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  });
+  return {
+    eventId: row.event_id,
+    eventRevision: row.event_revision,
+    title: row.title,
+    status: row.status,
+    policy,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
 }
 
 function principalFromRow(row: PrincipalRow): YingxiangEventPrincipal {
@@ -83,31 +157,72 @@ function calibrationFromRow(row: CalibrationRow): YingxiangCalibrationGroup {
   };
 }
 
+function validateEventContext(context: YingxiangEventContext): YingxiangEventContext {
+  if (!context.eventId.normalize("NFKC").trim()) throw new Error("YINGXIANG_EVENT_ID_REQUIRED");
+  if (!context.title.normalize("NFKC").trim()) throw new Error("YINGXIANG_EVENT_TITLE_REQUIRED");
+  if (!Number.isSafeInteger(context.eventRevision) || context.eventRevision < 1) throw new Error("YINGXIANG_EVENT_REVISION_INVALID");
+  const naming = context.policy.participantName;
+  if (context.policy.schemaVersion !== "yingxiang-event-policy/0.1" || context.policy.allowGuestParticipants !== true) {
+    throw new Error("YINGXIANG_EVENT_POLICY_INVALID");
+  }
+  if (!Number.isSafeInteger(naming.minLength) || !Number.isSafeInteger(naming.maxLength)
+    || naming.minLength < 1 || naming.maxLength < naming.minLength || naming.maxLength > 64) {
+    throw new Error("YINGXIANG_NAME_LENGTH_POLICY_INVALID");
+  }
+  if (!context.createdAt.trim() || !context.updatedAt.trim()) throw new Error("YINGXIANG_EVENT_TIMESTAMP_REQUIRED");
+  return context;
+}
+
+function sameEvent(a: YingxiangEvent, b: YingxiangEvent): boolean {
+  return a.eventId === b.eventId
+    && a.eventRevision === b.eventRevision
+    && a.hostUserId === b.hostUserId
+    && a.title === b.title
+    && a.status === b.status
+    && a.createdAt === b.createdAt
+    && a.updatedAt === b.updatedAt
+    && policySignature(a.policy) === policySignature(b.policy);
+}
+
+function sameContext(a: YingxiangEventContext, b: YingxiangEventContext): boolean {
+  return a.eventId === b.eventId
+    && a.eventRevision === b.eventRevision
+    && a.title === b.title
+    && a.status === b.status
+    && a.createdAt === b.createdAt
+    && a.updatedAt === b.updatedAt
+    && policySignature(a.policy) === policySignature(b.policy);
+}
+
 export class YingxiangEventStore {
   constructor(private readonly db: SQLiteDriver) {}
 
-  async putEvent(event: YingxiangEvent): Promise<"created" | "updated" | "already_present"> {
+  async putEvent(event: YingxiangEvent, cachedAt = event.updatedAt): Promise<"created" | "updated" | "already_present"> {
     validateYingxiangEvent(event);
     const existing = await this.getEvent(event.eventId);
     if (existing) {
       if (event.eventRevision < existing.eventRevision) throw new Error("YINGXIANG_STALE_EVENT_REVISION");
-      const same = event.eventRevision === existing.eventRevision
-        && JSON.stringify(event) === JSON.stringify(existing);
-      if (same) return "already_present";
+      if (event.eventRevision === existing.eventRevision && sameEvent(event, existing)) {
+        await this.putEventContext(eventContextFromEvent(event), cachedAt);
+        return "already_present";
+      }
       if (event.eventRevision === existing.eventRevision) throw new Error("YINGXIANG_EVENT_REVISION_CONFLICT");
     }
-    await this.db.run(
-      `INSERT INTO yingxiang_events (event_id, event_revision, host_user_id, title, status, policy_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(event_id) DO UPDATE SET
-         event_revision=excluded.event_revision,
-         host_user_id=excluded.host_user_id,
-         title=excluded.title,
-         status=excluded.status,
-         policy_json=excluded.policy_json,
-         updated_at=excluded.updated_at`,
-      [event.eventId, event.eventRevision, event.hostUserId, event.title, event.status, JSON.stringify(event.policy), event.createdAt, event.updatedAt]
-    );
+    await this.db.transaction(async () => {
+      await this.db.run(
+        `INSERT INTO yingxiang_events (event_id, event_revision, host_user_id, title, status, policy_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(event_id) DO UPDATE SET
+           event_revision=excluded.event_revision,
+           host_user_id=excluded.host_user_id,
+           title=excluded.title,
+           status=excluded.status,
+           policy_json=excluded.policy_json,
+           updated_at=excluded.updated_at`,
+        [event.eventId, event.eventRevision, event.hostUserId, event.title, event.status, policySignature(event.policy), event.createdAt, event.updatedAt]
+      );
+      await this.putEventContext(eventContextFromEvent(event), cachedAt);
+    });
     return existing ? "updated" : "created";
   }
 
@@ -120,11 +235,49 @@ export class YingxiangEventStore {
     return row ? eventFromRow(row) : undefined;
   }
 
+  async putEventContext(context: YingxiangEventContext, cachedAt: string): Promise<"created" | "updated" | "already_present"> {
+    validateEventContext(context);
+    if (!cachedAt.trim()) throw new Error("YINGXIANG_EVENT_CACHE_TIMESTAMP_REQUIRED");
+    const existing = await this.getEventContext(context.eventId);
+    if (existing) {
+      if (context.eventRevision < existing.eventRevision) throw new Error("YINGXIANG_STALE_EVENT_REVISION");
+      if (context.eventRevision === existing.eventRevision && sameContext(context, existing)) {
+        await this.db.run("UPDATE yingxiang_event_contexts SET cached_at = ? WHERE event_id = ?", [cachedAt, context.eventId]);
+        return "already_present";
+      }
+      if (context.eventRevision === existing.eventRevision) throw new Error("YINGXIANG_EVENT_REVISION_CONFLICT");
+    }
+    await this.db.run(
+      `INSERT INTO yingxiang_event_contexts
+       (event_id, event_revision, title, status, policy_json, created_at, updated_at, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(event_id) DO UPDATE SET
+         event_revision=excluded.event_revision,
+         title=excluded.title,
+         status=excluded.status,
+         policy_json=excluded.policy_json,
+         updated_at=excluded.updated_at,
+         cached_at=excluded.cached_at`,
+      [context.eventId, context.eventRevision, context.title, context.status, policySignature(context.policy), context.createdAt, context.updatedAt, cachedAt]
+    );
+    return existing ? "updated" : "created";
+  }
+
+  async getEventContext(eventId: string): Promise<YingxiangEventContext | undefined> {
+    const row = await this.db.get<EventContextRow>(
+      `SELECT event_id, event_revision, title, status, policy_json, created_at, updated_at, cached_at
+       FROM yingxiang_event_contexts WHERE event_id = ?`,
+      [eventId]
+    );
+    return row ? eventContextFromRow(row) : undefined;
+  }
+
   async putPrincipal(principal: YingxiangEventPrincipal): Promise<void> {
-    const event = await this.getEvent(principal.eventId);
-    if (!event) throw new Error("YINGXIANG_EVENT_NOT_FOUND");
+    const context = await this.getEventContext(principal.eventId);
+    if (!context) throw new Error("YINGXIANG_EVENT_CONTEXT_NOT_FOUND");
+    if (context.status === "completed" || context.status === "cancelled") throw new Error("YINGXIANG_EVENT_NOT_JOINABLE");
     if (principal.status !== "active" || principal.releasedAt) throw new Error("YINGXIANG_NEW_PRINCIPAL_MUST_BE_ACTIVE");
-    if (event.policy.participantName.uniqueWithinEvent) {
+    if (context.policy.participantName.uniqueWithinEvent) {
       const nameOwner = await this.db.get<{ participant_id: string }>(
         `SELECT participant_id FROM yingxiang_event_principals
          WHERE event_id = ? AND status = 'active' AND display_name = ? AND participant_id <> ?`,
@@ -132,8 +285,8 @@ export class YingxiangEventStore {
       );
       if (nameOwner) throw new Error("YINGXIANG_PARTICIPANT_NAME_CONFLICT");
     }
-    const existing = await this.db.get<{ principal_id: string; status: string }>(
-      "SELECT principal_id, status FROM yingxiang_event_principals WHERE event_id = ? AND participant_id = ?",
+    const existing = await this.db.get<{ principal_id: string }>(
+      "SELECT principal_id FROM yingxiang_event_principals WHERE event_id = ? AND participant_id = ?",
       [principal.eventId, principal.participantId]
     );
     if (existing && existing.principal_id !== principal.principalId) throw new Error("YINGXIANG_PARTICIPANT_ALREADY_BOUND");
@@ -178,9 +331,9 @@ export class YingxiangEventStore {
   }
 
   async putCalibrationGroup(group: YingxiangCalibrationGroup): Promise<void> {
-    const event = await this.getEvent(group.eventId);
-    if (!event) throw new Error("YINGXIANG_EVENT_NOT_FOUND");
-    validateCalibrationGroup(group, event.policy);
+    const context = await this.getEventContext(group.eventId);
+    if (!context) throw new Error("YINGXIANG_EVENT_CONTEXT_NOT_FOUND");
+    validateCalibrationGroup(group, context.policy);
     await this.db.run(
       `INSERT INTO yingxiang_calibration_groups
        (group_id, event_id, canonical_sample_id, event_sample_ids_json, reveal_policy, created_at)
@@ -194,13 +347,13 @@ export class YingxiangEventStore {
   }
 
   async listCalibrationGroups(eventId: string): Promise<readonly YingxiangCalibrationGroup[]> {
-    const event = await this.getEvent(eventId);
-    if (!event) return [];
+    const context = await this.getEventContext(eventId);
+    if (!context) return [];
     const rows = await this.db.all<CalibrationRow>(
       `SELECT group_id, event_id, canonical_sample_id, event_sample_ids_json, reveal_policy, created_at
        FROM yingxiang_calibration_groups WHERE event_id = ? ORDER BY created_at, group_id`,
       [eventId]
     );
-    return rows.map((row) => validateCalibrationGroup(calibrationFromRow(row), event.policy));
+    return rows.map((row) => validateCalibrationGroup(calibrationFromRow(row), context.policy));
   }
 }
