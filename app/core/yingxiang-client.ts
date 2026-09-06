@@ -19,7 +19,15 @@ export interface YingxiangInviteResult {
 }
 export interface YingxiangInvitePreview {
   event: YingxiangRemoteEvent;
-  invite: { inviteId: string; assignedName?: string; expiresAt: string; remainingUses: number | null };
+  invite: {
+    inviteId: string;
+    /** Legacy per-invite name; new organizer-assigned invitations leave this empty. */
+    assignedName?: string;
+    automaticName?: boolean;
+    namePrefix?: string;
+    expiresAt: string;
+    remainingUses: number | null;
+  };
 }
 export interface YingxiangJoinedPrincipal {
   schemaVersion: "yingxiang-principal/0.1";
@@ -106,7 +114,7 @@ export class YingxiangClient {
     if (options.body) headers["content-type"] = "application/json";
     if (options.auth || options.optionalAuth) {
       const token = await this.token();
-      if (options.auth && !token) throw new YingxiangClientError("UNAUTHORIZED", 401, "迎香发布功能需要先登录账户。");
+      if (options.auth && !token) throw new YingxiangClientError("UNAUTHORIZED", 401, "迎香功能需要先登录对应账户。");
       if (token) headers.authorization = `Bearer ${token}`;
     }
     if (options.accessToken) headers.authorization = `Bearer ${options.accessToken}`;
@@ -133,9 +141,9 @@ export class YingxiangClient {
 
 function messageForYingxiangError(code: string): string {
   const messages: Record<string, string> = {
-    UNAUTHORIZED: "迎香发布功能需要先登录账户。",
+    UNAUTHORIZED: "当前账户会话无效，请重新登录。",
     YINGXIANG_EVENT_PAYLOAD_INVALID: "活动信息、参与规则或样品列表不完整。",
-    YINGXIANG_EVENT_NOT_FOUND: "未找到该迎香活动，或当前账户没有管理权限。",
+    YINGXIANG_EVENT_NOT_FOUND: "未找到该迎香活动，或当前迎香账号没有管理权限。",
     YINGXIANG_EVENT_NOT_SHAREABLE: "当前活动尚未发布或已经结束，不能生成邀请。",
     YINGXIANG_EVENT_CONTRACT_CORRUPT: "活动数据契约损坏，已停止继续操作。",
     YINGXIANG_INVITE_NOT_FOUND: "邀请无效或不存在。",
@@ -148,12 +156,13 @@ function messageForYingxiangError(code: string): string {
     YINGXIANG_JOIN_IDEMPOTENCY_CONFLICT: "该加入请求与之前记录不一致，已停止重复写入。",
     YINGXIANG_PARTICIPANT_NAME_INVALID: "参与名称不符合主办方设定的规则。",
     YINGXIANG_PARTICIPANT_NAME_CONFLICT: "该参与名称在本次活动中已经被使用。",
-    YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME: "选择个人账户名称参与时必须先登录。",
+    YINGXIANG_PARTICIPANT_NAME_POLICY_MISMATCH: "自动生成的参与名称超出当前命名规则，请缩短名称前缀。",
+    YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME: "选择个人账户名称参与时必须先登录香迹账户。",
     YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED: "主办方不允许使用个人账户名称参与。",
-    YINGXIANG_ACCOUNT_NAME_UNAVAILABLE: "当前账户还没有设置可用于迎香的显示名称。",
+    YINGXIANG_ACCOUNT_NAME_UNAVAILABLE: "当前香迹账户还没有设置可用于活动的显示名称。",
     YINGXIANG_ACCOUNT_NAME_POLICY_MISMATCH: "个人账户显示名称不符合本次活动的命名规则。",
     YINGXIANG_ACCOUNT_NAME_INVALID: "账户显示名称必须为 1–64 个字符。",
-    YINGXIANG_ASSIGNED_NAME_REQUIRED: "该活动要求主办方为邀请指定参与名称。",
+    YINGXIANG_ASSIGNED_NAME_REQUIRED: "旧版邀请缺少主办方分配名称，请重新生成邀请。",
     YINGXIANG_CALIBRATION_INVALID: "校准设置引用了无效或重复的活动样品。",
     YINGXIANG_CALIBRATION_SLOT_ASSIGNED: "这些样品编号已归入另一重复样品组。",
     YINGXIANG_EVENT_STRUCTURE_LOCKED: "已有参与者，样品和身份规则已锁定；仍可修改活动名称。",
