@@ -256,7 +256,7 @@ export default {
     }});
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return json({ ok: true, service: "aromasense-api", version: PRODUCT_VERSION, yingxiang: "B0.1-collection", build: env.BUILD_SHA ?? null, protocol: "aromasense-sync/1.0", database: env.DB ? "configured" : "not-configured", authentication: env.FIREBASE_PROJECT_ID ? "firebase-configured" : "not-configured", aiAdapter: env.ZHIPU_API_KEY ? "zhipu-configured" : "optional-unavailable", timestamp: new Date().toISOString() });
+      return json({ ok: true, service: "aromasense-api", version: PRODUCT_VERSION, yingxiang: "B0.2-host-flow", build: env.BUILD_SHA ?? null, protocol: "aromasense-sync/1.0", database: env.DB ? "configured" : "not-configured", authentication: env.FIREBASE_PROJECT_ID ? "firebase-configured" : "not-configured", aiAdapter: env.ZHIPU_API_KEY ? "zhipu-configured" : "optional-unavailable", timestamp: new Date().toISOString() });
     }
 
     if (!env.DB) return dbUnavailable();
