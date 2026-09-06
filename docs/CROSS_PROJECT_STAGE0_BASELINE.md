@@ -98,11 +98,102 @@ Before later stages are merged, compare at least:
 
 No performance change is accepted solely on theoretical benefit. Multi-item accuracy and record association are primary correctness gates.
 
-## 9. Stage 0 execution note
+## 9. Stage 0 execution record
 
-Static repository/dependency/contract audit is complete for this control point. The GitHub connector exposes no completed status checks for the current merge SHA, and this chat runtime cannot clone GitHub directly for local benchmark execution. Therefore **runtime benchmark numbers are not claimed here**. Capture them in the execution environment before Stage 1 acceptance.
+Execution time: `2026-09-06T09:31:02Z`
 
-## 10. Stage 1 entry condition
+Environment: Linux, Node `v24.19.0`, npm `11.9.0`. Tests were executed from
+`stage0-cross-project-baseline-20260906` at the pre-record commit
+`8d76a634d185039fdcbe24fbbcf0310685de8c9d`, whose only change from the audited
+source SHA is this control document.
+
+| Command | Observed result | Wall time |
+| --- | --- | ---: |
+| `npm ci` | pass; 39 packages installed | 104.73 s |
+| `npm run typecheck` | pass | 2.81 s |
+| `npm test` | pass; 163/163 | 4.45 s |
+| `npm run check` | pass; typecheck plus a second 163/163 test run | 7.18 s |
+| `npm run bundle:web` | first run failed on the 12 s remote data timeout; unchanged retry passed | 22.65 s (passing retry) |
+
+The successful bundle verified the executable LuckyBean recognition core,
+same-origin PP-OCR/ROI Worker assets, lazy serialized recognition cache,
+Coffee Knowledge `1.0.0-alpha.7`, 75 aliases, 5 blocked ambiguous entities,
+16 knowledge-only varieties and unchanged QR indexes for both Pages and Android
+WebView artifacts.
+
+The first bundle attempt did not obtain the remote BrewIon data before the
+hard-coded 12 s timeout, so no recognition bootstrap was emitted and the
+hardening step correctly rejected the artifact. After the same URLs became
+warm in the network cache, the exact same command passed without any source
+change. This is a reproducible build-network flake risk, not a valid successful
+fallback path.
+
+## 10. Data-integrity and phase-level proxy measurements
+
+The Node test run exercised the real domain/storage implementations and
+reported these representative single-run durations:
+
+| Covered path | Observed duration |
+| --- | ---: |
+| dense one-row-per-sample grouping | 13.66 ms |
+| roast-grouped menu grouping | 19.21 ms |
+| coffee-table column grouping | 42.60 ms |
+| session plus samples atomic create/restart slice | 13.57 ms |
+| 100-sample slice-scoped rail path | 54.38 ms |
+| offline session then sync recovery | 52.34 ms |
+| immutable event cloud guards | 47.22 ms |
+
+These are regression-test timings, not image-recognition benchmarks. They show
+that grouping, local transactions, large-session slicing, offline recovery and
+immutable cloud rules execute without integrity failures in the Node runtime.
+
+The requested end-to-end image phases have the following honest status:
+
+| Recognition phase | Stage 0 status |
+| --- | --- |
+| image preparation | unmeasured; no representative image fixture and no executable browser/Android image runtime |
+| OCR | unmeasured for the same reason |
+| layout/group | exercised by real grouping tests; durations above, but without OCR/image preparation |
+| canonical | exercised by Foundation field/date/i18n/conflict tests; no isolated end-to-end image timing |
+| persistence | exercised by the real SQL.js repository and migration tests; representative timings above |
+| UI render | contract-tested only; no local browser render timing |
+
+The public Pages artifact tied to the audited `main` SHA was also opened in a
+cloud Chromium smoke session. It reached the logged-out homepage with an empty
+sample list and no visible error. The first observation was 2.946 s after
+navigation but intentionally included a fixed 2.5 s settling wait; a same-tab
+reload-to-visible-`开始杯测` reading was 0.942 s. The browser did not expose a
+navigation performance trace, so these readings are observational smoke data,
+not a repeatable performance baseline.
+
+GitHub reported eight completed-success checks for
+`dfbdfca0c683c74dbcc053cd46fd98e3c824c020` on 2026-09-06, including
+`core-persistence`, `android-debug`, connected Web/Android builds,
+`browser-refresh`, Cloudflare deployment verification and Pages publishing.
+This confirms those CI jobs completed on the exact audited source; it does not
+replace a physical-device OCR or launch measurement.
+
+## 11. Current Stage 0 risks
+
+- Red: no representative single-sample or multi-sample image OCR timing, and no
+  six-phase end-to-end trace, exists yet.
+- Red: the old LuckyBean pin/provider mismatch remains deliberately unchanged.
+- Red: the documented "browsing does not activate a session" rule still differs
+  from the current controller/tested timing behavior; this remains reserved for
+  the later Session/timed-mode stage.
+- Yellow: the 12 s remote BrewIon fetch timeout can make a clean bundle fail on
+  a slow but otherwise successful connection.
+- Yellow: PaddleOCR third-party notices remain inaccurate for the assets that
+  are actually bundled.
+- Green: type safety, 163 domain/storage tests, migrations, Local-first recovery,
+  immutable revisions, event identity and both Web/Android bundle hardening
+  passed without business-code or schema changes.
+
+Stage 0 is therefore recorded accurately but is **not fully validated**. Stage 1
+must not begin until representative photos are run through an executable
+Chromium/WebKit or Android path and the six phase timings are captured.
+
+## 12. Stage 1 entry condition
 
 Proceed to the Global Interaction Foundation only after:
 
