@@ -141,11 +141,15 @@ async function executeRecognitionCoreSmoke() {
     "recognizeImageRegion",
     "normalizeRecognitionRegion",
     "createRecognitionDocument",
+    "groupRecognitionRecordCandidates",
     "analyzeRecognitionDocument"
   ]) {
     if (typeof core?.[method] !== "function") {
       throw new Error(`Formal LuckyBean recognition core failed runtime smoke: ${method} is unavailable`);
     }
+  }
+  if (core?.RECOGNITION_RECORD_CANDIDATE_SCHEMA !== "recognition-record-candidate/1.0") {
+    throw new Error(`Foundation RecordCandidate schema mismatch: ${String(core?.RECOGNITION_RECORD_CANDIDATE_SCHEMA)}`);
   }
   const normalized = core.normalizeRecognitionRegion({ left: 0.1, top: 0.2, right: 0.8, bottom: 0.9 });
   if (normalized.left !== 0.1 || normalized.bottom !== 0.9) {
@@ -176,4 +180,4 @@ async function executeRecognitionCoreSmoke() {
 await installPagesRuntime();
 await configurePagesRuntime();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + same-origin ROI Worker assets verified");
+console.log("Foundation recognition runtime: executable core + RecordCandidate + browser-safe PP-OCR + same-origin ROI Worker assets verified");
