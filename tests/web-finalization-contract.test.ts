@@ -33,7 +33,9 @@ test("Web homepage is a real four-section layout instead of legacy DOM with cosm
   assert.match(home, /actions\.replaceChildren\(\)/);
 });
 
-test("Homepage header keeps only account while list actions and expandable records follow the requested hierarchy", () => {
+test("Homepage header preserves distinct Yingxiang and account actions while records keep the requested hierarchy", () => {
+  assert.match(home, /const yingxiang = headerButtons\.find\(button => button\.dataset\.homeAction === "yingxiang"\)/);
+  assert.match(home, /if \(yingxiang\) actions\.append\(yingxiang\)/);
   assert.match(home, /account\.textContent = "账户"/);
   assert.match(home, /recordToggle\.textContent = "记录"/);
   assert.match(home, /photo\?\.remove\(\)/);

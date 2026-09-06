@@ -70,12 +70,23 @@ samples[]
 当前 Worker 路由：
 
 - `POST /api/v1/yingxiang/events`
+- `GET /api/v1/yingxiang/events`
+- `GET /api/v1/yingxiang/events/:eventId/dashboard`
+- `POST /api/v1/yingxiang/events/:eventId/republish`
 - `POST /api/v1/yingxiang/events/:eventId/invites`
+- `POST /api/v1/yingxiang/events/:eventId/invites/:inviteId/revoke`
+- `POST /api/v1/yingxiang/events/:eventId/participants/:participantId/release`
 - `GET /api/v1/yingxiang/invites/:token`
 - `POST /api/v1/yingxiang/invites/:token/join`
+- `GET /api/v1/yingxiang/participants/:participantId/status`
+- `POST /api/v1/yingxiang/participants/:participantId/progress`
+- `POST /api/v1/yingxiang/participants/:participantId/submissions`
+- `POST /api/v1/yingxiang/participants/:participantId/leave`
 - `POST /api/v1/yingxiang/account-display-name`
 - `POST /api/v1/yingxiang/events/:eventId/calibration-groups`
 - `POST /api/v1/yingxiang/events/:eventId/complete`
+
+加入成功后，服务器从 invite token 与持久化的 `joinRequestId` 派生 event-scoped participant capability。客户端本地保存明文 capability，D1 只保存 SHA-256 hash。该 capability 只允许对应 participant 读取自身状态、上报进度、提交结果或退出，不授予主办方权限。
 
 ## 5. 邀请进入香迹 Session：已实现
 
@@ -114,7 +125,7 @@ Event Context、Principal、Session 和 `yingxiang_session_bindings` 在 SQLite 
 - 揭示策略为 `after_event` 或 `organizer_only`；
 - 不复制豆卡、不改写原始 observation。
 
-后续比较引擎可以据此计算重复性、离散程度和系统性偏差。
+主办方看板按稳定的 `eventSampleId + stage + field` 聚合数值结果，并据此计算重复槽位的均值、样本标准差和同场偏移。缺失 observation 保持缺失，不以 0 填充；参与者之间不会通过显示顺序或数组位置匹配。
 
 ## 7. Local-first 与同步边界
 
@@ -125,37 +136,49 @@ Event Context、Principal、Session 和 `yingxiang_session_bindings` 在 SQLite 
 - 活动 revision 与 Submission revision 独立；
 - revision 不允许静默覆盖。
 
+活动 Session 的进度和最终结果使用 `yingxiang_delivery` 在本地持久化投递状态。每次有意义的本地杯测写入后可以上报单调递增的 progress sequence；完成时生成不可变 SubmissionBundle。网络失败、响应丢失、页面刷新或应用重启后，客户端继续使用相同 revision/hash 重试，直到收到并保存云端 ACK。
+
+Worker 对 SubmissionBundle 重新计算内容 hash，并验证 event、participant、session、event sample 与最终评分确认。主办方结束活动或参与者被释放后，新的进度和结果写入被拒绝；已经保存的本地感官数据保持完整。
+
 ## 8. B0.1 当前落地文件
 
 - `app/core/yingxiang-event.ts`
 - `app/core/yingxiang-client.ts`
 - `app/core/yingxiang-participation-service.ts`
+- `app/core/yingxiang-delivery-service.ts`
 - `app/storage/0006_yingxiang_event_context.sql`
+- `app/storage/0007_yingxiang_collection.sql`
 - `app/storage/yingxiang-event-store.ts`
 - `app/runtime/yingxiang-browser-bootstrap.ts`
+- `app/ui/dom/yingxiang-console-renderer.ts`
 - `app/ui/dom/yingxiang-host-renderer.ts`
 - `app/ui/dom/yingxiang-join-renderer.ts`
 - `cloud/worker/migrations/0007_yingxiang_events.sql`
 - `cloud/worker/migrations/0008_account_display_name.sql`
+- `cloud/worker/migrations/0009_yingxiang_collection.sql`
 - `cloud/worker/src/yingxiang-api.ts`
+- `cloud/worker/src/yingxiang-management-api.ts`
 - `cloud/worker/src/index.ts`
+- `shared/yingxiang-results.ts`
 - `tests/yingxiang-event.test.ts`
 - `tests/yingxiang-event-store.test.ts`
 - `tests/yingxiang-client.test.ts`
 - `tests/yingxiang-participation-service.test.ts`
+- `tests/yingxiang-collection.test.ts`
+- `tests/yingxiang-delivery.test.ts`
 
-Web / Android 共用启动迁移链已加入本地 migration 6。
+Web / Android 共用启动迁移链已加入本地 migration 7。
 
-## 9. 下一开发范围
+## 9. B0.1 完成边界
 
-当前 B0.1 已形成“发布 → 邀请 → 加入 → 香迹 Session”的测试闭环。下一层继续包括：
+当前 B0.1 已形成以下完整测试闭环：
 
-1. 活动编辑与 revision 再发布；
-2. 单个参与者释放；
-3. 主办方参与进度读取；
-4. SubmissionBundle 回收；
-5. 多参与者结果汇总；
-6. 重复校准统计与偏差分析；
-7. 主办方看板。
+```text
+发布 → 邀请 → 加入 → 香迹 Session
+→ 本地持续保存 → 进度投递 → 最终结果回收
+→ 主办方看板 → 多人汇总 → 重复校准
+```
+
+结构编辑在首位参与者加入后锁定；标题可以继续按 revision 更新。活动结束会关闭邀请并释放仍活跃的 Event Principal。当前仍需依赖真实部署验收的部分是多人现场网络、不同移动设备上的长时杯测以及物理触控体验。
 
 页面仍以功能、系统兼容性和信息密度优先；移动与网页端保持同一业务流程，以响应式布局适配显示差异。

@@ -1,8 +1,10 @@
+import { handleYingxiangManagementRoute, handleYingxiangParticipantRoute } from "./yingxiang-management-api";
 import { decodeProtectedHeader, importX509, jwtVerify, type JWTPayload } from "jose";
 import { createZhipuAiAdapter } from "../.foundation/runtime/ai-adapter.mjs";
 import { handleYingxiangAuthenticatedRoute, handleYingxiangPublicRoute } from "./yingxiang-api";
 
 interface Env {
+  BUILD_SHA?: string;
   DB?: D1Database;
   FIREBASE_PROJECT_ID?: string;
   PUBLIC_APP_URL?: string;
@@ -253,10 +255,14 @@ export default {
     }});
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return json({ ok: true, service: "aromasense-api", version: PRODUCT_VERSION, protocol: "aromasense-sync/1.0", database: env.DB ? "configured" : "not-configured", authentication: env.FIREBASE_PROJECT_ID ? "firebase-configured" : "not-configured", aiAdapter: env.ZHIPU_API_KEY ? "zhipu-configured" : "optional-unavailable", timestamp: new Date().toISOString() });
+      return json({ ok: true, service: "aromasense-api", version: PRODUCT_VERSION, yingxiang: "B0.1-collection", build: env.BUILD_SHA ?? null, protocol: "aromasense-sync/1.0", database: env.DB ? "configured" : "not-configured", authentication: env.FIREBASE_PROJECT_ID ? "firebase-configured" : "not-configured", aiAdapter: env.ZHIPU_API_KEY ? "zhipu-configured" : "optional-unavailable", timestamp: new Date().toISOString() });
     }
 
     if (!env.DB) return dbUnavailable();
+    if (url.pathname.startsWith("/api/v1/yingxiang/participants/")) {
+      const response = await handleYingxiangParticipantRoute(request, url, env.DB);
+      if (response) return response;
+    }
     if (url.pathname.startsWith("/api/v1/yingxiang/invites/")) {
       const optionalUser = await authenticate(request, env.DB) ?? undefined;
       const response = await handleYingxiangPublicRoute(request, url, env.DB, optionalUser);
@@ -276,6 +282,8 @@ export default {
     if (url.pathname === "/api/v1/ai/enrich-samples" && request.method === "POST") return handleAiEnrichment(request, env);
     if (url.pathname === "/api/v1/share" && request.method === "POST") return handleShareCreate(request, env, user);
 
+    const managementResponse = await handleYingxiangManagementRoute(request, url, env.DB, user);
+    if (managementResponse) return managementResponse;
     const yingxiangResponse = await handleYingxiangAuthenticatedRoute(request, url, env.DB, user, env.PUBLIC_APP_URL);
     if (yingxiangResponse) return yingxiangResponse;
 

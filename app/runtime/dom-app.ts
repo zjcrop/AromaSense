@@ -1,3 +1,5 @@
+import { YingxiangDeliveryService } from "../core/yingxiang-delivery-service";
+import { YingxiangClient } from "../core/yingxiang-client";
 import { CloudflareAuthClient } from "../core/auth-client";
 import type { BatchSetupDraft } from "../core/batch-setup-draft";
 import { CuppingSessionController, type ObservationIdFactory } from "../core/cupping-session-controller";
@@ -69,6 +71,7 @@ export class AromaSenseDomApp {
   private readonly syncEngine?: SyncEngine;
   private readonly revisions: RevisionCheckpointService;
   private readonly submissions: SubmissionBundleStore;
+  readonly yingxiangDelivery?: YingxiangDeliveryService;
   private readonly recognizer = new SampleRecognitionService();
   private preloadPromise?: Promise<AppPreloadState>;
   private homeModal?: HTMLElement;
@@ -82,6 +85,7 @@ export class AromaSenseDomApp {
     const repository = new LocalCuppingRepository(db);
     this.revisions = new RevisionCheckpointService(db, repository, this.syncQueue, { revisionId: () => crypto.randomUUID(), queueId: () => crypto.randomUUID() });
 
+    if (options.cloudBaseUrl) this.yingxiangDelivery = new YingxiangDeliveryService(db,new YingxiangClient(options.cloudBaseUrl,async () => (await this.authStore.get())?.token),options.now);
     if (this.hasCloudAuthConfiguration()) {
       this.authClient = new CloudflareAuthClient(options.cloudBaseUrl!, options.firebaseApiKey!, this.authStore, this.pendingRegistrationStore);
       const remote = new CloudflareSyncRepository(options.cloudBaseUrl!, { token: async () => (await this.authClient?.current())?.token });
@@ -158,12 +162,14 @@ export class AromaSenseDomApp {
     const flavorService = new FlavorGroupPreferenceService(this.preferences);
     this.screen = new CuppingScreenRenderer(this.root, controller, flavorService, new SampleSummaryReader(this.db), {
       now: this.options.now,
-      onExit: async () => { await this.showSetup(); },
+      onExit: async () => { void this.yingxiangDelivery?.sync(); await this.showSetup(); },
       onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); },
       onOpenRecords: async () => { await this.showRecords(); },
-      onSessionFinished: async (sessionId) => { await this.syncPending([sessionId]); }
+      onSessionFinished: async (sessionId) => { void this.syncPending([sessionId]); }
     });
     await this.screen.initialize(sessionId);
+    this.root.dataset.sessionId = sessionId;
+    void this.yingxiangDelivery?.sync();
   }
 
   async showRecords(): Promise<void> {
@@ -210,6 +216,7 @@ export class AromaSenseDomApp {
   }
 
   async syncPending(sessionIds?: readonly string[]): Promise<SyncRunResult | undefined> {
+    await this.yingxiangDelivery?.sync();
     if (!this.syncEngine || !(await this.authClient?.current())) return undefined;
     if (sessionIds?.length) await this.syncQueue.retrySessions(sessionIds, this.options.now());
     return this.syncEngine.runOnce(sessionIds);
@@ -365,6 +372,7 @@ export class AromaSenseDomApp {
 
   private setRootMode(mode: RootMode): void {
     this.root.replaceChildren();
+    if (mode !== "cupping") delete this.root.dataset.sessionId;
     this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen", "session-records", "record-replay");
     if (mode === "setup") this.root.classList.add("batch-setup");
     if (mode === "cupping") this.root.classList.add("aromasense-cupping");

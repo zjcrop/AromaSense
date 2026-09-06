@@ -3,7 +3,8 @@ import { YingxiangParticipationService } from "../core/yingxiang-participation-s
 import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
-import { YingxiangHostRenderer } from "../ui/dom/yingxiang-host-renderer";
+import { YingxiangConsoleRenderer } from "../ui/dom/yingxiang-console-renderer";
+import type { YingxiangDeliveryService } from "../core/yingxiang-delivery-service";
 import { YingxiangJoinRenderer } from "../ui/dom/yingxiang-join-renderer";
 
 function installOverlayStyles(): void {
@@ -26,6 +27,8 @@ export interface YingxiangBrowserBootstrapOptions {
   createSampleId(index: number): string;
   onOpenSession(sessionId: string): void | Promise<void>;
   cloudBaseUrl?: string;
+  delivery?: YingxiangDeliveryService;
+  onRequireAccount?(): void | Promise<void>;
 }
 
 export class YingxiangBrowserBootstrap {
@@ -35,6 +38,9 @@ export class YingxiangBrowserBootstrap {
   private readonly volatileJoinIds = new Map<string, string>();
   private observer?: MutationObserver;
   private overlay?: HTMLElement;
+  private console?: YingxiangConsoleRenderer;
+  private syncTimer?: ReturnType<typeof setInterval>;
+  private installingParticipation = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -56,8 +62,10 @@ export class YingxiangBrowserBootstrap {
   start(): void {
     installOverlayStyles();
     this.installHomeEntry();
-    this.observer = new MutationObserver(() => this.installHomeEntry());
-    this.observer.observe(this.root, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-screen"] });
+    this.observer = new MutationObserver(() => { this.installHomeEntry(); void this.installParticipationEntry(); });
+    this.observer.observe(this.root, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-screen", "data-session-id"] });
+    this.syncTimer = setInterval(() => { if (document.visibilityState === "visible") void this.options.delivery?.sync(); }, 20000);
+    void this.options.delivery?.sync();
   }
 
   async openPendingInvite(): Promise<boolean> {
@@ -68,6 +76,7 @@ export class YingxiangBrowserBootstrap {
   }
 
   dispose(): void {
+    if (this.syncTimer) clearInterval(this.syncTimer);
     this.observer?.disconnect();
     this.observer = undefined;
     this.closeOverlay();
@@ -82,7 +91,7 @@ export class YingxiangBrowserBootstrap {
     button.className = "yingxiang-entry";
     button.dataset.homeAction = "yingxiang";
     button.textContent = "迎香";
-    button.setAttribute("aria-label", "进入迎香活动发布");
+    button.setAttribute("aria-label", "进入迎香活动");
     button.addEventListener("click", () => this.openHost());
     actions.prepend(button);
   }
@@ -104,17 +113,36 @@ export class YingxiangBrowserBootstrap {
     return { overlay, panel };
   }
 
-  private openHost(): void {
+  private async installParticipationEntry(): Promise<void> {
+    const sessionId = this.root.dataset.sessionId;
+    if (this.installingParticipation || this.root.dataset.screen !== "cupping" || !sessionId || this.root.querySelector("[data-yingxiang-participation]")) return;
+    this.installingParticipation = true;
+    try {
+      const p = await this.db.get<{display_name:string;status:string}>(`SELECT p.display_name,p.status FROM yingxiang_session_bindings b JOIN yingxiang_event_principals p ON p.event_id=b.event_id AND p.participant_id=b.participant_id WHERE b.session_id=?`,[sessionId]);
+      if (!p || this.root.dataset.screen !== "cupping" || this.root.dataset.sessionId !== sessionId) return;
+      const header = this.root.querySelector(".cupping-main__header");
+      if (!header || header.querySelector("[data-yingxiang-participation]")) return;
+      const entry = document.createElement("button");entry.type="button";entry.dataset.yingxiangParticipation="true";
+      entry.textContent = `迎香 · ${p.display_name}${p.status === "released" ? " · 身份已释放" : " · 本次活动身份"}`;
+      entry.style.cssText="display:block;max-width:100%;padding:8px;margin-bottom:8px;border:1px solid #84704b;border-radius:6px;background:#211e17;color:#ead8b3;font-size:14px;white-space:normal";
+      entry.onclick=()=>this.openHost(true);header.prepend(entry);
+    } finally { this.installingParticipation=false; }
+  }
+
+  private openHost(participation = false): void {
     const { panel } = this.createOverlay("迎香测试版");
-    new YingxiangHostRenderer(panel, this.client, {
+    this.console = new YingxiangConsoleRenderer(panel, this.client, this.db, this.options.delivery, {
+      onOpenSession: async (id) => { this.closeOverlay(); await this.options.onOpenSession(id); },
       onClose: () => this.closeOverlay(),
       onRequireAccount: () => {
         this.closeOverlay();
+        if (this.options.onRequireAccount) { void this.options.onRequireAccount(); return; }
         const account = [...this.root.querySelectorAll<HTMLButtonElement>(".batch-setup__header-actions button")]
           .find((candidate) => candidate.textContent?.trim() === "账户");
         account?.click();
       }
-    }).render();
+    });
+    void (participation ? this.console.showParticipations() : this.console.render());
   }
 
   private async openJoin(token: string): Promise<void> {
@@ -123,8 +151,18 @@ export class YingxiangBrowserBootstrap {
       panel.textContent = "迎香云端服务尚未配置，无法读取活动邀请。";
       return;
     }
+    // Recover a previous explicit join even when its one-use invitation is now exhausted.
+    let attempted: string | null = null;
+    try { attempted = window.localStorage.getItem(`aromasense.yingxiang.attempt.${token}`); } catch { /* normal preview remains available */ }
+    if (attempted) {
+      try {
+        const restored = await this.participation.join({token,joinRequestId:attempted});
+        this.clearInviteFromUrl();this.closeOverlay();await this.options.onOpenSession(restored.sessionId);return;
+      } catch { /* The first attempt may never have reached the server; show the normal invite form. */ }
+    }
     await new YingxiangJoinRenderer(panel, this.participation, this.client, {
       token,
+      onJoinAttempt: (id) => { try { window.localStorage.setItem(`aromasense.yingxiang.attempt.${token}`,id); } catch { /* SQLite still protects successfully joined records. */ } },
       getJoinRequestId: (inviteId) => this.joinRequestId(inviteId),
       onClose: () => {
         this.clearInviteFromUrl();
@@ -163,6 +201,8 @@ export class YingxiangBrowserBootstrap {
   }
 
   private closeOverlay(): void {
+    this.console?.dispose();
+    this.console = undefined;
     this.overlay?.remove();
     this.overlay = undefined;
   }

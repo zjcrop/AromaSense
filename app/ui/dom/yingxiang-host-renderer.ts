@@ -4,6 +4,9 @@ import { YingxiangClient, YingxiangClientError, type YingxiangInviteResult, type
 export interface YingxiangHostRendererOptions {
   onRequireAccount(): void | Promise<void>;
   onClose(): void;
+  initialEvent?: YingxiangRemoteEvent;
+  structureLocked?: boolean;
+  onPublished?(event: YingxiangRemoteEvent): void | Promise<void>;
 }
 
 function installStyles(): void {
@@ -12,6 +15,7 @@ function installStyles(): void {
   style.dataset.yingxiangHost = "true";
   style.textContent = `
     .yingxiang-host{display:grid;gap:18px;padding:22px;color:#ece8df;background:#151515}
+    .yingxiang-host [hidden]{display:none!important}
     .yingxiang-host__head{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08)}
     .yingxiang-host__title{margin:0;color:#d6ad63;font:600 24px/1.2 "Noto Serif SC","Songti SC",serif;letter-spacing:.12em}
     .yingxiang-host__sub{margin:7px 0 0;color:#9b958b;font-size:12px;line-height:1.6}
@@ -52,7 +56,7 @@ export class YingxiangHostRenderer {
   constructor(private readonly root: HTMLElement, private readonly client: YingxiangClient | undefined, private readonly options: YingxiangHostRendererOptions) {}
 
   render(): void {
-    installStyles(); this.root.replaceChildren();
+    installStyles(); this.root.replaceChildren(); this.event = this.options.initialEvent;
     const shell = document.createElement("section"); shell.className = "yingxiang-host";
     const head = document.createElement("div"); head.className = "yingxiang-host__head";
     const copy = document.createElement("div");
@@ -96,6 +100,17 @@ export class YingxiangHostRenderer {
     createButton.addEventListener("click", () => void this.createEvent({ eventTitle, organizerName, cuppingMode, sampleCodes, namingMode, prefix, maxNameLength, allowAccount: allowAccount.input, uniqueName: uniqueName.input, calibration: calibration.input, createButton, status, inviteSection, assignedName }));
     inviteButton.addEventListener("click", () => void this.createInvite({ assignedName, maxUses, expiryHours, inviteButton, status, result, resultMeta, shareText }));
     copyButton.addEventListener("click", () => void this.copyInvite(copyButton));
+    const initial = this.options.initialEvent;
+    if (initial) {
+      eventTitle.value = initial.title; organizerName.value = initial.manifest.organizerName; cuppingMode.value = initial.manifest.cuppingMode;
+      sampleCodes.value = initial.manifest.samples.map(s => s.sampleCode).join("\n");
+      namingMode.value = initial.policy.participantName.mode; prefix.value = initial.policy.participantName.requiredPrefix ?? "";
+      maxNameLength.value = String(initial.policy.participantName.maxLength); allowAccount.input.checked = initial.policy.participantName.allowAccountDisplayName;
+      uniqueName.input.checked = initial.policy.participantName.uniqueWithinEvent; calibration.input.checked = initial.policy.calibrationRepeatEnabled;
+      createButton.textContent = "保存并重新发布";
+      if (this.options.structureLocked) for (const control of [organizerName,cuppingMode,sampleCodes,namingMode,prefix,maxNameLength,allowAccount.input,uniqueName.input,calibration.input]) control.disabled = true;
+      status.textContent = this.options.structureLocked ? "已有参与者，当前可修改活动名称。重新发布后需生成新邀请，已加入者的杯测继续保留。" : "重新发布后旧邀请失效，请生成新邀请。";
+    }
     shell.append(head, eventSection, policySection, createButton, status, inviteSection, result); this.root.append(shell);
   }
 
@@ -106,9 +121,14 @@ export class YingxiangHostRenderer {
     let manifest;
     try { manifest = buildYingxiangManifest({ organizerName: view.organizerName.value, cuppingMode: view.cuppingMode.value === "open" ? "open" : view.cuppingMode.value === "semi_blind" ? "semi_blind" : "blind", sampleCodes: normalizedLines(view.sampleCodes.value) }); }
     catch (error) { view.status.textContent = error instanceof Error ? error.message : "样品列表无效。"; return; }
-    const policy: YingxiangEventPolicy = { ...defaultYingxiangEventPolicy(), participantName: { mode: view.namingMode.value === "organizer_assigned" ? "organizer_assigned" : "participant_choice", allowAccountDisplayName: view.allowAccount.checked, uniqueWithinEvent: view.uniqueName.checked, minLength: 1, maxLength, ...(view.prefix.value.normalize("NFKC").trim() ? { requiredPrefix: view.prefix.value.normalize("NFKC").trim() } : {}) }, calibrationRepeatEnabled: view.calibration.checked };
+    let policy: YingxiangEventPolicy = { ...defaultYingxiangEventPolicy(), participantName: { mode: view.namingMode.value === "organizer_assigned" ? "organizer_assigned" : "participant_choice", allowAccountDisplayName: view.allowAccount.checked, uniqueWithinEvent: view.uniqueName.checked, minLength: 1, maxLength, ...(view.prefix.value.normalize("NFKC").trim() ? { requiredPrefix: view.prefix.value.normalize("NFKC").trim() } : {}) }, calibrationRepeatEnabled: view.calibration.checked };
+    if (this.options.structureLocked && this.event) { manifest = this.event.manifest; policy = this.event.policy; }
+    else if (this.event) manifest = { ...manifest, samples: manifest.samples.map(s => {
+      const old = this.event!.manifest.samples.find(v => v.sampleCode === s.sampleCode);
+      return old ? { ...s, eventSampleId: old.eventSampleId, ...(old.label ? {label:old.label} : {}) } : s;
+    }) };
     view.createButton.disabled = true; view.status.textContent = "正在发布…";
-    try { this.event = await this.client.createEvent({ title, policy, manifest, publish: true }); view.inviteSection.hidden = false; view.assignedName.disabled = policy.participantName.mode !== "organizer_assigned"; view.status.textContent = `已发布：${this.event.title} · ${this.event.manifest.samples.length} 个样品 · revision ${this.event.eventRevision}`; }
+    try { this.event = this.event ? await this.client.republish(this.event.eventId, { expectedRevision: this.event.eventRevision, title, policy, manifest }) : await this.client.createEvent({ title, policy, manifest, publish: true }); view.inviteSection.hidden = false; view.assignedName.disabled = policy.participantName.mode !== "organizer_assigned"; view.status.textContent = `已发布：${this.event.title} · ${this.event.manifest.samples.length} 个样品`; await this.options.onPublished?.(this.event); }
     catch (error) { if (error instanceof YingxiangClientError && error.code === "UNAUTHORIZED") { view.status.textContent = "发布迎香杯测必须先登录主账户。"; await this.options.onRequireAccount(); } else view.status.textContent = error instanceof Error ? error.message : String(error); }
     finally { view.createButton.disabled = false; }
   }
@@ -117,7 +137,7 @@ export class YingxiangHostRenderer {
     if (!this.client || !this.event) return; const uses = Number(view.maxUses.value); const hours = Number(view.expiryHours.value);
     if (!Number.isSafeInteger(uses) || uses < 1 || uses > 10000 || !Number.isFinite(hours) || hours < 1 || hours > 168) { view.status.textContent = "邀请次数需为 1–10000，有效期需为 1–168 小时。"; return; }
     view.inviteButton.disabled = true; view.status.textContent = "正在生成邀请…";
-    try { this.invite = await this.client.createInvite(this.event.eventId, { assignedName: view.assignedName.value.normalize("NFKC").trim() || undefined, maxUses: uses, expiresAt: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString() }); view.result.hidden = false; view.resultMeta.textContent = `event ${this.invite.eventId} · revision ${this.invite.eventRevision} · ${this.invite.maxUses ?? "不限"} 次 · 到期 ${this.invite.expiresAt}`; view.shareText.textContent = this.invite.share.webUrl || this.invite.share.deepLink; view.status.textContent = "邀请已生成。明文 token 仅在本次返回中提供，服务器只保存哈希。"; }
+    try { this.invite = await this.client.createInvite(this.event.eventId, { assignedName: view.assignedName.value.normalize("NFKC").trim() || undefined, maxUses: uses, expiresAt: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString() }); view.result.hidden = false; view.resultMeta.textContent = `event ${this.invite.eventId} · revision ${this.invite.eventRevision} · ${this.invite.maxUses ?? "不限"} 次 · 到期 ${this.invite.expiresAt}`; view.shareText.textContent = this.invite.share.webUrl || this.invite.share.deepLink; view.status.textContent = "邀请已生成，可以复制链接发给参与者。"; }
     catch (error) { view.status.textContent = error instanceof Error ? error.message : String(error); } finally { view.inviteButton.disabled = false; }
   }
 

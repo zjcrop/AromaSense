@@ -163,7 +163,7 @@ async function runAcceptance(appUrl) {
 
     requireCondition(JSON.stringify(home?.capture) === JSON.stringify(["批量识别","手工录入","清空列表","导入数据"]), `Wrong homepage actions: ${JSON.stringify(home)}`);
     requireCondition(JSON.stringify(home?.footer) === JSON.stringify(["开始杯测","记录"]), `Wrong footer actions: ${JSON.stringify(home)}`);
-    requireCondition(JSON.stringify(home?.header) === JSON.stringify(["账户"]), `Header should only retain account action: ${JSON.stringify(home)}`);
+    requireCondition(JSON.stringify(home?.header) === JSON.stringify(["迎香","账户"]), `Header must preserve distinct Yingxiang and account actions: ${JSON.stringify(home)}`);
     requireCondition(home?.hasPhoto === false, `拍摄录入 still visible: ${JSON.stringify(home)}`);
     requireCondition(home?.hasDirectHistory === false, `History still rendered directly on homepage: ${JSON.stringify(home)}`);
     requireCondition(home?.startFont >= 20 && home?.startHeight >= 60, `Start action is not visually dominant: ${JSON.stringify(home)}`);
@@ -214,6 +214,26 @@ async function runAcceptance(appUrl) {
       scope:document.querySelector('.home-modal .session-records__list')?.dataset.recordScope
     }))()`);
     requireCondition(unfinished?.active === "unfinished" && unfinished?.scope === "unfinished", `Unfinished record page was not selected: ${JSON.stringify(unfinished)}`);
+
+    await cdp.evaluate(`document.querySelector('.home-modal .session-records__back')?.click()`);
+    await waitUntil(async () => !(await cdp.evaluate(`Boolean(document.querySelector('.home-modal'))`)), "records modal close for entry checks");
+    await cdp.evaluate(`document.querySelector('.batch-setup__account')?.click()`);
+    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.home-modal .account-card')`)), "real account entry");
+    requireCondition(!(await cdp.evaluate(`Boolean(document.querySelector('.yingxiang-overlay'))`)), "Account entry incorrectly opened Yingxiang");
+    const closeAccount = await cdp.evaluate(`(() => {
+      const choices=[...document.querySelectorAll('.home-modal .account-card__link')];
+      const node=choices.find((item)=>/离线使用|返回本地杯测/.test(item.textContent||''));
+      if(!(node instanceof HTMLElement)) return false;
+      node.click();
+      return true;
+    })()`);
+    requireCondition(closeAccount === true, "Unable to close the account modal");
+    await waitUntil(async () => !(await cdp.evaluate(`Boolean(document.querySelector('.home-modal'))`)), "account modal close");
+    await cdp.evaluate(`document.querySelector('[data-home-action="yingxiang"]')?.click()`);
+    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.yingxiang-overlay .yx-console')`)), "Yingxiang console entry");
+    await cdp.evaluate(`[...document.querySelectorAll('.yx-console button')].find(b=>b.textContent==='新建杯测')?.click()`);
+    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.yingxiang-host')`)), "Yingxiang create form");
+    requireCondition(await cdp.evaluate(`([...document.querySelectorAll('.yingxiang-host__section')].filter(s=>s.hidden).every(s=>getComputedStyle(s).display==='none'))`), "Unpublished invitation controls must remain hidden");
 
     const relevantErrors = cdp.errors.filter((entry) => !/favicon|Failed to load resource.*404|onnxruntime/i.test(entry));
     requireCondition(relevantErrors.length === 0, `Browser errors:\n${relevantErrors.join("\n")}`);
