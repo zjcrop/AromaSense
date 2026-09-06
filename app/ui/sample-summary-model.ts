@@ -5,6 +5,8 @@ export interface RadarAxisValue {
   label: string;
   value: number;
   max: number;
+  /** False means the axis has no recorded observation; value is only a compatibility placeholder. */
+  recorded?: boolean;
 }
 
 const AXES: readonly { key: string; label: string; max: number }[] = [
@@ -24,7 +26,7 @@ export function buildRadarSummary(observations: readonly SummaryObservation[]): 
     const values = observations
       .filter((item) => item.fieldKey === axis.key && typeof item.value === "number" && Number.isFinite(item.value))
       .map((item) => item.value as number);
-    return { ...axis, value: mean(values) };
+    return { ...axis, value: mean(values), recorded: values.length > 0 };
   });
 }
 
