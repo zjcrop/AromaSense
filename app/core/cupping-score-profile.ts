@@ -64,5 +64,5 @@ export function scoreProfileForMode(mode: CuppingMode): CuppingScoreProfile {
 }
 
 export function scoreProfileForMetadata(metadata: Partial<CuppingSessionMetadata>): CuppingScoreProfile {
-  return PROFILES[cuppingModeFromMetadata(metadata)];
+  return PROFILES[normalizeCuppingMode(cuppingModeFromMetadata(metadata))];
 }
