@@ -38,6 +38,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build browser application
         run: npm run bundle:web
+      - name: Record Stage 0 six-phase recognition baseline
+        run: node scripts/stage0-recognition-baseline.mjs
       - name: Run homepage and records UI acceptance
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
