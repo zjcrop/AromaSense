@@ -1,5 +1,6 @@
 import type { OCRBox, OCRLayoutDocument, OCRLayoutLine } from "./ocr-layout-model";
 import type { SampleLayoutResult, SampleLayoutSegment } from "./sample-layout-segmenter";
+import { sharedRecordCandidateLayout } from "./shared-record-candidate-layout";
 
 interface OCRRow {
   lines: OCRLayoutLine[];
@@ -96,17 +97,9 @@ function rowFromLine(line: OCRLayoutLine): OCRRow {
   return { lines: [line], box: line.normalizedBox, text: line.text.trim() };
 }
 
-/**
- * Detect two independent coffee cards placed side-by-side before the generic row
- * builder can merge their horizontally separated text into shared Y rows.
- *
- * This runs only after the primary segmenter has returned a single sample. It is
- * intentionally conservative: both columns must contain at least three OCR lines,
- * overlap strongly in vertical extent, be separated by a material X-center gap,
- * and independently contain coffee identity + process evidence. Any meaningful
- * line crossing the proposed split rejects the fallback. High-confidence table
- * and catalog results never reach this function.
- */
+/** Compatibility fallback retained during Stage 3 migration. Shared LuckyBean
+ * RecordCandidates run first; this path only covers layouts not yet represented
+ * by the shared contract and remains review-required. */
 function sideBySideColumnsFallback(document: OCRLayoutDocument): SampleLayoutResult | undefined {
   const lines = document.lines
     .filter((line) => line.text.replace(/\s+/g, "").length >= 2)
@@ -152,7 +145,7 @@ function sideBySideColumnsFallback(document: OCRLayoutDocument): SampleLayoutRes
     [orderedLeft.map(rowFromLine), orderedRight.map(rowFromLine)],
     "grid",
     0.82,
-    "side-by-side-columns-v1"
+    "compat:side-by-side-columns-v1"
   );
 }
 
@@ -161,7 +154,7 @@ function processRowsFallback(document: OCRLayoutDocument, source: readonly OCRRo
   const records = meaningful.filter((row) => hasCoffeeEvidence(row.text));
   if (records.length < 2) return undefined;
   if (records.length / meaningful.length < 0.72) return undefined;
-  return result(document, records.map((row) => [row]), "row-list", 0.8, "semantic-process-row-v1");
+  return result(document, records.map((row) => [row]), "row-list", 0.8, "compat:semantic-process-row-v1");
 }
 
 function strongGapFallback(document: OCRLayoutDocument, source: readonly OCRRow[]): SampleLayoutResult | undefined {
@@ -183,7 +176,7 @@ function strongGapFallback(document: OCRLayoutDocument, source: readonly OCRRow[
   if (meaningful.length < 2) return undefined;
   const covered = meaningful.reduce((sum, group) => sum + group.length, 0) / source.length;
   if (covered < 0.7) return undefined;
-  return result(document, meaningful, "vertical-block-list", 0.78, "semantic-strong-gap-v1");
+  return result(document, meaningful, "vertical-block-list", 0.78, "compat:semantic-strong-gap-v1");
 }
 
 function processCycleFallback(document: OCRLayoutDocument, source: readonly OCRRow[]): SampleLayoutResult | undefined {
@@ -197,24 +190,23 @@ function processCycleFallback(document: OCRLayoutDocument, source: readonly OCRR
   const groups = starts.map((start, index) => source.slice(start, starts[index + 1] ?? source.length));
   if (groups.length < 2 || groups.some((group) => !group.length)) return undefined;
   if (groups.some((group) => !hasCoffeeEvidence(group.map((row) => row.text).join(" ")))) return undefined;
-  return result(document, groups, "vertical-block-list", 0.74, "semantic-process-cycle-v1");
+  return result(document, groups, "vertical-block-list", 0.74, "compat:semantic-process-cycle-v1");
 }
 
 /**
- * Secondary, deliberately conservative refinement for OCR pages that the primary
- * geometry segmenter called a single sample. It exists to prevent a dangerous
- * failure mode: several clearly separate coffee records being silently collapsed
- * into one setup row merely because the label did not contain explicit field
- * names such as “产地/品种/处理法”.
- *
- * Every fallback remains review-required. The primary high-confidence table,
- * catalog and explicit-field segmenters always win.
+ * Product-specific table/catalog segmentation happens before this function.
+ * For ambiguous single-sample pages, the shared LuckyBean RecordCandidate contract
+ * is now authoritative for generic geometry. Local semantic fallbacks are retained
+ * only as a compatibility safety net for patterns not yet covered by that contract.
  */
 export function refineAmbiguousSingleSampleLayout(
   document: OCRLayoutDocument,
   primary: SampleLayoutResult
 ): SampleLayoutResult {
   if (primary.segments.length !== 1 || document.lines.length < 2) return primary;
+
+  const shared = sharedRecordCandidateLayout(document);
+  if (shared) return shared;
 
   const sideBySide = sideBySideColumnsFallback(document);
   if (sideBySide) return sideBySide;
