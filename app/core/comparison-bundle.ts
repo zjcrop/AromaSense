@@ -1,4 +1,4 @@
-import { cuppingModeFromMetadata, type CuppingMode } from "./session-metadata";
+import { cuppingModeFromMetadata, normalizeCuppingMode, type CuppingMode } from "./session-metadata";
 import type { SubmissionBundle } from "./submission-bundle";
 import type { CuppingRecordSnapshot } from "./session-record-service";
 import { sampleIndexFromMetadata } from "./sample-batch-service";
@@ -23,6 +23,10 @@ export interface ComparisonMapping { schemaVersion: "aromasense-comparison-mappi
 
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function normalized(value: unknown): string { return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase("en-US"); }
+function publicIdentityMode(mode: CuppingMode): boolean {
+  const canonical = normalizeCuppingMode(mode);
+  return canonical === "free" || canonical === "timed";
+}
 
 function canonicalFingerprint(metadata: Record<string, unknown>): string {
   const canonical = object(metadata.canonical);
@@ -65,7 +69,7 @@ export function normalizeComparisonBundle(value: unknown): ComparisonBundle | un
 }
 
 export function mapComparison(local: CuppingRecordSnapshot, peer: ComparisonBundle): ComparisonMapping {
-  const strict = cuppingModeFromMetadata(local.session.metadata) !== "open" || peer.mode !== "open";
+  const strict = !publicIdentityMode(cuppingModeFromMetadata(local.session.metadata)) || !publicIdentityMode(peer.mode);
   const entries: ComparisonMappingEntry[] = [];
   const used = new Set<number>();
   const matched = new Set<string>();
