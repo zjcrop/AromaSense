@@ -194,7 +194,7 @@ async function runAcceptance(appUrl) {
         currentId: current?.dataset.stageId, currentClass: current?.className,
         currentHint: current ? getComputedStyle(current,'::after').content : '',
         currentBorder: current ? getComputedStyle(current).borderBottomColor : '',
-        timer: timer?.textContent?.replace(/\\s+/g,' ').trim() || '',
+        timer: timer?.textContent?.replace(/\s+/g,' ').trim() || '',
         compactTimerLines: timer?.querySelectorAll('.cupping-rail-timer__compact-line').length || 0
       };
     })()`);
@@ -207,7 +207,7 @@ async function runAcceptance(appUrl) {
     await click(cdp, "[data-rail-toggle]");
     const legend = await waitExpression(cdp, `(() => {
       const node=document.querySelector('.cupping-progress-legend');
-      return node ? node.textContent?.replace(/\\s+/g,' ').trim() : false;
+      return node ? node.textContent?.replace(/\s+/g,' ').trim() : false;
     })()`, "three-state legend");
     requireCondition(/灰色\s*未开始/.test(legend) && /浅蓝\s*已开始/.test(legend) && /绿色\s*已完成/.test(legend), `Progress legend incomplete: ${legend}`);
 
@@ -218,7 +218,20 @@ async function runAcceptance(appUrl) {
       body: document.querySelector('.cupping-main__editor')?.textContent || ''
     }))()`);
     requireCondition(/is-not_started/.test(overall?.cls || ""), `Browsing incorrectly started overall: ${JSON.stringify(overall)}`);
-    requireCondition(/缺陷与异味/.test(overall?.body || ""), `Overall does not visibly expose defect/off-flavor section: ${JSON.stringify(overall)}`);
+    requireCondition(/具体缺陷\s*\/\s*异味记录/.test(overall?.body || ""), `Overall does not visibly expose defect/off-flavor section: ${JSON.stringify(overall)}`);
+
+    const scaFields = [
+      "final_sca_affective_fragrance", "final_sca_affective_aroma", "final_sca_affective_flavor", "final_sca_affective_aftertaste",
+      "final_sca_affective_acidity", "final_sca_affective_sweetness", "final_sca_affective_mouthfeel", "final_sca_affective_overall"
+    ];
+    for (const fieldKey of scaFields) {
+      await setValue(cdp, `[data-field-key="${fieldKey}"] input`, "5");
+      await waitExpression(cdp, `document.querySelector('[data-field-key="${fieldKey}"] .final-assessment__sca-scale-value')?.textContent?.trim()==='5' && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, `SCA field ${fieldKey}`);
+    }
+    await setValue(cdp, '[data-field-key="quality_clean"] input', "8");
+    await waitExpression(cdp, `document.querySelector('[data-field-key="quality_clean"] output')?.textContent?.trim()==='8' && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "AromaSense cleanliness profile");
+    await click(cdp, ".final-assessment__zero-cups");
+    await waitExpression(cdp, `document.querySelector('.final-assessment__live-score-value')?.textContent?.trim()==='79.00' && [...document.querySelectorAll('.final-assessment__cup-field select')].every((node)=>node.value==='0') && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "complete SCA 79.00 score");
 
     await click(cdp, '[data-stage-id="aroma"]');
     await waitExpression(cdp, `Boolean(document.querySelector('.sensory-range__input'))`, "aroma editor");
@@ -236,7 +249,7 @@ async function runAcceptance(appUrl) {
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-completed')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma completed state");
     const completedBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(completedBorder !== activeBorder, `Completed state did not visibly change progress color: ${completedBorder}`);
-    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\\s+/g,' ').trim() || ''`);
+    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\s+/g,' ').trim() || ''`);
     requireCondition(/本进程完成/.test(aromaStamp) && /分\s*\d{2}秒/.test(aromaStamp) && /\d{2}:\d{2}/.test(aromaStamp), `Aroma completion timestamp missing: ${aromaStamp}`);
 
     await click(cdp, '[data-stage-id="scoring"]');
@@ -250,11 +263,17 @@ async function runAcceptance(appUrl) {
         label: confirm?.textContent?.trim() || '',
         fontSize: style?.fontSize || '',
         fontWeight: style?.fontWeight || '',
-        textAlign: style?.textAlign || ''
+        textAlign: style?.textAlign || '',
+        score: editor?.querySelector('.final-assessment__score-value')?.textContent?.trim() || '',
+        hasRadar: Boolean(editor?.querySelector('[aria-label*="结构雷达图"]')),
+        hasEvolution: Boolean(editor?.querySelector('.temperature-flavor-profile__canvas'))
       };
     })()`);
-    requireCondition(/确认得分/.test(scoring?.label || ""), `Scoring step does not expose explicit score confirmation: ${JSON.stringify(scoring)}`);
-    requireCondition(/确认得分后，本样品杯测记录将被锁定，无法修改/.test(scoring?.body || ""), `Score lock warning is missing: ${JSON.stringify(scoring)}`);
+    requireCondition(/确认 SCA 得分/.test(scoring?.label || ""), `Scoring step does not expose explicit SCA score confirmation: ${JSON.stringify(scoring)}`);
+    requireCondition(scoring?.score === "79.00", `SCA score was not preserved into scoring: ${JSON.stringify(scoring)}`);
+    requireCondition(/确认后锁定本样品/.test(scoring?.body || ""), `Score lock warning is missing: ${JSON.stringify(scoring)}`);
+    requireCondition(/填充色仅表达风味倾向，不表示温度、质量或得分/.test(scoring?.body || ""), `Flavor-color semantics are missing: ${JSON.stringify(scoring)}`);
+    requireCondition(scoring?.hasRadar === true && scoring?.hasEvolution === true, `Sensory conclusion charts are missing: ${JSON.stringify(scoring)}`);
     requireCondition(parseFloat(scoring?.fontSize || "0") >= 18 && Number(scoring?.fontWeight || 0) >= 700 && scoring?.textAlign === "center", `Score confirmation is not large/bold/centered: ${JSON.stringify(scoring)}`);
 
     await click(cdp, ".final-assessment__score-confirm");
@@ -262,7 +281,7 @@ async function runAcceptance(appUrl) {
     const locked = await cdp.evaluate(`(() => ({
       banner: document.querySelector('.cupping-main__lock-status')?.textContent?.trim() || '',
       confirm: document.querySelector('.final-assessment__score-confirm')?.textContent?.trim() || '',
-      stamp: document.querySelector('.cupping-completion-stamp')?.textContent?.replace(/\\s+/g,' ').trim() || '',
+      stamp: document.querySelector('.cupping-completion-stamp')?.textContent?.replace(/\s+/g,' ').trim() || '',
       readonly: document.querySelector('.cupping-main__editor')?.getAttribute('aria-readonly') || ''
     }))()`);
     requireCondition(/得分已确认/.test(locked?.confirm || "") && locked?.readonly === "true", `Score confirmation did not lock the sample: ${JSON.stringify(locked)}`);
