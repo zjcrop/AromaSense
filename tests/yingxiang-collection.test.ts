@@ -18,7 +18,7 @@ rmSync(dir,{recursive:true,force:true});
 
 class D1 {
   readonly sqlite=new DatabaseSync(":memory:");
-  constructor(){this.sqlite.exec("PRAGMA foreign_keys=ON;CREATE TABLE users(user_id TEXT PRIMARY KEY,email TEXT);");for(const f of ["0007_yingxiang_events.sql","0008_account_display_name.sql","0009_yingxiang_collection.sql"])this.sqlite.exec(readFileSync(`cloud/worker/migrations/${f}`,"utf8"));this.sqlite.exec("INSERT INTO users(user_id,email) VALUES ('host','host@example.invalid'),('other','other@example.invalid')");}
+  constructor(){this.sqlite.exec("PRAGMA foreign_keys=ON;CREATE TABLE users(user_id TEXT PRIMARY KEY,email TEXT);");for(const f of ["0007_yingxiang_events.sql","0008_account_display_name.sql","0009_yingxiang_collection.sql","0010_yingxiang_host_accounts_and_sequence.sql"])this.sqlite.exec(readFileSync(`cloud/worker/migrations/${f}`,"utf8"));this.sqlite.exec("INSERT INTO users(user_id,email) VALUES ('host','host@example.invalid'),('other','other@example.invalid')");}
   prepare(sql:string){const db=this.sqlite;let params:any[]=[];const bound=()=>{const values:any[]=[];const text=sql.replace(/\?(\d+)/g,(_,n)=>{values.push(params[Number(n)-1]);return "?";});return {s:db.prepare(text),values};};return {
     bind(...args:any[]){params=args;return this;},
     async first(){const {s,values}=bound();return s.get(...values)??null;},

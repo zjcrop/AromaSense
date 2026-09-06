@@ -41,6 +41,27 @@ The following require explicit legal/license review before adoption:
 - Persistence: AromaSense exports the SQLite database and stores it in IndexedDB; sql.js itself is an in-memory SQLite runtime
 - Distributed assets: bundled JavaScript plus `sql-wasm.wasm`
 
+### qrcode / node-qrcode
+
+- Status: browser runtime dependency
+- Version range: `^1.5.4`
+- Upstream: https://github.com/soldair/node-qrcode
+- License: MIT
+- Modified: no
+- Purpose: render Yingxiang participant invitation links as QR codes in the host UI
+- Distribution implication: bundled JavaScript is distributed with the web application; retain the upstream MIT license notice
+
+### SheetJS Community Edition (`xlsx`)
+
+- Status: browser/runtime dependency
+- Version: `0.20.3` from the official SheetJS CDN package
+- Upstream: https://git.sheetjs.com/sheetjs/sheetjs
+- License: Apache-2.0
+- Copyright: Copyright (C) 2012-present SheetJS LLC
+- Modified: no
+- Purpose: read XLSX/XLS/CSV sample and coffee-information tables for AromaSense and Yingxiang import flows
+- Distribution implication: bundled JavaScript is distributed with the web application; preserve copyright/license notices and Apache-2.0 attribution requirements
+
 The Node SQLite persistence adapter used by CI/recovery tests relies on Node.js built-in `node:sqlite` and is not part of the Android or browser runtime.
 
 ## Development / build toolchain
@@ -58,6 +79,15 @@ The Node SQLite persistence adapter used by CI/recovery tests relies on Node.js 
 
 - Status: development/type-check dependency
 - Version range: `^24.0.0`
+- Upstream: https://github.com/DefinitelyTyped/DefinitelyTyped
+- License: MIT for the package, subject to the resolved package metadata
+- Modified: no
+- Distribution implication: type declarations only
+
+### @types/qrcode
+
+- Status: development/type-check dependency
+- Version range: `^1.5.5`
 - Upstream: https://github.com/DefinitelyTyped/DefinitelyTyped
 - License: MIT for the package, subject to the resolved package metadata
 - Modified: no

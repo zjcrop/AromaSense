@@ -229,16 +229,33 @@ async function runAcceptance(appUrl) {
     })()`);
     requireCondition(closeAccount === true, "Unable to close the account modal");
     await waitUntil(async () => !(await cdp.evaluate(`Boolean(document.querySelector('.home-modal'))`)), "account modal close");
+
     await cdp.evaluate(`document.querySelector('[data-home-action="yingxiang"]')?.click()`);
-    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.yingxiang-overlay .yx-console')`)), "Yingxiang console entry");
-    await cdp.evaluate(`[...document.querySelectorAll('.yx-console button')].find(b=>b.textContent==='新建杯测')?.click()`);
-    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.yingxiang-host')`)), "Yingxiang create form");
-    requireCondition(await cdp.evaluate(`([...document.querySelectorAll('.yingxiang-host__section')].filter(s=>s.hidden).every(s=>getComputedStyle(s).display==='none'))`), "Unpublished invitation controls must remain hidden");
+    await waitUntil(async () => Boolean(await cdp.evaluate(`document.querySelector('.yingxiang-overlay .yx-host-login')`)), "Yingxiang host login entry");
+    const yingxiangLogin = await cdp.evaluate(`(() => {
+      const panel=document.querySelector('.yingxiang-overlay .yx-host-login');
+      const account=panel?.querySelector('input[type="text"]');
+      const labels=[...panel?.querySelectorAll('button')||[]].map((button)=>button.textContent?.trim());
+      return {
+        hasPanel:Boolean(panel),
+        accountValue:account?.value ?? null,
+        labels,
+        hasConsole:Boolean(document.querySelector('.yingxiang-overlay .yx-console')),
+        hasPersonalAccount:Boolean(document.querySelector('.yingxiang-overlay .account-card'))
+      };
+    })()`);
+    requireCondition(yingxiangLogin?.hasPanel === true, `Yingxiang independent host login did not open: ${JSON.stringify(yingxiangLogin)}`);
+    requireCondition(yingxiangLogin?.accountValue === "", `Yingxiang account must be entered on every entry: ${JSON.stringify(yingxiangLogin)}`);
+    requireCondition(yingxiangLogin?.labels?.includes("登录迎香") && yingxiangLogin?.labels?.includes("首次创建账号"), `Yingxiang login actions missing: ${JSON.stringify(yingxiangLogin)}`);
+    requireCondition(yingxiangLogin?.hasConsole === false && yingxiangLogin?.hasPersonalAccount === false, `Yingxiang must not reuse AromaSense account/console before host login: ${JSON.stringify(yingxiangLogin)}`);
+    const closeYingxiang = await cdp.evaluate(`(() => { const n=[...document.querySelectorAll('.yx-host-login button')].find((b)=>b.textContent?.trim()==='返回香迹'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
+    requireCondition(closeYingxiang === true, "Unable to close Yingxiang host login");
+    await waitUntil(async () => !(await cdp.evaluate(`Boolean(document.querySelector('.yingxiang-overlay'))`)), "Yingxiang host login close");
 
     const relevantErrors = cdp.errors.filter((entry) => !/favicon|Failed to load resource.*404|onnxruntime/i.test(entry));
     requireCondition(relevantErrors.length === 0, `Browser errors:\n${relevantErrors.join("\n")}`);
     console.log("AromaSense home UI acceptance: PASS");
-    console.log(JSON.stringify({ home, expanded, completed, unfinished }, null, 2));
+    console.log(JSON.stringify({ home, expanded, completed, unfinished, yingxiangLogin }, null, 2));
   } finally {
     cdp?.close();
     chrome.kill("SIGTERM");

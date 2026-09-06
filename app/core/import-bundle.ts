@@ -75,6 +75,9 @@ const SAMPLE_FIELD_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   roaster: "roaster", 烘焙商: "roaster",
   weight: "weight", netweight: "weight", "net weight": "weight", 净重: "weight",
   flavor: "flavorNotes", flavours: "flavorNotes", flavors: "flavorNotes", notes: "flavorNotes", 风味: "flavorNotes", 风味描述: "flavorNotes",
+  remark: "notes", remarks: "notes", memo: "notes", other: "notes", "other information": "notes",
+  award: "notes", awards: "notes", winner: "notes", competition: "notes",
+  备注: "notes", 其他信息: "notes", 其他: "notes", 奖项: "notes", 荣誉: "notes", 获奖信息: "notes",
   aroma: "aroma", 香气: "aroma"
 });
 

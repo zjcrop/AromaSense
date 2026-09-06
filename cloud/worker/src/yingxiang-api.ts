@@ -21,7 +21,21 @@ type EventPolicy = {
   revealSampleIdentity: "on_event_complete" | "organizer_only";
   calibrationRepeatEnabled: boolean;
 };
-type EventSample = { eventSampleId: string; sampleCode: string; order: number; label?: string };
+type EventCoffeeDetail = {
+  productName?: string;
+  country?: string;
+  region?: string;
+  farm?: string;
+  station?: string;
+  variety?: string;
+  roast?: string;
+  process?: string;
+  roaster?: string;
+  altitude?: string;
+  roastDate?: string;
+  notes?: string;
+};
+type EventSample = { eventSampleId: string; sampleCode: string; order: number; label?: string; coffee?: EventCoffeeDetail };
 type EventManifest = {
   schemaVersion: "yingxiang-event-manifest/0.1";
   organizerName: string;
@@ -39,6 +53,7 @@ interface InviteRow {
 export interface ParticipantRow {
   participant_id: string; join_request_id: string; event_id: string; invite_id: string; account_user_id: string | null;
   identity_kind: "guest" | "account"; display_name: string; status: "active" | "released"; joined_at: string; released_at: string | null;
+  participant_ordinal?: number | null;
 }
 
 export function json(body: JsonValue, status = 200): Response {
@@ -80,6 +95,24 @@ export function parsePolicy(value: unknown): EventPolicy | undefined {
   };
 }
 
+function parseCoffeeDetail(value: unknown): EventCoffeeDetail | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const result: EventCoffeeDetail = {};
+  const limits: Record<keyof EventCoffeeDetail, number> = {
+    productName: 160, country: 120, region: 160, farm: 160, station: 160, variety: 160,
+    roast: 80, process: 160, roaster: 160, altitude: 80, roastDate: 80, notes: 600
+  };
+  for (const key of Object.keys(limits) as (keyof EventCoffeeDetail)[]) {
+    if (source[key] === undefined || source[key] === null) continue;
+    const normalized = normalizeName(source[key]);
+    if (!normalized || Array.from(normalized).length > limits[key]) return undefined;
+    result[key] = normalized;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
 export function parseManifest(value: unknown, requireSamples = true): EventManifest | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const source = value as Record<string, unknown>; const organizerName = normalizeName(source.organizerName);
@@ -92,10 +125,11 @@ export function parseManifest(value: unknown, requireSamples = true): EventManif
     if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
     const row = item as Record<string, unknown>; const eventSampleId = normalizeName(row.eventSampleId); const sampleCode = normalizeName(row.sampleCode);
     const order = Number(row.order); const label = row.label === undefined ? undefined : normalizeName(row.label);
+    const coffee = parseCoffeeDetail(row.coffee);
     if (!eventSampleId || eventSampleId.length > 128 || !sampleCode || sampleCode.length > 128 || !Number.isSafeInteger(order) || order < 1
-      || (row.label !== undefined && !label) || ids.has(eventSampleId) || codes.has(sampleCode) || orders.has(order)) return undefined;
+      || (row.label !== undefined && !label) || (row.coffee !== undefined && !coffee) || ids.has(eventSampleId) || codes.has(sampleCode) || orders.has(order)) return undefined;
     ids.add(eventSampleId); codes.add(sampleCode); orders.add(order);
-    samples.push({ eventSampleId, sampleCode, order, ...(label ? { label } : {}) });
+    samples.push({ eventSampleId, sampleCode, order, ...(label ? { label } : {}), ...(coffee ? { coffee } : {}) });
   }
   samples.sort((a, b) => a.order - b.order);
   if (samples.some((sample, index) => sample.order !== index + 1)) return undefined;
@@ -108,6 +142,13 @@ function validateDisplayName(value: unknown, policy: ParticipantNamePolicy): str
   if (policy.requiredPrefix && !name.startsWith(policy.requiredPrefix)) return undefined;
   return name;
 }
+
+function sequentialDisplayName(policy: ParticipantNamePolicy, ordinal: number, capacity: number | null): string | undefined {
+  const prefix = normalizeName(policy.requiredPrefix) || "参与者";
+  const width = Math.max(2, String(Math.max(ordinal, capacity ?? 0)).length);
+  return validateDisplayName(`${prefix}${String(ordinal).padStart(width, "0")}`, policy);
+}
+
 function validJoinRequestId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9._:-]{8,128}$/u.test(value);
 }
@@ -180,9 +221,29 @@ async function handleInviteGet(token: string, db: D1Database): Promise<Response>
   const resolved = await inviteFromToken(db, token); if (!resolved) return json({ ok: false, error: "YINGXIANG_INVITE_NOT_FOUND" }, 404);
   const reason = inviteUnavailableReason(resolved.invite, resolved.event, new Date().toISOString()); if (reason) return json({ ok: false, error: reason }, 410);
   return json({ ok: true, event: publicEvent(resolved.event, resolved.policy, resolved.manifest), invite: {
-    inviteId: resolved.invite.invite_id, assignedName: resolved.policy.participantName.mode === "organizer_assigned" ? resolved.invite.assigned_name : undefined,
+    inviteId: resolved.invite.invite_id,
+    assignedName: resolved.policy.participantName.mode === "organizer_assigned" && resolved.invite.assigned_name ? resolved.invite.assigned_name : undefined,
+    automaticName: resolved.policy.participantName.mode === "organizer_assigned" && !resolved.invite.assigned_name,
+    namePrefix: resolved.policy.participantName.mode === "organizer_assigned" ? (resolved.policy.participantName.requiredPrefix || "参与者") : undefined,
     expiresAt: resolved.invite.expires_at, remainingUses: resolved.invite.max_uses === null ? null : Math.max(0, resolved.invite.max_uses - resolved.invite.use_count)
   }});
+}
+
+function joinFailure(error: unknown): { response: Response; retryableSequenceConflict: boolean } {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("YINGXIANG_INVITE_")) return {
+    response: json({ ok: false, error: message.match(/YINGXIANG_INVITE_[A-Z_]+/u)?.[0] ?? "YINGXIANG_INVITE_UNAVAILABLE" }, 410),
+    retryableSequenceConflict: false
+  };
+  if (message.includes("YINGXIANG_PARTICIPANT_NAME_CONFLICT")) return {
+    response: json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_CONFLICT" }, 409),
+    retryableSequenceConflict: true
+  };
+  if (message.toLowerCase().includes("unique")) return {
+    response: json({ ok: false, error: "YINGXIANG_PARTICIPANT_CONFLICT" }, 409),
+    retryableSequenceConflict: true
+  };
+  return { response: json({ ok: false, error: "YINGXIANG_JOIN_FAILED" }, 409), retryableSequenceConflict: false };
 }
 
 async function handleInviteJoin(token: string, request: Request, db: D1Database, user?: YingxiangAuthenticatedUser): Promise<Response> {
@@ -190,7 +251,7 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
   const body = await parseJsonObject(request); if (!body) return json({ ok: false, error: "INVALID_JSON" }, 400);
   const joinRequestId = body.joinRequestId; if (!validJoinRequestId(joinRequestId)) return json({ ok: false, error: "YINGXIANG_JOIN_REQUEST_ID_INVALID" }, 400);
 
-  const existing = await db.prepare(`SELECT participant_id, join_request_id, event_id, invite_id, account_user_id, identity_kind, display_name, status, joined_at, released_at
+  const existing = await db.prepare(`SELECT participant_id, join_request_id, event_id, invite_id, account_user_id, identity_kind, display_name, status, joined_at, released_at, participant_ordinal
     FROM yingxiang_participants WHERE join_request_id = ?1`).bind(joinRequestId).first<ParticipantRow>();
   if (existing) {
     const sameAccount = user ? existing.account_user_id === user.userId : existing.account_user_id === null;
@@ -205,42 +266,70 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
 
   const now = new Date().toISOString(); const reason = inviteUnavailableReason(resolved.invite, resolved.event, now);
   if (reason) return json({ ok: false, error: reason }, 410);
-  const naming = resolved.policy.participantName; let displayName: string | undefined;
-  if (naming.mode === "organizer_assigned") {
-    displayName = validateDisplayName(resolved.invite.assigned_name, naming);
-    if (!displayName) return json({ ok: false, error: "YINGXIANG_ASSIGNED_NAME_MISSING" }, 409);
-  } else if (body.nameSource === "account") {
-    if (!user) return json({ ok: false, error: "YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME" }, 401);
-    if (!naming.allowAccountDisplayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED" }, 403);
-    const verified = await accountDisplayName(db, user.userId); if (!verified) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_UNAVAILABLE" }, 409);
-    displayName = validateDisplayName(verified, naming); if (!displayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_POLICY_MISMATCH" }, 409);
-  } else {
-    displayName = validateDisplayName(body.displayName, naming); if (!displayName) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_INVALID" }, 400);
-  }
+  const naming = resolved.policy.participantName;
   const participantId = crypto.randomUUID(); const identityKind = user ? "account" : "guest";
   const accessToken = joinRequestId.length >= 32
     ? await sha256Hex(`yingxiang-participant/1:${token.toLowerCase()}:${joinRequestId}`)
     : undefined;
-  try {
-    const statements = [db.prepare(`INSERT INTO yingxiang_participants
-      (participant_id, join_request_id, event_id, invite_id, account_user_id, identity_kind, display_name, status, joined_at, released_at)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8, NULL)`)
-      .bind(participantId, joinRequestId, resolved.event.event_id, resolved.invite.invite_id, user?.userId ?? null, identityKind, displayName, now)];
-    if (accessToken) {
-      statements.push(db.prepare(`INSERT INTO yingxiang_participant_access (participant_id, token_hash, event_revision)
-        VALUES (?1, ?2, ?3)`).bind(participantId, await sha256Hex(accessToken), resolved.invite.event_revision));
+  const accessHash = accessToken ? await sha256Hex(accessToken) : undefined;
+
+  let displayName: string | undefined;
+  let participantOrdinal: number | null = null;
+  const legacyAssignedName = naming.mode === "organizer_assigned" ? validateDisplayName(resolved.invite.assigned_name, naming) : undefined;
+  if (naming.mode === "participant_choice") {
+    if (body.nameSource === "account") {
+      if (!user) return json({ ok: false, error: "YINGXIANG_ACCOUNT_REQUIRED_FOR_ACCOUNT_NAME" }, 401);
+      if (!naming.allowAccountDisplayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_NOT_ALLOWED" }, 403);
+      const verified = await accountDisplayName(db, user.userId); if (!verified) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_UNAVAILABLE" }, 409);
+      displayName = validateDisplayName(verified, naming); if (!displayName) return json({ ok: false, error: "YINGXIANG_ACCOUNT_NAME_POLICY_MISMATCH" }, 409);
+    } else {
+      displayName = validateDisplayName(body.displayName, naming); if (!displayName) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_INVALID" }, 400);
     }
-    await db.batch(statements);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (message.includes("YINGXIANG_INVITE_")) return json({ ok: false, error: message.match(/YINGXIANG_INVITE_[A-Z_]+/u)?.[0] ?? "YINGXIANG_INVITE_UNAVAILABLE" }, 410);
-    if (message.includes("YINGXIANG_PARTICIPANT_NAME_CONFLICT")) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_CONFLICT" }, 409);
-    if (message.toLowerCase().includes("unique")) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_CONFLICT" }, 409);
-    return json({ ok: false, error: "YINGXIANG_JOIN_FAILED" }, 409);
+  } else if (legacyAssignedName) {
+    displayName = legacyAssignedName;
   }
+
+  const insertParticipant = async (name: string, ordinal: number | null): Promise<void> => {
+    const statements = [db.prepare(`INSERT INTO yingxiang_participants
+      (participant_id, join_request_id, event_id, invite_id, account_user_id, identity_kind, display_name, status, joined_at, released_at, participant_ordinal)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8, NULL, ?9)`)
+      .bind(participantId, joinRequestId, resolved.event.event_id, resolved.invite.invite_id, user?.userId ?? null, identityKind, name, now, ordinal)];
+    if (accessHash) statements.push(db.prepare(`INSERT INTO yingxiang_participant_access (participant_id, token_hash, event_revision)
+      VALUES (?1, ?2, ?3)`).bind(participantId, accessHash, resolved.invite.event_revision));
+    await db.batch(statements);
+  };
+
+  if (naming.mode === "organizer_assigned" && !legacyAssignedName) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const sequence = await db.prepare(`SELECT COUNT(*) + 1 AS next_ordinal FROM yingxiang_participants WHERE event_id = ?1`)
+        .bind(resolved.event.event_id).first<{ next_ordinal: number }>();
+      participantOrdinal = Math.max(1, Number(sequence?.next_ordinal ?? 1));
+      displayName = sequentialDisplayName(naming, participantOrdinal, resolved.invite.max_uses);
+      if (!displayName) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_POLICY_MISMATCH" }, 409);
+      try {
+        await insertParticipant(displayName, participantOrdinal);
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        const failure = joinFailure(error);
+        if (!failure.retryableSequenceConflict || attempt === 5) return failure.response;
+      }
+    }
+    if (lastError) return joinFailure(lastError).response;
+  } else {
+    try {
+      await insertParticipant(displayName!, participantOrdinal);
+    } catch (error) {
+      return joinFailure(error).response;
+    }
+  }
+
   const created: ParticipantRow = {
     participant_id: participantId, join_request_id: joinRequestId, event_id: resolved.event.event_id, invite_id: resolved.invite.invite_id,
-    account_user_id: user?.userId ?? null, identity_kind: identityKind, display_name: displayName, status: "active", joined_at: now, released_at: null
+    account_user_id: user?.userId ?? null, identity_kind: identityKind, display_name: displayName!, status: "active", joined_at: now, released_at: null,
+    participant_ordinal: participantOrdinal
   };
   return json({ ok: true, accessToken, principal: principalPayload(created), event: publicEvent(resolved.event, resolved.policy, resolved.manifest), replayed: false }, 201);
 }
@@ -262,7 +351,8 @@ async function handleInviteCreate(eventId: string, request: Request, db: D1Datab
   if (event.status !== "published" && event.status !== "active") return json({ ok: false, error: "YINGXIANG_EVENT_NOT_SHAREABLE" }, 409);
   const contracts = eventContracts(event); if (!contracts) return json({ ok: false, error: "YINGXIANG_EVENT_CONTRACT_CORRUPT" }, 500);
   const body = await parseJsonObject(request) ?? {}; const assignedName = normalizeName(body.assignedName) || null;
-  if (contracts.policy.participantName.mode === "organizer_assigned" && !validateDisplayName(assignedName, contracts.policy.participantName)) return json({ ok: false, error: "YINGXIANG_ASSIGNED_NAME_REQUIRED" }, 400);
+  // assignedName remains accepted for already-published legacy clients. New clients omit it and names are allocated by join order.
+  if (assignedName && !validateDisplayName(assignedName, contracts.policy.participantName)) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_INVALID" }, 400);
   const maxUsesValue = body.maxUses === undefined || body.maxUses === null ? null : Number(body.maxUses);
   if (maxUsesValue !== null && (!Number.isSafeInteger(maxUsesValue) || maxUsesValue < 1 || maxUsesValue > 10000)) return json({ ok: false, error: "YINGXIANG_INVITE_MAX_USES_INVALID" }, 400);
   const rawExpiry = isNonEmptyString(body.expiresAt, 64) ? String(body.expiresAt) : undefined; const expiryMs = rawExpiry ? Date.parse(rawExpiry) : Date.now() + 24 * 60 * 60 * 1000;

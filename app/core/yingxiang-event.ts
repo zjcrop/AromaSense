@@ -13,6 +13,7 @@ export interface YingxiangParticipantNamePolicy {
   uniqueWithinEvent: boolean;
   minLength: number;
   maxLength: number;
+  /** In organizer_assigned mode this is the automatic sequence prefix, e.g. “评委”. */
   requiredPrefix?: string;
 }
 
@@ -25,13 +26,30 @@ export interface YingxiangEventPolicy {
   calibrationRepeatEnabled: boolean;
 }
 
+export interface YingxiangCoffeeDetail {
+  productName?: string;
+  country?: string;
+  region?: string;
+  farm?: string;
+  station?: string;
+  variety?: string;
+  roast?: string;
+  process?: string;
+  roaster?: string;
+  altitude?: string;
+  roastDate?: string;
+  notes?: string;
+}
+
 export interface YingxiangEventSampleSlot {
   /** Stable inside one event. It does not expose the canonical coffee identity. */
   eventSampleId: string;
   sampleCode: string;
   order: number;
-  /** Optional participant-safe label only; never place hidden coffee identity here for blind events. */
+  /** Optional compact participant-safe label. */
   label?: string;
+  /** Host coffee identity. Non-open events strip this before participant delivery. */
+  coffee?: YingxiangCoffeeDetail;
 }
 
 export interface YingxiangEventManifest {
@@ -104,6 +122,20 @@ function normalizedRequired(value: string, code: string): string {
   return normalized;
 }
 
+function validateCoffeeDetail(detail: YingxiangCoffeeDetail): YingxiangCoffeeDetail {
+  const limits: Record<keyof YingxiangCoffeeDetail, number> = {
+    productName: 160, country: 120, region: 160, farm: 160, station: 160, variety: 160,
+    roast: 80, process: 160, roaster: 160, altitude: 80, roastDate: 80, notes: 600
+  };
+  for (const key of Object.keys(limits) as (keyof YingxiangCoffeeDetail)[]) {
+    const value = detail[key];
+    if (value == null) continue;
+    const normalized = normalizedRequired(value, "YINGXIANG_COFFEE_DETAIL_INVALID");
+    if (Array.from(normalized).length > limits[key]) throw new Error("YINGXIANG_COFFEE_DETAIL_INVALID");
+  }
+  return detail;
+}
+
 export function defaultYingxiangEventPolicy(): YingxiangEventPolicy {
   return {
     schemaVersion: "yingxiang-event-policy/0.1",
@@ -124,12 +156,14 @@ export function buildYingxiangManifest(input: {
   organizerName: string;
   cuppingMode: YingxiangCuppingMode;
   sampleCodes: readonly string[];
+  coffees?: readonly (YingxiangCoffeeDetail | undefined)[];
 }): YingxiangEventManifest {
   const organizerName = normalizedRequired(input.organizerName, "YINGXIANG_ORGANIZER_NAME_REQUIRED");
   if (!(["open", "blind", "semi_blind"] as const).includes(input.cuppingMode)) throw new Error("YINGXIANG_CUPPING_MODE_INVALID");
   const codes = input.sampleCodes.map((code) => normalizedRequired(code, "YINGXIANG_SAMPLE_CODE_REQUIRED"));
   if (codes.length === 0) throw new Error("YINGXIANG_SAMPLE_REQUIRED");
   if (new Set(codes).size !== codes.length) throw new Error("YINGXIANG_SAMPLE_CODE_DUPLICATE");
+  if (input.coffees && input.coffees.length !== codes.length) throw new Error("YINGXIANG_COFFEE_COUNT_MISMATCH");
   return {
     schemaVersion: YINGXIANG_MANIFEST_SCHEMA_VERSION,
     organizerName,
@@ -137,7 +171,8 @@ export function buildYingxiangManifest(input: {
     samples: codes.map((sampleCode, index) => ({
       eventSampleId: `slot-${String(index + 1).padStart(3, "0")}`,
       sampleCode,
-      order: index + 1
+      order: index + 1,
+      ...(input.coffees?.[index] ? { coffee: validateCoffeeDetail(input.coffees[index]!) } : {})
     }))
   };
 }
@@ -160,6 +195,7 @@ export function validateYingxiangManifest(manifest: YingxiangEventManifest, requ
     ids.add(id); codes.add(code); orders.add(sample.order);
     // Older local signatures encoded an absent optional label as JSON null.
     if (sample.label != null) normalizedRequired(sample.label, "YINGXIANG_SAMPLE_LABEL_INVALID");
+    if (sample.coffee != null) validateCoffeeDetail(sample.coffee);
   }
   const sortedOrders = [...orders].sort((a, b) => a - b);
   if (sortedOrders.some((value, index) => value !== index + 1)) throw new Error("YINGXIANG_SAMPLE_ORDER_NOT_CONTIGUOUS");
@@ -194,11 +230,20 @@ export function validateParticipantName(name: string, policy: YingxiangParticipa
   return normalized;
 }
 
+export function sequentialParticipantName(policy: YingxiangParticipantNamePolicy, ordinal: number, width = 2): string {
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw new Error("YINGXIANG_PARTICIPANT_ORDINAL_INVALID");
+  const prefix = policy.requiredPrefix?.normalize("NFKC").trim() || "参与者";
+  return validateParticipantName(`${prefix}${String(ordinal).padStart(Math.max(2, width), "0")}`, policy);
+}
+
 export function selectEventDisplayName(input: YingxiangJoinIdentityInput, policy: YingxiangParticipantNamePolicy): string {
   const assigned = input.organizerAssignedName?.normalize("NFKC").trim();
   if (policy.mode === "organizer_assigned") {
-    if (!assigned) throw new Error("YINGXIANG_ORGANIZER_ASSIGNED_NAME_REQUIRED");
-    return validateParticipantName(assigned, policy);
+    // Legacy per-invite names remain readable; new invitations allocate names from the join ordinal.
+    if (assigned) return validateParticipantName(assigned, policy);
+    const ordinal = input.participantOrdinal;
+    if (Number.isSafeInteger(ordinal) && Number(ordinal) > 0) return sequentialParticipantName(policy, Number(ordinal));
+    throw new Error("YINGXIANG_PARTICIPANT_ORDINAL_REQUIRED");
   }
 
   const requested = input.requestedName?.normalize("NFKC").trim();
@@ -213,7 +258,7 @@ export function selectEventDisplayName(input: YingxiangJoinIdentityInput, policy
   if (assigned) return validateParticipantName(assigned, policy);
   const ordinal = input.participantOrdinal;
   if (Number.isSafeInteger(ordinal) && Number(ordinal) > 0) {
-    return validateParticipantName(`参与者${String(ordinal).padStart(2, "0")}`, policy);
+    return sequentialParticipantName(policy, Number(ordinal));
   }
   throw new Error("YINGXIANG_PARTICIPANT_NAME_REQUIRED");
 }
