@@ -79,6 +79,7 @@ export class AromaSenseDomApp {
   private homeModal?: HTMLElement;
   private homeModalCleanup?: Cleanup;
   private rootBackCleanup?: Cleanup;
+  private sessionFlowCleanup?: Cleanup;
 
   constructor(private readonly root: HTMLElement, private readonly db: SQLiteDriver, private readonly options: AromaSenseDomAppOptions) {
     this.preferences = new UserPreferencesRepository(db);
@@ -179,6 +180,17 @@ export class AromaSenseDomApp {
       onSessionFinished: async (sessionId) => { void this.syncPending([sessionId]); }
     }, this.interaction.overlayManager);
     await this.screen.initialize(sessionId);
+    this.sessionFlowCleanup = this.interaction.flowNavigation.register({
+      id: `cupping-flow:${sessionId}`,
+      priority: 500,
+      canBack: () => {
+        const state = controller.current();
+        if (!state?.active || state.sessionStatus === "completed" || state.sessionStatus === "archived") return false;
+        if (state.active.context.stageId === "preparation") return false;
+        return Boolean(this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])"));
+      },
+      back: () => { this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])")?.click(); }
+    });
     this.root.dataset.sessionId = sessionId;
     void this.yingxiangDelivery?.sync();
   }
@@ -240,6 +252,7 @@ export class AromaSenseDomApp {
   dispose(): void {
     this.closeHomeModal();
     this.rootBackCleanup?.(); this.rootBackCleanup = undefined;
+    this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined;
     this.screen?.dispose(); this.screen = undefined;
     this.setRootMode("empty");
     this.interaction.dispose();
@@ -411,6 +424,8 @@ export class AromaSenseDomApp {
   private setRootMode(mode: RootMode, back?: () => void | Promise<void>): void {
     this.rootBackCleanup?.();
     this.rootBackCleanup = undefined;
+    this.sessionFlowCleanup?.();
+    this.sessionFlowCleanup = undefined;
     this.root.replaceChildren();
     if (mode !== "cupping") delete this.root.dataset.sessionId;
     this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen", "session-records", "record-replay");
