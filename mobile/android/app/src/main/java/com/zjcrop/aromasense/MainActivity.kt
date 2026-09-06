@@ -7,8 +7,10 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -64,6 +66,9 @@ class MainActivity : Activity() {
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         WebView.setWebContentsDebuggingEnabled(debuggable)
         webView.addJavascriptInterface(AromaSenseSQLiteBridge(database), "AromaSenseSQLite")
+        // Stage 1 interaction/navigation bridge is intentionally separate from the
+        // LuckyBean recognition transport so back/exit semantics cannot mutate OCR contracts.
+        webView.addJavascriptInterface(AromaSenseNativeBridge(), "AromaSenseNative")
         // Use LuckyBean's production Android transport contract directly. The JS side loads
         // luckybean/android/native-bridge.js and talks to this interface without an AromaSense
         // compatibility wrapper.
@@ -116,11 +121,21 @@ class MainActivity : Activity() {
             }
         }
         setContentView(webView)
+        registerSystemBackCallback()
 
         if (savedInstanceState == null) {
             webView.loadUrl("file:///android_asset/www/index.html")
         } else {
             webView.restoreState(savedInstanceState)
+        }
+    }
+
+    private inner class AromaSenseNativeBridge {
+        @JavascriptInterface
+        fun exitApp() {
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) finish()
+            }
         }
     }
 
@@ -235,9 +250,32 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(outState)
     }
 
+    private fun registerSystemBackCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) registerApi33BackCallback()
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.TIRAMISU)
+    private fun registerApi33BackCallback() {
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+        ) { handleSystemBack() }
+    }
+
+    private fun handleSystemBack() {
+        if (!::webView.isInitialized) {
+            finish()
+            return
+        }
+        val script = "(function(){try{return Boolean(globalThis.AromaSenseNavigation&&globalThis.AromaSenseNavigation.systemBack&&globalThis.AromaSenseNavigation.systemBack());}catch(error){return false;}})()"
+        webView.evaluateJavascript(script) { result ->
+            if (result == "true") return@evaluateJavascript
+            if (webView.canGoBack()) webView.goBack() else finish()
+        }
+    }
+
     @Deprecated("Deprecated in Activity")
     override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
+        handleSystemBack()
     }
 
     override fun onDestroy() {
@@ -248,6 +286,7 @@ class MainActivity : Activity() {
         if (::recognitionBridge.isInitialized) recognitionBridge.close()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("AromaSenseSQLite")
+            webView.removeJavascriptInterface("AromaSenseNative")
             webView.removeJavascriptInterface("LuckyBeanNative")
             webView.destroy()
         }
