@@ -4,6 +4,7 @@ import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import workflowMigration from "../storage/0003_workflow_event_comparison.sql";
 import submissionMigration from "../storage/0004_submission_revisions.sql";
 import sessionTimingMigration from "../storage/0005_session_timing.sql";
+import yingxiangCollectionMigration from "../storage/0007_yingxiang_collection.sql";
 import yingxiangEventMigration from "../storage/0006_yingxiang_event_context.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
@@ -48,7 +49,8 @@ async function main(): Promise<void> {
       { id: 3, name: "workflow_event_comparison_0_2", sql: workflowMigration },
       { id: 4, name: "submission_revisions_0_2", sql: submissionMigration },
       { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration },
-      { id: 6, name: "yingxiang_event_context_0_1", sql: yingxiangEventMigration }
+      { id: 6, name: "yingxiang_event_context_0_1", sql: yingxiangEventMigration },
+      { id: 7, name: "yingxiang_collection_0_1", sql: yingxiangCollectionMigration }
     ],
     new Date().toISOString()
   );
@@ -73,6 +75,8 @@ async function main(): Promise<void> {
     createSessionId,
     createSampleId,
     onOpenSession: (sessionId) => app?.openSession(sessionId),
+    delivery: app.yingxiangDelivery,
+    onRequireAccount: () => app?.showAccount(root.dataset.screen === "cupping" ? root.dataset.sessionId : undefined),
     cloudBaseUrl
   });
   yingxiang.start();

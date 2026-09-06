@@ -1,6 +1,6 @@
 # AromaSense Implementation Status
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 > This file records **observed product capability**, not merely the existence of a model, interface, or renderer. Automated acceptance and physical/runtime acceptance are distinguished explicitly. A feature that depends on external infrastructure is not treated as complete until that infrastructure has been exercised.
 
@@ -121,7 +121,23 @@ Automated engineering acceptance is complete for the shared Worker ROI path and 
 - [x] local sync-queue counts shown in account panel
 - [ ] full navigation shell acceptance on phone/tablet/desktop
 
-## Phase 5 — Release validation
+## Phase 5 — 迎香 event collaboration
+- [x] owner-scoped activity creation, listing, dashboard and completion APIs
+- [x] event revision republish with structure lock after the first participant joins
+- [x] expiring/revocable/max-use invitation and idempotent join contract
+- [x] guest/account Event Principal and hashed participant capability
+- [x] Local-first event Session binding and close/reopen recovery
+- [x] monotonic participant progress delivery
+- [x] immutable SubmissionBundle collection with server-side hash and binding validation
+- [x] persisted retry and ACK recovery after lost responses or app restart
+- [x] participant release/leave and invite revoke controls
+- [x] owner dashboard with latest-per-participant aggregation
+- [x] repeat-calibration mean, sample standard deviation and peer-offset calculation
+- [x] missing result values remain missing rather than becoming zero
+- [x] owner isolation, capability scope, progress order and immutable result automated tests
+- [ ] real multi-device event acceptance under intermittent venue networking
+
+## Phase 6 — Release validation
 - [x] offline-only full session — automated SQLite integration test
 - [ ] browser refresh recovery — real browser acceptance
 - [ ] Android process-kill recovery — real device acceptance
@@ -136,10 +152,10 @@ Automated engineering acceptance is complete for the shared Worker ROI path and 
 
 ## Current development gate
 
-B0.2.a core product code, Web/Cloud deployment path, Local-first persistence, workflow completion semantics, sample intake/canonicalization, comparison/export and immutable Submission revisions are already in the main development line.
+B0.2.a core product code, Web/Cloud deployment path, Local-first persistence, workflow completion semantics, sample intake/canonicalization, comparison/export and immutable Submission revisions are already in the main development line. 迎香 B0.1 now adds the full activity collection loop: host management, participant progress, locally retried immutable results, aggregation and repeat calibration.
 
 The current recognition hardening batch now closes both missing engineering pieces for complex photo intake: manual OCR segmentation review and shared pixel-level ROI second-pass OCR. The shared ROI capability was implemented in the Recognition/Foundation base first and only then consumed by AromaSense. The browser path is Worker-only, uses the formal PP-OCRv5 runtime, and has no AromaSense Tesseract/CDN or DOM Canvas fallback. The remaining recognition work is therefore physical/runtime acceptance rather than another private OCR implementation.
 
-APK formal signing/publishing is intentionally not part of the current gate. Remaining non-APK acceptance work is primarily real-browser refresh/resume, physical-device camera/gallery/touch testing, authenticated cloud round-trip/cross-device restore, and real complex-label validation of the ROI workflow.
+APK formal signing/publishing is intentionally not part of the current gate. Remaining non-APK acceptance work is primarily real-browser refresh/resume, physical-device camera/gallery/touch testing, authenticated cloud round-trip/cross-device restore, real complex-label validation of the ROI workflow, and a multi-device 迎香 event under intermittent venue networking.
 
 LuckyBean remains a reference/upstream implementation for recognition vocabulary and the shared production recognition runtime. AromaSense retains its own Session/Sample Local-first storage model and does not import LuckyBean inventory/business logic wholesale.

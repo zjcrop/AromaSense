@@ -74,6 +74,13 @@ export class YingxiangParticipationService {
     this.setup = new CuppingSetupService(new LocalCuppingRepository(db));
   }
 
+  private async saveDelivery(sessionId: string, participantId: string, accessToken?: string): Promise<void> {
+    if (!accessToken) return;
+    if (!/^[a-f0-9]{64}$/.test(accessToken)) throw new Error("YINGXIANG_ACCESS_TOKEN_INVALID");
+    await this.db.run(`INSERT INTO yingxiang_delivery (session_id,participant_id,access_token,updated_at) VALUES (?,?,?,?)
+      ON CONFLICT(session_id) DO UPDATE SET access_token=excluded.access_token,updated_at=excluded.updated_at`,[sessionId,participantId,accessToken,this.options.now()]);
+  }
+
   preview(token: string): Promise<YingxiangInvitePreview> {
     return this.client.previewInvite(token);
   }
@@ -86,6 +93,7 @@ export class YingxiangParticipationService {
     });
     const existing = await this.events.getSessionBinding(joined.event.eventId, joined.principal.participantId);
     if (existing) {
+      await this.saveDelivery(existing.sessionId, joined.principal.participantId, joined.accessToken);
       return {
         eventId: joined.event.eventId,
         participantId: joined.principal.participantId,
@@ -134,6 +142,7 @@ export class YingxiangParticipationService {
         sessionId,
         boundAt: now
       });
+      await this.saveDelivery(sessionId, joined.principal.participantId, joined.accessToken);
     });
 
     return {

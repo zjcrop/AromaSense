@@ -1,3 +1,5 @@
+import type { SubmissionBundle } from "./submission-bundle";
+import type { CalibrationMapping, CollectedResult, YingxiangResults } from "../../shared/yingxiang-results";
 import type { YingxiangEventManifest, YingxiangEventPolicy } from "./yingxiang-event";
 
 export interface YingxiangRemoteEvent {
@@ -45,12 +47,13 @@ export class YingxiangClient {
     const response = await this.request(`/api/v1/yingxiang/invites/${encodeURIComponent(token)}`, { method: "GET" });
     return { event: this.requireObject(response, "event") as unknown as YingxiangRemoteEvent, invite: this.requireObject(response, "invite") as unknown as YingxiangInvitePreview["invite"] };
   }
-  async joinInvite(token: string, input: { joinRequestId: string; displayName?: string; nameSource?: "custom" | "account" }): Promise<{ principal: YingxiangJoinedPrincipal; event: YingxiangRemoteEvent; replayed: boolean }> {
+  async joinInvite(token: string, input: { joinRequestId: string; displayName?: string; nameSource?: "custom" | "account" }): Promise<{ principal: YingxiangJoinedPrincipal; event: YingxiangRemoteEvent; replayed: boolean; accessToken?: string }> {
     const response = await this.request(`/api/v1/yingxiang/invites/${encodeURIComponent(token)}/join`, { method: "POST", body: input, optionalAuth: true });
     return {
       principal: this.requireObject(response, "principal") as unknown as YingxiangJoinedPrincipal,
       event: this.requireObject(response, "event") as unknown as YingxiangRemoteEvent,
-      replayed: response.replayed === true
+      replayed: response.replayed === true,
+      accessToken: typeof response.accessToken === "string" ? response.accessToken : undefined
     };
   }
   async setAccountDisplayName(displayName: string): Promise<string> {
@@ -66,7 +69,39 @@ export class YingxiangClient {
     return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/complete`, { method: "POST", body: {}, auth: true });
   }
 
-  private async request(path: string, options: { method: "GET" | "POST"; body?: Record<string, unknown>; auth?: boolean; optionalAuth?: boolean }): Promise<Record<string, unknown>> {
+  async listEvents(): Promise<YingxiangRemoteEvent[]> {
+    const r = await this.request("/api/v1/yingxiang/events", { method: "GET", auth: true });
+    if (!Array.isArray(r.events)) throw new YingxiangClientError("INVALID_SERVER_RESPONSE", 200);
+    return r.events as YingxiangRemoteEvent[];
+  }
+  async dashboard(eventId: string): Promise<YingxiangDashboard> {
+    return await this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/dashboard`, { method: "GET", auth: true }) as unknown as YingxiangDashboard;
+  }
+  async republish(eventId: string, input: { expectedRevision: number; title: string; policy: YingxiangEventPolicy; manifest: YingxiangEventManifest }): Promise<YingxiangRemoteEvent> {
+    return this.requireObject(await this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/republish`, { method: "POST", body: input, auth: true }), "event") as unknown as YingxiangRemoteEvent;
+  }
+  releaseParticipant(eventId: string, participantId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/participants/${encodeURIComponent(participantId)}/release`, { method: "POST", body: {}, auth: true });
+  }
+  revokeInvite(eventId: string, inviteId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/invites/${encodeURIComponent(inviteId)}/revoke`, { method: "POST", body: {}, auth: true });
+  }
+  async participantStatus(participantId: string, accessToken: string): Promise<YingxiangParticipantStatus> {
+    return await this.request(`/api/v1/yingxiang/participants/${encodeURIComponent(participantId)}/status`, { method: "GET", accessToken }) as unknown as YingxiangParticipantStatus;
+  }
+  sendProgress(participantId: string, accessToken: string, input: { sessionId: string; sequence: number; completedSamples: number; totalSamples: number }): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/yingxiang/participants/${encodeURIComponent(participantId)}/progress`, { method: "POST", body: input, accessToken });
+  }
+  async submit(participantId: string, accessToken: string, bundle: SubmissionBundle): Promise<{ revision: number; contentHash: string }> {
+    const ack = await this.request(`/api/v1/yingxiang/participants/${encodeURIComponent(participantId)}/submissions`, { method: "POST", body: { bundle }, accessToken });
+    if (ack.revision !== bundle.revision || ack.contentHash !== bundle.contentHash) throw new YingxiangClientError("YINGXIANG_ACK_MISMATCH",200);
+    return { revision: bundle.revision, contentHash: bundle.contentHash };
+  }
+  leave(participantId: string, accessToken: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/yingxiang/participants/${encodeURIComponent(participantId)}/leave`, { method: "POST", body: {}, accessToken });
+  }
+
+  private async request(path: string, options: { method: "GET" | "POST"; body?: Record<string, unknown>; auth?: boolean; optionalAuth?: boolean; accessToken?: string }): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = { accept: "application/json" };
     if (options.body) headers["content-type"] = "application/json";
     if (options.auth || options.optionalAuth) {
@@ -74,8 +109,9 @@ export class YingxiangClient {
       if (options.auth && !token) throw new YingxiangClientError("UNAUTHORIZED", 401, "迎香发布功能需要先登录账户。");
       if (token) headers.authorization = `Bearer ${token}`;
     }
+    if (options.accessToken) headers.authorization = `Bearer ${options.accessToken}`;
     let response: Response;
-    try { response = await fetch(new URL(path, this.baseUrl).href, { method: options.method, headers, body: options.body ? JSON.stringify(options.body) : undefined }); }
+    try { response = await fetch(new URL(path, this.baseUrl).href, { method: options.method, headers, body: options.body ? JSON.stringify(options.body) : undefined, signal: AbortSignal.timeout(15000) }); }
     catch { throw new YingxiangClientError("NETWORK_ERROR", 0, "当前无法连接迎香服务。杯测本地记录仍可继续使用。"); }
     let payload: unknown;
     try { payload = await response.json(); }
@@ -119,7 +155,30 @@ function messageForYingxiangError(code: string): string {
     YINGXIANG_ACCOUNT_NAME_INVALID: "账户显示名称必须为 1–64 个字符。",
     YINGXIANG_ASSIGNED_NAME_REQUIRED: "该活动要求主办方为邀请指定参与名称。",
     YINGXIANG_CALIBRATION_INVALID: "校准设置引用了无效或重复的活动样品。",
+    YINGXIANG_CALIBRATION_SLOT_ASSIGNED: "这些样品编号已归入另一重复样品组。",
+    YINGXIANG_EVENT_STRUCTURE_LOCKED: "已有参与者，样品和身份规则已锁定；仍可修改活动名称。",
+    YINGXIANG_EVENT_REVISION_CONFLICT: "活动已被更新，请刷新后再修改。",
+    YINGXIANG_PARTICIPANT_RELEASED: "活动已结束或参与身份已释放，本地记录已保留。",
+    YINGXIANG_SESSION_CONFLICT: "此参与身份已绑定另一份杯测记录。",
+    YINGXIANG_SUBMISSION_CONFLICT: "相同提交版本已有不同内容，已停止覆盖。",
+    YINGXIANG_SUBMISSION_INVALID: "杯测结果格式或样品绑定不符合活动要求。",
+    YINGXIANG_SUBMISSION_HASH_MISMATCH: "结果校验未通过，请重新提交本地记录。",
+    YINGXIANG_FINAL_SCORES_REQUIRED: "所有样品确认最终评分后才能提交。",
     NETWORK_ERROR: "当前无法连接迎香服务。"
   };
   return messages[code] ?? "迎香操作失败，请检查活动状态和输入内容。";
+}
+
+export interface YingxiangParticipantStatus {
+  event: YingxiangRemoteEvent;
+  participant: { participantId: string; displayName: string; status: "active" | "released"; releasedAt?: string };
+  ack: { revision: number; contentHash: string; receivedAt: string } | null;
+}
+export interface YingxiangDashboard {
+  event: YingxiangRemoteEvent;
+  participants: Array<{ participantId: string; displayName: string; status: string; joinedAt: string; releasedAt: string | null; completedSamples: number | null; totalSamples: number | null; progressAt: string | null; submissionRevision: number | null; receivedAt: string | null }>;
+  invites: Array<{ inviteId: string; assignedName: string | null; expiresAt: string; maxUses: number | null; useCount: number; revokedAt: string | null; eventRevision: number }>;
+  groups: CalibrationMapping[];
+  results: YingxiangResults;
+  submissions: CollectedResult[];
 }

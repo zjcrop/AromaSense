@@ -48,6 +48,14 @@ Matching applies each priority across the whole sample set, reserves exact event
 
 Submission `revision` is independent of Event `eventRevision`. Migration `0004_submission_revisions.sql` records each Session's immutable export revision/hash in local SQLite. Re-exporting unchanged content reuses the latest revision; changed content increments it, including when reverting to an older content state. The transaction and uniqueness constraint prevent revision reuse with different hashes. Export time does not change the content hash. Web and Android apply the same numbered migration before enabling exports.
 
+## Yingxiang collection boundary
+
+An Yingxiang participant keeps the AromaSense Session and all sensory edits in local SQLite. Joining adds a stable event/participant/session binding and a participant capability; it does not replace the Session repository or turn the network into an edit prerequisite.
+
+Progress delivery is monotonic per participant and bound to one local Session. Final delivery reuses the immutable Submission revision/hash contract. The Worker independently validates the content hash, event identity, sample slots and final-score confirmation before accepting a result. A repeated request with the same revision/hash returns the prior ACK; the same revision with different content is a conflict. Failed or ambiguous deliveries remain retryable locally.
+
+Host aggregation joins values only by stable `eventSampleId + stage + field`. It selects the latest accepted revision for each participant, never matches by display or array order, and never substitutes zero for a missing observation. Repeat calibration derives statistics from explicitly configured event sample slots without rewriting source observations.
+
 ## Score-profile routing
 
 The sensory workflow, raw observations, flavor tags, radar data and defect observations remain shared across all three cupping modes. At the final scoring stage the Session mode routes to one explicit score profile:

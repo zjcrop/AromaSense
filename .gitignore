@@ -144,3 +144,9 @@ vite.config.ts.timestamp-*
 
 # Integrity-verified Coffee Foundation runtime, materialized during builds.
 cloud/worker/.foundation/
+
+# Generated Web and Android WebView bundles.
+/site/
+/mobile/android/app/src/main/assets/www/
+/mobile/android/.gradle/
+/mobile/android/app/build/

@@ -7,7 +7,7 @@
 
 AromaSense 采用 Local-first 架构：杯测过程首先写入本地 SQLite，网络中断不会阻止感官记录；云端负责身份验证、不可变 revision 备份、跨设备恢复基础以及迎香多人活动协作。
 
-迎香不是第二套杯测软件。它与香迹位于同一仓库、共享同一套 Session / Sample / Stage、识别、感官记录和本地持久化能力；迎香只增加活动发布、临时参与身份、邀请、多人协作和后续汇总层。
+迎香不是第二套杯测软件。它与香迹位于同一仓库、共享同一套 Session / Sample / Stage、识别、感官记录和本地持久化能力；迎香只增加活动发布、临时参与身份、邀请、多人协作和结果汇总层。
 
 ## 网页测试版
 
@@ -39,6 +39,9 @@ AromaSense repository
    ├─ 邀请与临时参与身份
    ├─ 活动规则
    ├─ 重复样品校准映射
+   ├─ 进度与不可变结果回收
+   ├─ 主办方活动看板
+   ├─ 多参与者结果汇总
    └─ 复用香迹 Session 完成实际杯测
 ```
 
@@ -210,29 +213,42 @@ canonical coffee
 
 参与端只看到不同活动槽位，不读取 `canonicalSampleId`。本地和 D1 都会校验校准组引用的 `eventSampleId` 必须真实存在于 Event Manifest。
 
-该结构为后续计算参与者重复性、离散程度和系统性偏差提供基础，同时保持原始 observation 不变。
+主办方看板按 `eventSampleId + stage + field` 汇总结果，并基于组内重复槽位计算参与者的均值、样本标准差和相对同场参与者的偏移。缺失值保持缺失，不会按 0 补齐；原始 observation 始终保持不变。
 
 ### 7. 当前 Worker 路由
 
 - `POST /api/v1/yingxiang/events`：创建 / 发布活动；
+- `GET /api/v1/yingxiang/events`：列出当前账户拥有的活动；
+- `GET /api/v1/yingxiang/events/:eventId/dashboard`：读取活动、邀请、实时进度、最新结果和校准汇总；
+- `POST /api/v1/yingxiang/events/:eventId/republish`：按期望 revision 编辑 / 再发布活动；
 - `POST /api/v1/yingxiang/events/:eventId/invites`：生成邀请；
+- `POST /api/v1/yingxiang/events/:eventId/invites/:inviteId/revoke`：撤销单个邀请；
+- `POST /api/v1/yingxiang/events/:eventId/participants/:participantId/release`：释放单个活动身份；
 - `GET /api/v1/yingxiang/invites/:token`：读取有效邀请与公开活动规则；
 - `POST /api/v1/yingxiang/invites/:token/join`：guest / account 加入；
+- `GET /api/v1/yingxiang/participants/:participantId/status`：参与者读取自身活动状态；
+- `POST /api/v1/yingxiang/participants/:participantId/progress`：参与者上报单调递增的本地进度；
+- `POST /api/v1/yingxiang/participants/:participantId/submissions`：幂等提交不可变 SubmissionBundle；
+- `POST /api/v1/yingxiang/participants/:participantId/leave`：参与者退出并释放活动身份；
 - `POST /api/v1/yingxiang/account-display-name`：设置服务器可验证的账户显示名称；
 - `POST /api/v1/yingxiang/events/:eventId/calibration-groups`：建立重复校准映射；
 - `POST /api/v1/yingxiang/events/:eventId/complete`：完成活动、释放临时身份并撤销邀请。
 
-### 8. 迎香后续范围
+参与者接口使用加入时派生的 event-scoped bearer capability。D1 只保存其 SHA-256 hash；主办方看板不会返回 invite token、token hash、`joinRequestId` 或账户标识。
 
-B0.1 当前重点是可测试的“发布 → 邀请 → 加入 → 香迹 Session”闭环。后续继续扩展：
+### 8. 本地回收与主办方看板
+
+B0.1 已实现：
 
 - 活动编辑与 revision 再发布；
 - 单个参与者释放；
 - 主办方实时进度；
-- SubmissionBundle 回收；
+- 本地持久化的 SubmissionBundle 自动回收与失败重试；
 - 多参与者结果汇总；
 - 重复校准统计与偏差分析；
 - 主办方看板。
+
+活动一旦有人加入，样品结构与活动规则即锁定，避免参与端与结果端产生不同的 event scope；仍可只修改活动标题。结果回收先从本地 SQLite 读取并生成稳定的 Submission revision/hash，服务器重新验证 bundle、event/sample 绑定和最终评分确认。响应丢失、刷新或重启后会使用同一 revision/hash 重试，云端 ACK 也保存于本地。网络失败不会阻断杯测，也不会删除本地记录。
 
 ## 自动化验收
 
@@ -250,7 +266,10 @@ B0.1 当前重点是可测试的“发布 → 邀请 → 加入 → 香迹 Sessi
 - Android `assembleDebug`；
 - 迎香 Event / Principal / Manifest / calibration / invite client contract；
 - 迎香公开 Event Context；
-- 迎香 event → participant → AromaSense Session 本地恢复与去重。
+- 迎香 event → participant → AromaSense Session 本地恢复与去重；
+- 参与者 capability、进度顺序、主办方隔离、结果幂等 / 冲突与 D1 不可变约束；
+- 响应丢失后的本地结果重试、重启恢复与 ACK 持久化；
+- 多参与者汇总、缺失值处理和重复校准统计。
 
 真实设备相机 / 相册 OCR、移动端触控、跨设备同步和多人现场网络条件仍需要物理设备或真实部署验收。
 

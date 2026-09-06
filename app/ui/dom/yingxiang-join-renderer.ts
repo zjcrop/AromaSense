@@ -5,6 +5,7 @@ import { cuppingModeLabel } from "../../core/session-metadata";
 export interface YingxiangJoinRendererOptions {
   token: string;
   getJoinRequestId(inviteId: string): string;
+  onJoinAttempt?(joinRequestId: string): void;
   onJoined(sessionId: string): void | Promise<void>;
   onClose(): void;
 }
@@ -15,6 +16,7 @@ function installStyles(): void {
   style.dataset.yingxiangJoin = "true";
   style.textContent = `
     .yingxiang-join{display:grid;gap:16px;padding:22px;background:#151515;color:#eee9df}
+    .yingxiang-join [hidden]{display:none!important}
     .yingxiang-join__head{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08)}
     .yingxiang-join__title{margin:0;color:#d6ad63;font:600 24px/1.2 "Noto Serif SC","Songti SC",serif;letter-spacing:.12em}
     .yingxiang-join__close{min-width:70px;min-height:38px;border:1px solid rgba(185,153,90,.3);border-radius:8px;background:#1c1c1c;color:#c9bea4;font-weight:700}
@@ -190,6 +192,7 @@ export class YingxiangJoinRenderer {
           if (!displayName) throw new Error("请输入本次活动名称。");
         }
       }
+      this.options.onJoinAttempt?.(view.joinRequestId);
       const result = await this.service.join({
         token: this.options.token,
         joinRequestId: view.joinRequestId,

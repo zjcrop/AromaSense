@@ -260,10 +260,12 @@ export class BatchSetupRenderer {
     copy.append(brand);
 
     const headerButtons = [...actions.querySelectorAll<HTMLButtonElement>("button")];
-    const account = headerButtons[0];
-    const importButton = headerButtons[1];
-    const records = headerButtons[2];
+    const account = headerButtons.find(button => button.classList.contains("batch-setup__account"));
+    const importButton = headerButtons.find(button => button.classList.contains("batch-setup__import"));
+    const records = headerButtons.find(button => button.classList.contains("batch-setup__records"));
+    const yingxiang = headerButtons.find(button => button.dataset.homeAction === "yingxiang");
     actions.replaceChildren();
+    if (yingxiang) actions.append(yingxiang);
     if (account) {
       account.textContent = "账户";
       actions.append(account);

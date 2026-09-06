@@ -28,7 +28,7 @@ type EventManifest = {
   cuppingMode: CuppingMode;
   samples: EventSample[];
 };
-interface EventRow {
+export interface EventRow {
   event_id: string; owner_user_id: string; event_revision: number; title: string; status: EventStatus;
   policy_json: string; manifest_json: string; created_at: string; updated_at: string;
 }
@@ -36,12 +36,12 @@ interface InviteRow {
   invite_id: string; event_id: string; event_revision: number; assigned_name: string | null;
   expires_at: string; max_uses: number | null; use_count: number; revoked_at: string | null;
 }
-interface ParticipantRow {
+export interface ParticipantRow {
   participant_id: string; join_request_id: string; event_id: string; invite_id: string; account_user_id: string | null;
   identity_kind: "guest" | "account"; display_name: string; status: "active" | "released"; joined_at: string; released_at: string | null;
 }
 
-function json(body: JsonValue, status = 200): Response {
+export function json(body: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: {
     "content-type": "application/json; charset=utf-8", "cache-control": "no-store",
     "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization",
@@ -51,15 +51,15 @@ function json(body: JsonValue, status = 200): Response {
 function isNonEmptyString(value: unknown, max = 256): value is string {
   return typeof value === "string" && value.normalize("NFKC").trim().length > 0 && value.length <= max;
 }
-function normalizeName(value: unknown): string { return typeof value === "string" ? value.normalize("NFKC").trim() : ""; }
+export function normalizeName(value: unknown): string { return typeof value === "string" ? value.normalize("NFKC").trim() : ""; }
 function bytesToHex(bytes: Uint8Array): string { return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join(""); }
 function randomHex(bytes: number): string { const value = new Uint8Array(bytes); crypto.getRandomValues(value); return bytesToHex(value); }
-async function sha256Hex(value: string): Promise<string> {
+export async function sha256Hex(value: string): Promise<string> {
   return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))));
 }
 function parseStoredJson(value: string): unknown { try { return JSON.parse(value); } catch { return undefined; } }
 
-function parsePolicy(value: unknown): EventPolicy | undefined {
+export function parsePolicy(value: unknown): EventPolicy | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const source = value as Record<string, unknown>; const naming = source.participantName;
   if (!naming || typeof naming !== "object" || Array.isArray(naming)) return undefined;
@@ -80,7 +80,7 @@ function parsePolicy(value: unknown): EventPolicy | undefined {
   };
 }
 
-function parseManifest(value: unknown, requireSamples = true): EventManifest | undefined {
+export function parseManifest(value: unknown, requireSamples = true): EventManifest | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const source = value as Record<string, unknown>; const organizerName = normalizeName(source.organizerName);
   const cuppingMode = source.cuppingMode; const rawSamples = source.samples;
@@ -111,25 +111,38 @@ function validateDisplayName(value: unknown, policy: ParticipantNamePolicy): str
 function validJoinRequestId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9._:-]{8,128}$/u.test(value);
 }
-async function parseJsonObject(request: Request): Promise<Record<string, unknown> | undefined> {
-  try { const body = await request.json(); return body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : undefined; }
+export async function parseJsonObject(request: Request): Promise<Record<string, unknown> | undefined> {
+  try {
+    if (!request.body || Number(request.headers.get("content-length") || 0) > 1_500_000) return undefined;
+    const reader = request.body.getReader(); const decoder = new TextDecoder(); let text = ""; let size = 0;
+    while (true) {
+      const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength;
+      if (size > 1_500_000) { await reader.cancel(); return undefined; }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode(); const body = JSON.parse(text);
+    return body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+  }
   catch { return undefined; }
 }
-async function eventById(db: D1Database, eventId: string): Promise<EventRow | null> {
+export async function eventById(db: D1Database, eventId: string): Promise<EventRow | null> {
   return db.prepare(`SELECT event_id, owner_user_id, event_revision, title, status, policy_json, manifest_json, created_at, updated_at FROM yingxiang_events WHERE event_id = ?1`).bind(eventId).first<EventRow>();
 }
 async function accountDisplayName(db: D1Database, userId: string): Promise<string | undefined> {
   const row = await db.prepare("SELECT display_name FROM users WHERE user_id = ?1").bind(userId).first<{ display_name: string | null }>();
   return normalizeName(row?.display_name) || undefined;
 }
-function eventContracts(row: EventRow): { policy: EventPolicy; manifest: EventManifest } | undefined {
+export function eventContracts(row: EventRow): { policy: EventPolicy; manifest: EventManifest } | undefined {
   const policy = parsePolicy(parseStoredJson(row.policy_json)); const manifest = parseManifest(parseStoredJson(row.manifest_json), row.status !== "draft");
   return policy && manifest ? { policy, manifest } : undefined;
 }
-function publicEvent(row: EventRow, policy: EventPolicy, manifest: EventManifest): Record<string, unknown> {
+export function publicEvent(row: EventRow, policy: EventPolicy, manifest: EventManifest, owner = false): Record<string, unknown> {
+  if (!owner && manifest.cuppingMode !== "open" && !(row.status === "completed" && policy.revealSampleIdentity === "on_event_complete")) {
+    manifest = { ...manifest, samples: manifest.samples.map(({ eventSampleId, sampleCode, order }) => ({ eventSampleId, sampleCode, order })) };
+  }
   return { schemaVersion: "yingxiang-event/0.1", eventId: row.event_id, eventRevision: row.event_revision, title: row.title, status: row.status, policy, manifest, createdAt: row.created_at, updatedAt: row.updated_at };
 }
-function principalPayload(row: ParticipantRow): Record<string, unknown> {
+export function principalPayload(row: ParticipantRow): Record<string, unknown> {
   return {
     schemaVersion: "yingxiang-principal/0.1", participantId: row.participant_id, eventId: row.event_id,
     identityKind: row.identity_kind, accountUserId: row.account_user_id ?? undefined, displayName: row.display_name,
@@ -185,7 +198,9 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
       return json({ ok: false, error: "YINGXIANG_JOIN_IDEMPOTENCY_CONFLICT" }, 409);
     }
     if (existing.status !== "active") return json({ ok: false, error: "YINGXIANG_EVENT_NOT_JOINABLE" }, 410);
-    return json({ ok: true, principal: principalPayload(existing), event: publicEvent(resolved.event, resolved.policy, resolved.manifest), replayed: true });
+    const access = await participantAccess(db, existing, token, resolved.invite.event_revision);
+    const participantEvent = { ...resolved.event, event_revision: access?.eventRevision ?? resolved.invite.event_revision };
+    return json({ ok: true, accessToken: access?.token, principal: principalPayload(existing), event: publicEvent(participantEvent, resolved.policy, resolved.manifest), replayed: true });
   }
 
   const now = new Date().toISOString(); const reason = inviteUnavailableReason(resolved.invite, resolved.event, now);
@@ -203,11 +218,19 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
     displayName = validateDisplayName(body.displayName, naming); if (!displayName) return json({ ok: false, error: "YINGXIANG_PARTICIPANT_NAME_INVALID" }, 400);
   }
   const participantId = crypto.randomUUID(); const identityKind = user ? "account" : "guest";
+  const accessToken = joinRequestId.length >= 32
+    ? await sha256Hex(`yingxiang-participant/1:${token.toLowerCase()}:${joinRequestId}`)
+    : undefined;
   try {
-    await db.prepare(`INSERT INTO yingxiang_participants
+    const statements = [db.prepare(`INSERT INTO yingxiang_participants
       (participant_id, join_request_id, event_id, invite_id, account_user_id, identity_kind, display_name, status, joined_at, released_at)
       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8, NULL)`)
-      .bind(participantId, joinRequestId, resolved.event.event_id, resolved.invite.invite_id, user?.userId ?? null, identityKind, displayName, now).run();
+      .bind(participantId, joinRequestId, resolved.event.event_id, resolved.invite.invite_id, user?.userId ?? null, identityKind, displayName, now)];
+    if (accessToken) {
+      statements.push(db.prepare(`INSERT INTO yingxiang_participant_access (participant_id, token_hash, event_revision)
+        VALUES (?1, ?2, ?3)`).bind(participantId, await sha256Hex(accessToken), resolved.invite.event_revision));
+    }
+    await db.batch(statements);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("YINGXIANG_INVITE_")) return json({ ok: false, error: message.match(/YINGXIANG_INVITE_[A-Z_]+/u)?.[0] ?? "YINGXIANG_INVITE_UNAVAILABLE" }, 410);
@@ -219,7 +242,7 @@ async function handleInviteJoin(token: string, request: Request, db: D1Database,
     participant_id: participantId, join_request_id: joinRequestId, event_id: resolved.event.event_id, invite_id: resolved.invite.invite_id,
     account_user_id: user?.userId ?? null, identity_kind: identityKind, display_name: displayName, status: "active", joined_at: now, released_at: null
   };
-  return json({ ok: true, principal: principalPayload(created), event: publicEvent(resolved.event, resolved.policy, resolved.manifest), replayed: false }, 201);
+  return json({ ok: true, accessToken, principal: principalPayload(created), event: publicEvent(resolved.event, resolved.policy, resolved.manifest), replayed: false }, 201);
 }
 
 async function handleEventCreate(request: Request, db: D1Database, user: YingxiangAuthenticatedUser): Promise<Response> {
@@ -231,7 +254,7 @@ async function handleEventCreate(request: Request, db: D1Database, user: Yingxia
   await db.prepare(`INSERT INTO yingxiang_events
     (event_id, owner_user_id, event_revision, title, status, policy_json, manifest_json, created_at, updated_at)
     VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?7)`).bind(eventId, user.userId, title, status, JSON.stringify(policy), JSON.stringify(manifest), now).run();
-  const row = await eventById(db, eventId); return json({ ok: true, event: publicEvent(row!, policy, manifest) }, 201);
+  const row = await eventById(db, eventId); return json({ ok: true, event: publicEvent(row!, policy, manifest, true) }, 201);
 }
 
 async function handleInviteCreate(eventId: string, request: Request, db: D1Database, user: YingxiangAuthenticatedUser, publicAppUrl?: string): Promise<Response> {
@@ -263,10 +286,11 @@ async function handleAccountDisplayName(request: Request, db: D1Database, user: 
 
 async function handleCalibrationCreate(eventId: string, request: Request, db: D1Database, user: YingxiangAuthenticatedUser): Promise<Response> {
   const event = await eventById(db, eventId); if (!event || event.owner_user_id !== user.userId) return json({ ok: false, error: "YINGXIANG_EVENT_NOT_FOUND" }, 404);
+  if (!["published","active"].includes(event.status)) return json({ok:false,error:"YINGXIANG_EVENT_NOT_SHAREABLE"},409);
   const contracts = eventContracts(event); if (!contracts) return json({ ok: false, error: "YINGXIANG_EVENT_CONTRACT_CORRUPT" }, 500);
   if (!contracts.policy.calibrationRepeatEnabled) return json({ ok: false, error: "YINGXIANG_CALIBRATION_DISABLED" }, 409);
   const body = await parseJsonObject(request); const canonicalSampleId = normalizeName(body?.canonicalSampleId); const rawIds = body?.eventSampleIds;
-  if (!canonicalSampleId || !Array.isArray(rawIds)) return json({ ok: false, error: "YINGXIANG_CALIBRATION_INVALID" }, 400);
+  if (!canonicalSampleId || canonicalSampleId.length > 256 || !Array.isArray(rawIds)) return json({ ok: false, error: "YINGXIANG_CALIBRATION_INVALID" }, 400);
   const eventSampleIds = rawIds.map(normalizeName); const allowed = new Set(contracts.manifest.samples.map((sample) => sample.eventSampleId));
   if (eventSampleIds.length < 2 || eventSampleIds.some((id) => !id || !allowed.has(id)) || new Set(eventSampleIds).size !== eventSampleIds.length) return json({ ok: false, error: "YINGXIANG_CALIBRATION_INVALID" }, 400);
   const revealPolicy = body?.revealPolicy === "organizer_only" ? "organizer_only" : "after_event"; const groupId = crypto.randomUUID(); const now = new Date().toISOString();
@@ -287,7 +311,7 @@ async function handleEventComplete(eventId: string, db: D1Database, user: Yingxi
   if (event.status === "completed") return json({ ok: true, eventId, status: "completed", eventRevision: event.event_revision });
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare(`UPDATE yingxiang_events SET status = 'completed', event_revision = event_revision + 1, updated_at = ?1 WHERE event_id = ?2 AND owner_user_id = ?3`).bind(now, eventId, user.userId),
+    db.prepare(`UPDATE yingxiang_events SET status = 'completed', event_revision = event_revision + 1, updated_at = ?1 WHERE event_id = ?2 AND owner_user_id = ?3 AND status IN ('draft','published','active')`).bind(now, eventId, user.userId),
     db.prepare(`UPDATE yingxiang_participants SET status = 'released', released_at = ?1 WHERE event_id = ?2 AND status = 'active'`).bind(now, eventId),
     db.prepare(`UPDATE yingxiang_invites SET revoked_at = COALESCE(revoked_at, ?1) WHERE event_id = ?2`).bind(now, eventId)
   ]);
@@ -296,7 +320,7 @@ async function handleEventComplete(eventId: string, db: D1Database, user: Yingxi
 
 export async function handleYingxiangPublicRoute(request: Request, url: URL, db: D1Database, user?: YingxiangAuthenticatedUser): Promise<Response | undefined> {
   const match = url.pathname.match(/^\/api\/v1\/yingxiang\/invites\/([a-f0-9]{48})(?:\/(join))?$/iu); if (!match) return undefined;
-  const token = match[1]; if (request.method === "GET" && !match[2]) return handleInviteGet(token, db);
+  const token = match[1].toLowerCase(); if (request.method === "GET" && !match[2]) return handleInviteGet(token, db);
   if (request.method === "POST" && match[2] === "join") return handleInviteJoin(token, request, db, user);
   return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
 }
@@ -308,4 +332,17 @@ export async function handleYingxiangAuthenticatedRoute(request: Request, url: U
   const calibration = url.pathname.match(/^\/api\/v1\/yingxiang\/events\/([^/]+)\/calibration-groups$/u); if (calibration && request.method === "POST") return handleCalibrationCreate(decodeURIComponent(calibration[1]), request, db, user);
   const complete = url.pathname.match(/^\/api\/v1\/yingxiang\/events\/([^/]+)\/complete$/u); if (complete && request.method === "POST") return handleEventComplete(decodeURIComponent(complete[1]), db, user);
   return undefined;
+}
+
+// The invite and private join request together derive a replayable per-participant capability.
+// Only the hash is stored; never return join_request_id or token_hash in host views.
+async function participantAccess(db: D1Database, p: ParticipantRow, inviteToken: string, eventRevision: number): Promise<{ token: string; eventRevision: number } | undefined> {
+  if (p.join_request_id.length < 32) return undefined; // legacy short ids cannot grant a bearer capability
+  const token = await sha256Hex(`yingxiang-participant/1:${inviteToken.toLowerCase()}:${p.join_request_id}`);
+  await db.prepare(`INSERT INTO yingxiang_participant_access (participant_id, token_hash, event_revision)
+    VALUES (?1, ?2, ?3) ON CONFLICT(participant_id) DO NOTHING`).bind(p.participant_id, await sha256Hex(token), eventRevision).run();
+  const saved = await db.prepare("SELECT event_revision FROM yingxiang_participant_access WHERE participant_id = ?1")
+    .bind(p.participant_id).first<{ event_revision: number }>();
+  if (!saved) throw new Error("YINGXIANG_PARTICIPANT_ACCESS_MISSING");
+  return { token, eventRevision: saved.event_revision };
 }
