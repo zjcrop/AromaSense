@@ -19,12 +19,16 @@ export function blindModeDescription(mode: CuppingMode): string {
   return "杯测过程中显示样品名称与全部已录入信息。";
 }
 
+function isOpenIdentityMode(mode: CuppingMode): boolean {
+  return mode === "free" || mode === "timed";
+}
+
 export function isBlindSessionRevealed(
   metadata: CuppingSessionMetadata,
   status: SessionVisibilityStatus
 ): boolean {
   const mode = cuppingModeFromMetadata(metadata);
-  return mode === "open" || status === "completed" || status === "archived" || Boolean(metadata.revealedAt?.trim());
+  return isOpenIdentityMode(mode) || status === "completed" || status === "archived" || Boolean(metadata.revealedAt?.trim());
 }
 
 export function anonymousSampleLabel(displayNumber: number): string {
@@ -53,7 +57,7 @@ export function visibleSampleMetadata(
   if (isBlindSessionRevealed(metadata, status)) return { ...sampleMetadata };
   const mode = cuppingModeFromMetadata(metadata);
   if (mode === "blind") return {};
-  if (mode === "open") return { ...sampleMetadata };
+  if (isOpenIdentityMode(mode)) return { ...sampleMetadata };
 
   const allowed = metadata.semiBlindVisibleFields?.length
     ? metadata.semiBlindVisibleFields
@@ -67,6 +71,7 @@ export function visibleSampleMetadata(
 
 export function revealBlindSessionMetadata(metadata: CuppingSessionMetadata, now: string): CuppingSessionMetadata {
   const normalized = normalizeSessionMetadata(metadata);
-  if (cuppingModeFromMetadata(normalized) === "open" || normalized.revealedAt) return normalized;
+  const mode = cuppingModeFromMetadata(normalized);
+  if (isOpenIdentityMode(mode) || normalized.revealedAt) return normalized;
   return normalizeSessionMetadata({ ...normalized, revealedAt: now });
 }
