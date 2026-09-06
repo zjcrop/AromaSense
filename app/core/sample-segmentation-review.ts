@@ -187,6 +187,38 @@ export function linesInsideBox(lines: readonly SegmentationReviewLine[], box: OC
     .map((line) => line.id);
 }
 
+function overlapArea(first: OCRBox, second: OCRBox): number {
+  const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+  const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+  return width * height;
+}
+
+/**
+ * Rebuilds OCR-line ownership from the CURRENT region geometry.
+ *
+ * Manual drag/resize is therefore an authoritative input to the next semantic
+ * parse. `lineIds` carried by the old automatic segmentation are treated only
+ * as historical state and are not reused after geometry has changed.
+ */
+export function assignSegmentationLinesByGeometry(model: SegmentationReviewModel): SegmentationReviewModel {
+  const regions = model.regions.map((region) => ({ ...region, box: normalizeRegionBox(region.box), lineIds: [] as string[] }));
+  for (const line of model.lines) {
+    const candidates = regions.flatMap((region, index) => {
+      const containsCenter = line.box.centerX >= region.box.left && line.box.centerX <= region.box.right
+        && line.box.centerY >= region.box.top && line.box.centerY <= region.box.bottom;
+      if (!containsCenter) return [];
+      const overlap = overlapArea(line.box, region.box);
+      const dx = line.box.centerX - region.box.centerX;
+      const dy = line.box.centerY - region.box.centerY;
+      return [{ index, overlap, distance: dx * dx + dy * dy }];
+    });
+    if (!candidates.length) continue;
+    candidates.sort((a, b) => b.overlap - a.overlap || a.distance - b.distance || a.index - b.index);
+    regions[candidates[0].index].lineIds.push(line.id);
+  }
+  return { ...model, regions };
+}
+
 export function normalizeRegionBox(input: Pick<OCRBox, "left" | "top" | "right" | "bottom">): OCRBox {
   const left = clamp01(input.left);
   const top = clamp01(input.top);
@@ -411,17 +443,16 @@ export function resegmentRecognizedPage(
   model: SegmentationReviewModel
 ): RecognizedPage {
   if (!model.regions.length) throw new Error("至少保留一个样品分区");
+  const synchronizedModel = assignSegmentationLinesByGeometry(model);
   const used = new Set<string>();
-  for (const [index, region] of model.regions.entries()) {
-    if (!region.lineIds.length) throw new Error(`分区 ${index + 1} 没有文字`);
+  for (const [index, region] of synchronizedModel.regions.entries()) {
+    if (!region.lineIds.length) throw new Error(`分区 ${index + 1} 没有文字，请调整边界使其覆盖该样品的 OCR 文字`);
     for (const id of region.lineIds) {
       if (used.has(id)) throw new Error(`识别文字 ${id} 被分配到多个样品，请调整边界`);
       used.add(id);
     }
   }
-  const normalizedRegions = model.regions.map((region) => ({ ...region, box: normalizeRegionBox(region.box) }));
-  const normalizedModel = { ...model, regions: normalizedRegions };
-  const samples = normalizedRegions.map((region, index) => sampleFromRegion(page, normalizedModel, region, index));
+  const samples = synchronizedModel.regions.map((region, index) => sampleFromRegion(page, synchronizedModel, region, index));
   return {
     ...page,
     layoutType: samples.length > 1 ? "mixed" : "single",
