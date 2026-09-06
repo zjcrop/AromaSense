@@ -4,6 +4,7 @@ import type { YingxiangCoffeeDetail } from "../../core/yingxiang-event";
 import type { SQLiteDriver } from "../../storage/local-cupping-repository";
 import { YingxiangHostRenderer } from "./yingxiang-host-renderer";
 import { renderYingxiangInviteShare } from "./yingxiang-invite-share";
+import { interactionConfirm } from "../interaction-foundation";
 
 interface Options {
   onClose(): void;
@@ -197,7 +198,7 @@ export class YingxiangConsoleRenderer {
       const note = el("p", row.last_error ?? (row.ack_revision ? "结果已送达主办方" : "已保存到本机，完成杯测后自动提交")); note.className = "yx-status";
       card.append(note, button("打开本地杯测", () => this.options.onOpenSession(row.session_id)));
       if (principal?.status === "active") card.append(button("退出本次活动", () => this.run(note, async () => {
-        if (!window.confirm("退出后不能再向本次活动提交；本地杯测记录会保留。确认退出？")) { note.textContent = ""; return; }
+        if (!await interactionConfirm({ title: "退出本次活动？", message: "退出后不能再向本次活动提交；本地杯测记录会保留。", confirmLabel: "退出", danger: true })) { note.textContent = ""; return; }
         await this.delivery!.leave(row); await this.showParticipations();
       })));
       shell.append(card);
@@ -227,7 +228,7 @@ export class YingxiangConsoleRenderer {
         participant.submissionRevision ? "已收到" : participant.status === "released" ? "已释放" : "未提交",
         time(participant.receivedAt ?? participant.progressAt),
         participant.status === "active" ? button("释放身份", () => this.run(status, async () => {
-          if (!window.confirm(`释放 ${participant.displayName} 的本次活动身份？本地记录仍保留。`)) { status.textContent = ""; return; }
+          if (!await interactionConfirm({ title: "释放活动身份？", message: `将释放 ${participant.displayName} 的本次活动身份；本地记录仍保留。`, confirmLabel: "释放", danger: true })) { status.textContent = ""; return; }
           await this.client!.releaseParticipant(eventId, participant.participantId); await refresh();
         })) : "—"
       ])));
@@ -252,7 +253,7 @@ export class YingxiangConsoleRenderer {
       button("编辑活动", () => this.showEditor(data.event, data.participants.length > 0)),
       button("结束活动", () => this.run(status, async () => {
         const missing = data.participants.filter((participant) => participant.status === "active" && !participant.submissionRevision).length;
-        if (!window.confirm(`结束后关闭邀请并释放活动身份。${missing ? `还有 ${missing} 人未提交结果。` : ""}确认结束？`)) { status.textContent = ""; return; }
+        if (!await interactionConfirm({ title: "结束迎香活动？", message: `结束后关闭邀请并释放活动身份。${missing ? `还有 ${missing} 人未提交结果。` : ""}`, confirmLabel: "结束活动", danger: true })) { status.textContent = ""; return; }
         await this.client!.completeEvent(eventId); await this.showDashboard(eventId);
       }))
     );

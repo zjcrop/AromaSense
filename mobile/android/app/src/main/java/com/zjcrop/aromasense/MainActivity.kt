@@ -7,10 +7,9 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
+import android.os.Build
 import android.provider.MediaStore
-import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -18,6 +17,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.JavascriptInterface
+import android.widget.Toast
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
 
@@ -66,13 +67,11 @@ class MainActivity : Activity() {
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         WebView.setWebContentsDebuggingEnabled(debuggable)
         webView.addJavascriptInterface(AromaSenseSQLiteBridge(database), "AromaSenseSQLite")
-        // Stage 1 interaction/navigation bridge is intentionally separate from the
-        // LuckyBean recognition transport so back/exit semantics cannot mutate OCR contracts.
-        webView.addJavascriptInterface(AromaSenseNativeBridge(), "AromaSenseNative")
         // Use LuckyBean's production Android transport contract directly. The JS side loads
         // luckybean/android/native-bridge.js and talks to this interface without an AromaSense
         // compatibility wrapper.
         webView.addJavascriptInterface(recognitionBridge, "LuckyBeanNative")
+        webView.addJavascriptInterface(AromaSenseAppBridge(), "AromaSenseNative")
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url ?: return true
@@ -121,21 +120,18 @@ class MainActivity : Activity() {
             }
         }
         setContentView(webView)
-        registerSystemBackCallback()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                ::handleSystemBack
+            )
+        }
 
         if (savedInstanceState == null) {
             webView.loadUrl("file:///android_asset/www/index.html")
         } else {
             webView.restoreState(savedInstanceState)
-        }
-    }
-
-    private inner class AromaSenseNativeBridge {
-        @JavascriptInterface
-        fun exitApp() {
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed) finish()
-            }
         }
     }
 
@@ -250,26 +246,20 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(outState)
     }
 
-    private fun registerSystemBackCallback() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) registerApi33BackCallback()
-    }
-
-    @android.annotation.TargetApi(Build.VERSION_CODES.TIRAMISU)
-    private fun registerApi33BackCallback() {
-        onBackInvokedDispatcher.registerOnBackInvokedCallback(
-            android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
-        ) { handleSystemBack() }
+    private inner class AromaSenseAppBridge {
+        @JavascriptInterface
+        fun exitApp() {
+            runOnUiThread { finish() }
+        }
     }
 
     private fun handleSystemBack() {
-        if (!::webView.isInitialized) {
-            finish()
-            return
-        }
-        val script = "(function(){try{return Boolean(globalThis.AromaSenseNavigation&&globalThis.AromaSenseNavigation.systemBack&&globalThis.AromaSenseNavigation.systemBack());}catch(error){return false;}})()"
+        if (!::webView.isInitialized) return
+        val script = "(function(){try{return Boolean(globalThis.AromaSenseBackGestureAdapter&&globalThis.AromaSenseBackGestureAdapter.handleAndroidBack&&globalThis.AromaSenseBackGestureAdapter.handleAndroidBack());}catch(error){return false;}})()"
         webView.evaluateJavascript(script) { result ->
             if (result == "true") return@evaluateJavascript
-            if (webView.canGoBack()) webView.goBack() else finish()
+            if (webView.canGoBack()) webView.goBack()
+            else Toast.makeText(this, "界面正在准备，请稍后再试", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -286,8 +276,8 @@ class MainActivity : Activity() {
         if (::recognitionBridge.isInitialized) recognitionBridge.close()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("AromaSenseSQLite")
-            webView.removeJavascriptInterface("AromaSenseNative")
             webView.removeJavascriptInterface("LuckyBeanNative")
+            webView.removeJavascriptInterface("AromaSenseNative")
             webView.destroy()
         }
         if (::database.isInitialized) database.close()

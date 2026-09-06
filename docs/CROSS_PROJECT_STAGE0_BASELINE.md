@@ -2,24 +2,23 @@
 
 Date: 2026-09-06
 Base branch: `main`
-Original audited source SHA: `dfbdfca0c683c74dbcc053cd46fd98e3c824c020`
-Stage 0 validated branch head before this record update: `884598b006f752cda9193fc5b6fcca60f1a7c8ee`
+Validated source SHA for this audit: `dfbdfca0c683c74dbcc053cd46fd98e3c824c020`
 AromaSense product baseline: `B0.2.a` (alpha)
 Yingxiang module baseline: `B0.1` (test)
 
-This document is the Stage 0 control point. Stage 0 changes no AromaSense/Yingxiang production business behavior. Executable additions are test/CI instrumentation only.
+This document is a pre-integration control point. It changes no runtime behavior and must not be treated as a release by itself.
 
 ## 1. Product/repository boundary confirmed
 
-Yingxiang is an active module inside the AromaSense repository. It reuses AromaSense Session / Sample / Stage, recognition, local persistence and sensory workflow, then adds event publishing, temporary participant identity, invitation, calibration mapping, aggregation and host operations.
+Yingxiang is already an active module inside the AromaSense repository. It is not a future standalone project. It reuses AromaSense Session / Sample / Stage, recognition, local persistence and sensory workflow, then adds event publishing, temporary participant identity, invitation, calibration mapping, aggregation and host operations.
 
-Later work must integrate shared foundations into the existing module rather than re-create it.
+Recent `main` already includes Yingxiang sample-code intake by photo/table/paste and host recovery work. Later plans must therefore integrate shared foundations into existing Yingxiang code rather than re-create the module.
 
 ## 2. Local-first and data-safety freeze boundary
 
-The following are non-negotiable:
+The following are non-negotiable and must not regress:
 
-- local SQLite remains authoritative during active cupping;
+- local SQLite is authoritative during active cupping;
 - network failure cannot block or erase sensory recording;
 - only the active sample/stage slice should be required in the editing context;
 - immutable revision/hash upload semantics remain idempotent;
@@ -27,138 +26,180 @@ The following are non-negotiable:
 - stable sample identity cannot be derived from rail/display order;
 - schema changes require numbered migrations and old production migrations are never edited in place.
 
-Stage 1 must not change these rules.
-
-## 3. Recognition dependency mismatch recorded
+## 3. Recognition dependency mismatch discovered in Stage 0
 
 AromaSense currently depends on:
 
 `luckybean-static-app#ff2db954a27aba1adc882e0f0c5392af0cd082f3`
 
-That is older than the current LuckyBean Stage 0 baseline. AromaSense therefore does not automatically inherit later LuckyBean startup, WebKit, OCR-reuse and Android Native preprocessing changes.
+LuckyBean current audited baseline is newer (`115e5d7f509ee777166a296eefee203451121458`). Therefore AromaSense is still building recognition against an older LuckyBean/Foundation snapshot and does not automatically inherit the later LuckyBean startup, WebKit, OCR-reuse and Android Native preprocessing fixes.
 
-Do **not** silently bump this dependency during Stage 1. Recognition-provider reconciliation belongs to the later Recognition integration stage with explicit compatibility tests.
+This is a likely contributor to AromaSense still exhibiting recognition performance similar to older LuckyBean behavior.
 
-## 4. Recognition work retained for later stages
+Do **not** simply bump the dependency. `scripts/harden-recognition-runtime.mjs` currently asserts an older provider contract including `workerOnly === true`, while current LuckyBean supports a WebKit direct-WASM/no-SIMD compatibility path and does not expose a worker-only provider contract. Upgrade requires an explicit compatibility reconciliation and regression tests.
 
-Prioritize later, not during Stage 1:
+## 4. Recognition work that remains high value
 
-1. multi-item record association robustness;
-2. shared LuckyBean/Coffee Foundation semantic reuse;
-3. Chinese/other date normalization and continuous flavor-token segmentation;
-4. recognition/review screen behavior and direct editing;
-5. selective AI use for ambiguous structure/low-confidence cases;
-6. performance work only where the six-phase baseline identifies a real bottleneck.
+Prioritize:
 
-Automatic full-image cropping remains a recovery tool rather than the default path.
+1. measure where AromaSense multi-item recognition time is spent;
+2. repair item/group association so fields from different coffees cannot be incorrectly combined;
+3. reuse the stabilized LuckyBean/Coffee Foundation semantics instead of maintaining parallel coffee-field logic;
+4. improve Chinese/other date normalization and continuous flavor-token segmentation at the shared semantic layer;
+5. keep re-recognition on the recognition/review screen, with all fields reorganized for review, rather than automatically handing off into form entry;
+6. use AI selectively for ambiguous multi-item structure/low-confidence cases, not as a mandatory OCR pass.
 
-## 5. Cupping timing/editability gap retained for later Session work
+Automatic full-image cropping is not a required normal path. Capture-quality feedback should first warn when the photographed information occupies too little of the frame. ROI remains a recovery tool.
 
-Current documentation says browsing should not start a Session while current controller behavior can activate draft sessions on entry. The approved timed/untimed rule remains a later Session-policy task:
+## 5. Cupping timing/editability gap
 
-- `timed`: structural edit is locked during active timing;
-- structural edit requires explicit confirmation and timing interruption;
-- `untimed`: leave/re-enter and add/delete/reorder remain available;
-- lifecycle and timing status stay independent;
-- deleting samples with observations preserves history.
+Current domain documentation states that browsing should not start a Session and that the first meaningful sensory edit activates it. Current `CuppingScreenController.initialize()` still activates draft sessions on entry, so implementation and documented interaction semantics are not fully aligned.
 
-Stage 1 must not modify Session lifecycle or timing policy.
+The newly approved product rule should be implemented in a later AromaSense session stage as an explicit independent timing mode:
+
+- `timed`: running timer locks sample structure; add/delete/reorder are blocked;
+- requesting structural edit while timed requires explicit confirmation, ends/interupts timing, then unlocks editing;
+- `untimed`: the user may leave the cupping flow and later add/delete/reorder samples, then re-enter and continue;
+- lifecycle status and timing status must remain separate concepts;
+- deleting a sample with existing observations must preserve history (soft-remove/archive semantics rather than destructive loss).
+
+Do not bolt this onto one UI button; treat it as a Session policy plus project-editing capability.
 
 ## 6. Cross-project interfaces to stabilize
 
-Stage 1 should stabilize:
+Stabilize interface contracts before attempting a shared package:
 
 - Overlay / Navigation / Back / Exit;
-- route/history semantics;
-- flow step navigation boundary;
-- platform back-gesture adapter;
-- root exit guard.
+- RecognitionDocument / RecognitionSession / RecognitionIssue;
+- multi-item RecordGroup / RecordCandidate;
+- BatchInput source-to-record contract;
+- SortableList behavior;
+- long-task status contract, with visible progress reserved for expected >5 s work;
+- AI advisory and AI sensory-summary contracts.
 
-RecognitionDocument, RecordGroup, BatchInput, SortableList and long-task contracts remain later stages unless needed only as unchanged interface dependencies.
+A shared npm/package extraction is intentionally deferred until both repositories pass acceptance against these contracts.
 
-A shared npm package remains deferred until both applications prove the interfaces in production-shaped tests.
+## 7. Third-party/license consistency warning
 
-## 7. Third-party/license warning retained
+`THIRD_PARTY_NOTICES.md` still describes PaddleOCR / PP-OCR as planned/under evaluation, while the build hardening pipeline copies LuckyBean/Foundation PP-OCR runtime/model assets into AromaSense output. Before a release that relies on those assets, the notice must be reconciled with the exact bundled source/version/model/license/attribution state.
 
-`THIRD_PARTY_NOTICES.md` still needs reconciliation with the PP-OCR assets actually bundled by the build. This is a release/legal bookkeeping item and is not a reason to replace the OCR implementation.
+This is a release/legal bookkeeping issue, not a reason to replace the OCR implementation.
 
-## 8. Final Stage 0 execution record
+## 8. Performance guardrails
 
-The final Stage 0 branch validation includes:
+Before later stages are merged, compare at least:
 
-- Firebase auth configuration checks;
-- TypeScript typecheck and domain/storage tests;
-- browser bundle and recognition hardening;
-- Cloudflare Worker typecheck;
-- browser startup/refresh acceptance;
-- Stage 0 six-phase Recognition benchmark;
-- Android debug build.
+- AromaSense startup and first actionable UI;
+- single-item scan;
+- representative multi-item scan;
+- time spent in image preparation, OCR, layout grouping, canonicalization, persistence and UI rendering;
+- Web vs Android behavior;
+- repeated recognition entry and memory stability.
 
-Both `AromaSense browser refresh acceptance` and the complete `AromaSense CI` completed successfully for branch head `884598b006f752cda9193fc5b6fcca60f1a7c8ee` before this documentation-only update.
+No performance change is accepted solely on theoretical benefit. Multi-item accuracy and record association are primary correctness gates.
 
-The first benchmark instrumentation attempt failed because the production `LuckyBeanRecognitionCore` is deliberately `Object.freeze()` and a JavaScript Proxy cannot replace frozen non-configurable methods. The benchmark was corrected to use a plain timed wrapper and restore the original global object afterwards; production code was not modified.
+## 9. Stage 0 execution record
 
-A subsequent run completed the actual recognition pipeline but treated ONNX Runtime `CleanUnusedInitializersAndNodeArgs` optimizer warnings as fatal browser errors. The test now filters only that known warning class while retaining true Recognition/Paddle/ONNX/SQLite failures as blockers.
+Execution time: `2026-09-06T09:31:02Z`
 
-## 9. Six-phase Recognition performance baseline
+Environment: Linux, Node `v24.19.0`, npm `11.9.0`. Tests were executed from
+`stage0-cross-project-baseline-20260906` at the pre-record commit
+`8d76a634d185039fdcbe24fbbcf0310685de8c9d`, whose only change from the audited
+source SHA is this control document.
 
-The benchmark uses deterministic camera-like JPEG fixtures for **performance/regression measurement**, not as a claim of real coffee-label accuracy. It executes the existing `SampleRecognitionService`, production LuckyBean Recognition Core, real `BrowserSQLiteDriver` / `LocalCuppingRepository` persistence and the real batch review dialog.
+| Command | Observed result | Wall time |
+| --- | --- | ---: |
+| `npm ci` | pass; 39 packages installed | 104.73 s |
+| `npm run typecheck` | pass | 2.81 s |
+| `npm test` | pass; 163/163 | 4.45 s |
+| `npm run check` | pass; typecheck plus a second 163/163 test run | 7.18 s |
+| `npm run bundle:web` | first run failed on the 12 s remote data timeout; unchanged retry passed | 22.65 s (passing retry) |
 
-Observed GitHub Actions Chromium result:
+The successful bundle verified the executable LuckyBean recognition core,
+same-origin PP-OCR/ROI Worker assets, lazy serialized recognition cache,
+Coffee Knowledge `1.0.0-alpha.7`, 75 aliases, 5 blocked ambiguous entities,
+16 knowledge-only varieties and unchanged QR indexes for both Pages and Android
+WebView artifacts.
 
-| Phase | Single sample | Two-entry table |
-| --- | ---: | ---: |
-| image preparation | 0.1 ms | 0.0 ms |
-| OCR | **3809.4 ms** | **3037.6 ms** |
-| layout / group | 14.6 ms | 10.9 ms |
-| canonical | 23.8 ms | 23.7 ms |
-| recognition total | **3847.9 ms** | **3072.2 ms** |
-| persistence | — | **6.2 ms** for 2 samples |
-| Review UI render | **26.6 ms** | — |
+The first bundle attempt did not obtain the remote BrewIon data before the
+hard-coded 12 s timeout, so no recognition bootstrap was emitted and the
+hardening step correctly rejected the artifact. After the same URLs became
+warm in the network cache, the exact same command passed without any source
+change. This is a reproducible build-network flake risk, not a valid successful
+fallback path.
 
-Recognition result details:
+## 10. Data-integrity and phase-level proxy measurements
 
-- engine: `PP-OCRv5-browser-0.4.4-self-hosted-worker`;
-- single fixture: 1 sample, `layoutType=single`, no segmentation review;
-- multi-entry fixture: **2 samples**, `layoutType=table`, no segmentation review;
-- Review UI rendered 7 recognized fields in the measured single-sample case.
+The Node test run exercised the real domain/storage implementations and
+reported these representative single-run durations:
 
-The engineering conclusion is explicit: OCR accounts for about 99% of recognition wall time in these fixtures. Layout/group, canonicalization, SQLite persistence and UI rendering are not the current primary bottlenecks. Stage 1 must not optimize or alter this recognition path.
+| Covered path | Observed duration |
+| --- | ---: |
+| dense one-row-per-sample grouping | 13.66 ms |
+| roast-grouped menu grouping | 19.21 ms |
+| coffee-table column grouping | 42.60 ms |
+| session plus samples atomic create/restart slice | 13.57 ms |
+| 100-sample slice-scoped rail path | 54.38 ms |
+| offline session then sync recovery | 52.34 ms |
+| immutable event cloud guards | 47.22 ms |
 
-## 10. Earlier domain/storage timing context
+These are regression-test timings, not image-recognition benchmarks. They show
+that grouping, local transactions, large-session slicing, offline recovery and
+immutable cloud rules execute without integrity failures in the Node runtime.
 
-The pre-browser Node baseline also showed representative durations such as:
+The requested end-to-end image phases have the following honest status:
 
-- dense one-row-per-sample grouping: 13.66 ms;
-- roast-grouped menu grouping: 19.21 ms;
-- coffee-table column grouping: 42.60 ms;
-- session plus samples atomic create/restart slice: 13.57 ms;
-- 100-sample slice-scoped rail path: 54.38 ms;
-- offline session then sync recovery: 52.34 ms;
-- immutable event cloud guards: 47.22 ms.
+| Recognition phase | Stage 0 status |
+| --- | --- |
+| image preparation | unmeasured; no representative image fixture and no executable browser/Android image runtime |
+| OCR | unmeasured for the same reason |
+| layout/group | exercised by real grouping tests; durations above, but without OCR/image preparation |
+| canonical | exercised by Foundation field/date/i18n/conflict tests; no isolated end-to-end image timing |
+| persistence | exercised by the real SQL.js repository and migration tests; representative timings above |
+| UI render | contract-tested only; no local browser render timing |
 
-These remain supporting regression context, not substitutes for the six-phase browser trace above.
+The public Pages artifact tied to the audited `main` SHA was also opened in a
+cloud Chromium smoke session. It reached the logged-out homepage with an empty
+sample list and no visible error. The first observation was 2.946 s after
+navigation but intentionally included a fixed 2.5 s settling wait; a same-tab
+reload-to-visible-`开始杯测` reading was 0.942 s. The browser did not expose a
+navigation performance trace, so these readings are observational smoke data,
+not a repeatable performance baseline.
 
-## 11. Stage 0 risk disposition
+GitHub reported eight completed-success checks for
+`dfbdfca0c683c74dbcc053cd46fd98e3c824c020` on 2026-09-06, including
+`core-persistence`, `android-debug`, connected Web/Android builds,
+`browser-refresh`, Cloudflare deployment verification and Pages publishing.
+This confirms those CI jobs completed on the exact audited source; it does not
+replace a physical-device OCR or launch measurement.
 
-- Green: six-phase end-to-end recognition timing now exists.
-- Green: a multi-entry camera-like table is correctly separated into 2 samples in the benchmark.
-- Green: Browser acceptance, core/persistence, Worker checks and Android debug CI pass.
-- Green: local-first storage, immutable revisions and migrations remain untouched.
-- Yellow: the old LuckyBean dependency/provider mismatch remains intentionally unresolved for the later Recognition stage.
-- Yellow: clean browser builds still depend on remote BrewIon/Coffee Knowledge inputs and can experience transient network timeout risk.
-- Yellow: PP-OCR third-party notice text remains to be reconciled before release.
-- Yellow: real physical coffee-label accuracy remains a later Recognition/manual-device acceptance item.
-- Red/deferred: documented Session activation semantics still differ from current controller behavior; reserved for the Session/timed-mode stage, not Stage 1.
+## 11. Current Stage 0 risks
 
-Stage 0 is **validated for entry to Stage 1**.
+- Red: no representative single-sample or multi-sample image OCR timing, and no
+  six-phase end-to-end trace, exists yet.
+- Red: the old LuckyBean pin/provider mismatch remains deliberately unchanged.
+- Red: the documented "browsing does not activate a session" rule still differs
+  from the current controller/tested timing behavior; this remains reserved for
+  the later Session/timed-mode stage.
+- Yellow: the 12 s remote BrewIon fetch timeout can make a clean bundle fail on
+  a slow but otherwise successful connection.
+- Yellow: PaddleOCR third-party notices remain inaccurate for the assets that
+  are actually bundled.
+- Green: type safety, 163 domain/storage tests, migrations, Local-first recovery,
+  immutable revisions, event identity and both Web/Android bundle hardening
+  passed without business-code or schema changes.
+
+Stage 0 is therefore recorded accurately but is **not fully validated**. Stage 1
+must not begin until representative photos are run through an executable
+Chromium/WebKit or Android path and the six phase timings are captured.
 
 ## 12. Stage 1 entry condition
 
-The Global Interaction Foundation may proceed under these constraints:
+Proceed to the Global Interaction Foundation only after:
 
-- do not modify Recognition semantics or the LuckyBean dependency pin;
-- do not modify local database schema, Session lifecycle policy or Yingxiang event protocol;
-- preserve current startup, account and local-first behavior;
-- introduce one authoritative interaction boundary for overlay/navigation/back/exit behavior;
-- prove browser and Android behavior through regression tests before Stage 1 merge.
+- this cross-project boundary is accepted;
+- current AromaSense/Yingxiang startup and core cupping path are manually confirmed as a usable baseline;
+- benchmark commands/data are recorded;
+- the LuckyBean dependency mismatch is recorded as a later Recognition-stage task, not silently upgraded during navigation work.
+
+Stage 1 must not modify recognition semantics, local database schema, Session lifecycle policy, or Yingxiang event protocol.

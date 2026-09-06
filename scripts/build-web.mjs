@@ -376,7 +376,8 @@ async function buildTarget(out, { android = false } = {}) {
     "luckybean-flat-theme.css",
     "release-0.1c.css",
     "import-0.1c.css",
-    "mobile-ocr-emergency.css"
+    "mobile-ocr-emergency.css",
+    "interaction-foundation.css"
   ]) {
     await cp(resolve(root, `app/ui/dom/${file}`), resolve(out, file));
   }

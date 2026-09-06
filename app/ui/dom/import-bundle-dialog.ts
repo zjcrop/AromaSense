@@ -1,5 +1,6 @@
 import type { ImportBundle, ImportSessionDraft } from "../../core/import-bundle";
 import { button, element } from "./dom-helpers";
+import { interactionAlert, manageInteractionLayer } from "../interaction-foundation";
 
 export interface ImportBundleDialogOptions {
   root: HTMLElement;
@@ -66,7 +67,7 @@ export function openImportBundleDialog(options: ImportBundleDialogOptions): void
       overlay.remove();
     } catch (error) {
       accept.disabled = false;
-      window.alert(error instanceof Error ? error.message : String(error));
+      await interactionAlert(error instanceof Error ? error.message : String(error));
     }
   });
   actions.append(
@@ -81,4 +82,5 @@ export function openImportBundleDialog(options: ImportBundleDialogOptions): void
   panel.append(actions);
   overlay.append(panel);
   options.root.append(overlay);
+  manageInteractionLayer(overlay, "dialog");
 }

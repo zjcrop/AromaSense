@@ -1,4 +1,5 @@
 import { button, element } from "./dom-helpers";
+import { manageInteractionLayer } from "../interaction-foundation";
 
 export interface ManualTextImportDialogOptions {
   root: HTMLElement;
@@ -50,5 +51,6 @@ export function openManualTextImportDialog(options: ManualTextImportDialogOption
   panel.append(header, hint, textarea, status, actions);
   overlay.append(panel);
   options.root.append(overlay);
+  manageInteractionLayer(overlay, "dialog");
   textarea.focus();
 }

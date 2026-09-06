@@ -1,623 +1,535 @@
-export const OVERLAY_KINDS = Object.freeze({
-  TRANSIENT: "transient",
-  DIALOG: "dialog",
-  MODAL: "modal",
-  SHEET: "sheet",
-  PAGE: "page"
-} as const);
+export type OverlayKind = "picker" | "popover" | "dialog" | "modal";
+export type BackSource = "android" | "native" | "pwa" | "programmatic" | "keyboard" | "browser";
+export type BackPriorityStep = "keyboard" | "picker" | "dialog" | "modal" | "workflow" | "child" | "topLevelRoot" | "appRoot";
 
-export type OverlayKind = typeof OVERLAY_KINDS[keyof typeof OVERLAY_KINDS];
-export type BackHandler = () => void | Promise<void>;
-export type Cleanup = () => void;
+export const BACK_PRIORITY: readonly BackPriorityStep[] = [
+  "keyboard", "picker", "dialog", "modal", "workflow", "child", "topLevelRoot", "appRoot"
+];
 
-interface EventTargetPort {
-  addEventListener(type: string, listener: EventListener): void;
-  removeEventListener(type: string, listener: EventListener): void;
+export function resolveBackStep(handlers: Readonly<Partial<Record<BackPriorityStep, () => boolean>>>): BackPriorityStep | undefined {
+  for (const step of BACK_PRIORITY) if (handlers[step]?.()) return step;
+  return undefined;
 }
 
-interface BackEntry {
-  id: string;
-  back: BackHandler;
-  canBack: () => boolean;
-  priority: number;
-  scope?: string;
-  leavesContext: boolean;
-  sequence: number;
-}
-
-interface OverlayEntry {
-  id: string;
+interface ManagedLayer {
   element: HTMLElement;
   kind: OverlayKind;
-  dismiss: BackHandler;
-  scrim: boolean;
-  priority: number;
   sequence: number;
+  zIndex: number;
 }
 
-export interface RootExitConfirmation {
-  dirty: boolean;
+export interface InteractionConfirmationOptions {
+  id?: string;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  hideCancel?: boolean;
   onConfirm(): void;
-  onCancel(): void;
+  onCancel?(): void;
 }
 
-export interface InteractionSnapshot {
-  page: string;
-  overlays: readonly { id: string; kind: OverlayKind; scrim: boolean; priority: number }[];
-  flows: readonly { id: string; priority: number; scope?: string; leavesContext: boolean }[];
-  children: readonly { id: string; scope?: string; leavesContext: boolean }[];
-  draft: { dirty: boolean; scopes: readonly string[] };
-  rootExit: { native: boolean; armed: boolean; confirmOpen: boolean };
-}
+const LAYER_SELECTOR = [
+  "[data-overlay-kind]",
+  "[role='listbox']:not([hidden])",
+  ".home-modal",
+  ".yingxiang-overlay",
+  ".blind-identity-editor",
+  ".batch-review",
+  ".manual-import",
+  ".import-bundle",
+  ".qr-scanner",
+  ".import-source",
+  ".cupping-count-dialog",
+  ".seg-review",
+  ".session-share",
+  ".yx-coffee-edit",
+  ".interaction-confirmation"
+].join(",");
 
-export interface AromaSenseNativeBridge {
-  exitApp(): void;
-}
+export class OverlayManager {
+  private readonly scrimId = "aromasenseInteractionScrim";
+  private readonly watchers = new Map<HTMLElement, readonly MutationObserver[]>();
+  private waitingForBody = false;
+  private sequence = 0;
+  private syncQueued = false;
 
-export interface RegisterBackOptions {
-  id?: string;
-  back: BackHandler;
-  canBack?: () => boolean;
-  priority?: number;
-  scope?: string;
-  leavesContext?: boolean;
-}
+  constructor(private readonly document: Document) {}
 
-export interface RegisterOverlayOptions {
-  id?: string;
-  element: HTMLElement;
-  kind?: OverlayKind;
-  dismiss?: BackHandler;
-  scrim?: boolean;
-  priority?: number;
-}
-
-export interface AromaSenseNavigationApi {
-  back(options?: { source?: string }): boolean;
-  systemBack(): boolean;
-  canGoBack(): boolean;
-  snapshot(): InteractionSnapshot;
-  registerOverlay(options: RegisterOverlayOptions): Cleanup;
-  registerFlowBack(options: RegisterBackOptions): Cleanup;
-  registerChildBack(options: RegisterBackOptions): Cleanup;
-  setDraftDirty(scope: string, dirty?: boolean): boolean;
-  clearDraft(scope: string): boolean;
-  isDraftDirty(scope?: string): boolean;
-}
-
-declare global {
-  interface Window {
-    AromaSenseNative?: AromaSenseNativeBridge;
-    AromaSenseNavigation?: AromaSenseNavigationApi;
-  }
-}
-
-function invoke(handler: BackHandler): void {
-  try {
-    const result = handler();
-    if (result && typeof (result as Promise<void>).catch === "function") {
-      void (result as Promise<void>).catch((error: unknown) => {
-        console.error("AromaSense navigation handler failed", error);
-      });
+  start(): void {
+    if (!this.document.body) {
+      if (!this.waitingForBody) {
+        this.waitingForBody = true;
+        this.document.addEventListener("DOMContentLoaded", () => {
+          this.waitingForBody = false;
+          this.start();
+        }, { once: true });
+      }
+      return;
     }
-  } catch (error) {
-    console.error("AromaSense navigation handler failed", error);
-  }
-}
-
-function isVisible(element: HTMLElement): boolean {
-  if (!element.isConnected || element.hidden || element.getAttribute("aria-hidden") === "true") return false;
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  return !style || (style.display !== "none" && style.visibility !== "hidden");
-}
-
-export class DraftGuard {
-  private readonly dirtyScopes = new Set<string>();
-  private beforeUnloadAttached = false;
-  private readonly boundBeforeUnload: EventListener;
-
-  constructor(private readonly windowTarget?: EventTargetPort) {
-    this.boundBeforeUnload = (event: Event): void => {
-      if (!this.isDirty()) return;
-      event.preventDefault();
-      (event as BeforeUnloadEvent).returnValue = "";
-    };
-  }
-
-  setDirty(scope = "default", dirty = true): boolean {
-    const key = scope || "default";
-    if (dirty) this.dirtyScopes.add(key);
-    else this.dirtyScopes.delete(key);
-    this.syncBeforeUnload();
-    return this.isDirty(key);
-  }
-
-  clear(scope = "default"): boolean {
-    return this.setDirty(scope, false);
-  }
-
-  isDirty(scope?: string): boolean {
-    return scope === undefined ? this.dirtyScopes.size > 0 : this.dirtyScopes.has(scope);
-  }
-
-  decision(scope?: string): "allow" | "confirm" {
-    return this.isDirty(scope) ? "confirm" : "allow";
-  }
-
-  snapshot(): { dirty: boolean; scopes: readonly string[] } {
-    return { dirty: this.isDirty(), scopes: [...this.dirtyScopes] };
+    this.synchronize();
   }
 
   dispose(): void {
-    if (this.beforeUnloadAttached) this.windowTarget?.removeEventListener("beforeunload", this.boundBeforeUnload);
-    this.beforeUnloadAttached = false;
-    this.dirtyScopes.clear();
+    for (const observers of this.watchers.values()) observers.forEach((observer) => observer.disconnect());
+    this.watchers.clear();
+    this.document.getElementById(this.scrimId)?.remove();
+    this.document.documentElement.classList.remove("interaction-layer-open");
   }
 
-  private syncBeforeUnload(): void {
-    const shouldAttach = this.isDirty();
-    if (!this.windowTarget || shouldAttach === this.beforeUnloadAttached) return;
-    if (shouldAttach) this.windowTarget.addEventListener("beforeunload", this.boundBeforeUnload);
-    else this.windowTarget.removeEventListener("beforeunload", this.boundBeforeUnload);
-    this.beforeUnloadAttached = shouldAttach;
-  }
-}
-
-export class FlowNavigation {
-  private entries: BackEntry[] = [];
-  private sequence = 0;
-
-  register(options: RegisterBackOptions): Cleanup {
-    const entry: BackEntry = {
-      id: options.id ?? `flow-${this.sequence + 1}`,
-      back: options.back,
-      canBack: options.canBack ?? (() => true),
-      priority: Number(options.priority ?? 0),
-      scope: options.scope,
-      leavesContext: options.leavesContext === true,
-      sequence: ++this.sequence
-    };
-    this.entries.push(entry);
-    return () => {
-      this.entries = this.entries.filter((candidate) => candidate !== entry);
-    };
-  }
-
-  peek(): BackEntry | undefined {
-    return this.entries
-      .filter((entry) => entry.canBack())
-      .sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)[0];
-  }
-
-  canBack(): boolean {
-    return Boolean(this.peek());
-  }
-
-  snapshot(): readonly { id: string; priority: number; scope?: string; leavesContext: boolean }[] {
-    return this.entries.map(({ id, priority, scope, leavesContext }) => ({ id, priority, scope, leavesContext }));
-  }
-}
-
-export class OverlayManager {
-  private entries: OverlayEntry[] = [];
-  private sequence = 0;
-  private readonly scrimId = "interactionScrim";
-
-  constructor(private readonly documentTarget?: Document) {}
-
-  start(): this {
-    this.ensureScrim();
-    this.syncScrim();
-    return this;
-  }
-
-  stop(): void {
-    this.entries = [];
-    this.syncScrim();
-  }
-
-  register(options: RegisterOverlayOptions): Cleanup {
-    const kind = options.kind ?? OVERLAY_KINDS.MODAL;
-    const entry: OverlayEntry = {
-      id: options.id ?? `overlay-${this.sequence + 1}`,
-      element: options.element,
-      kind,
-      dismiss: options.dismiss ?? (() => options.element.remove()),
-      scrim: options.scrim !== false && kind !== OVERLAY_KINDS.PAGE,
-      priority: Number(options.priority ?? 0),
-      sequence: ++this.sequence
-    };
-    this.normalize(entry.element, kind);
-    this.entries.push(entry);
-    this.syncScrim();
-    return () => {
-      this.entries = this.entries.filter((candidate) => candidate !== entry);
-      this.syncScrim();
-    };
-  }
-
-  top(kinds?: readonly OverlayKind[]): OverlayEntry | undefined {
-    const wanted = kinds ? new Set<OverlayKind>(kinds) : undefined;
-    return this.entries
-      .filter((entry) => isVisible(entry.element) && (!wanted || wanted.has(entry.kind)))
-      .sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)[0];
-  }
-
-  canDismiss(kinds?: readonly OverlayKind[]): boolean {
-    return Boolean(this.top(kinds));
-  }
-
-  dismissTop(kinds?: readonly OverlayKind[]): boolean {
-    const entry = this.top(kinds);
-    if (!entry) return false;
-    invoke(entry.dismiss);
-    this.entries = this.entries.filter((candidate) => candidate !== entry);
-    queueMicrotask(() => this.syncScrim());
-    return true;
-  }
-
-  snapshot(): readonly { id: string; kind: OverlayKind; scrim: boolean; priority: number }[] {
-    return this.entries
-      .filter((entry) => isVisible(entry.element))
-      .map(({ id, kind, scrim, priority }) => ({ id, kind, scrim, priority }));
-  }
-
-  showNotice(message: string): void {
-    const doc = this.documentTarget;
-    if (!doc?.body) return;
-    doc.getElementById("interactionNotice")?.remove();
-    const notice = doc.createElement("div");
-    notice.id = "interactionNotice";
-    notice.className = "interaction-notice";
-    notice.setAttribute("role", "status");
-    notice.setAttribute("aria-live", "polite");
-    notice.textContent = message;
-    doc.body.append(notice);
-    setTimeout(() => notice.remove(), 1800);
-  }
-
-  openSystemDialog(options: {
-    id: string;
-    title: string;
-    message: string;
-    confirmLabel: string;
-    cancelLabel?: string;
-    danger?: boolean;
-    onConfirm(): void;
-    onCancel?(): void;
-  }): Cleanup {
-    const doc = this.documentTarget;
-    if (!doc?.body) return () => undefined;
-
-    const overlay = doc.createElement("div");
-    overlay.id = options.id;
-    overlay.className = "interaction-system-overlay";
-    overlay.dataset.interactionKind = OVERLAY_KINDS.DIALOG;
-
-    const panel = doc.createElement("section");
-    panel.className = "interaction-system-dialog";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
-
-    const title = doc.createElement("h2");
-    title.textContent = options.title;
-    const message = doc.createElement("p");
-    message.textContent = options.message;
-    const actions = doc.createElement("div");
-    actions.className = "interaction-system-dialog__actions";
-    const cancel = doc.createElement("button");
-    cancel.type = "button";
-    cancel.textContent = options.cancelLabel ?? "取消";
-    const confirm = doc.createElement("button");
-    confirm.type = "button";
-    confirm.textContent = options.confirmLabel;
-    if (options.danger) confirm.dataset.danger = "true";
-    actions.append(cancel, confirm);
-    panel.append(title, message, actions);
-    overlay.append(panel);
-    doc.body.append(overlay);
-
-    let unregister: Cleanup = () => undefined;
-    let closed = false;
-    const close = (cancelled: boolean): void => {
-      if (closed) return;
-      closed = true;
-      unregister();
-      overlay.remove();
-      this.syncScrim();
-      if (cancelled) options.onCancel?.();
-    };
-    unregister = this.register({
-      id: options.id,
-      element: overlay,
-      kind: OVERLAY_KINDS.DIALOG,
-      priority: 1000,
-      dismiss: () => close(true)
-    });
-    cancel.onclick = () => close(true);
-    confirm.onclick = () => {
-      close(false);
-      options.onConfirm();
-    };
-    return () => close(true);
-  }
-
-  private ensureScrim(): HTMLElement | undefined {
-    const doc = this.documentTarget;
-    if (!doc?.body) return undefined;
-    let scrim = doc.getElementById(this.scrimId);
-    if (!scrim) {
-      scrim = doc.createElement("div");
-      scrim.id = this.scrimId;
-      scrim.className = "interaction-scrim";
-      scrim.hidden = true;
-      scrim.setAttribute("aria-hidden", "true");
-      doc.body.append(scrim);
+  manage(element: HTMLElement, kind?: OverlayKind): HTMLElement {
+    if (kind) element.dataset.overlayKind = kind;
+    element.dataset.overlayManaged = "true";
+    if (element.isConnected) {
+      this.watch(element);
+      this.synchronize();
+    } else {
+      queueMicrotask(() => {
+        if (!element.isConnected) return;
+        this.watch(element);
+        this.synchronize();
+      });
     }
+    return element;
+  }
+
+  synchronize(): readonly ManagedLayer[] {
+    this.syncQueued = false;
+    const layers = this.collect();
+    layers.forEach((layer) => this.watch(layer.element));
+    for (const element of this.watchers.keys()) {
+      if (!element.isConnected) this.unwatch(element);
+    }
+    const scrim = this.ensureScrim();
+    const hidden = layers.length === 0;
+    if (scrim.hidden !== hidden) scrim.hidden = hidden;
+    this.document.documentElement.classList.toggle("interaction-layer-open", layers.length > 0);
+    const minimumZ = layers.reduce((value, layer) => Math.min(value, layer.zIndex), 90);
+    const scrimZ = String(Math.max(0, minimumZ - 1));
+    if (scrim.style.getPropertyValue("--interaction-scrim-z") !== scrimZ) {
+      scrim.style.setProperty("--interaction-scrim-z", scrimZ);
+    }
+    layers.forEach((layer, index) => {
+      layer.element.dataset.overlayUnderlay = String(index < layers.length - 1);
+    });
+    return layers;
+  }
+
+  top(kind?: OverlayKind | readonly OverlayKind[]): HTMLElement | undefined {
+    return this.topLayer(kind)?.element;
+  }
+
+  dismiss(kind: OverlayKind | readonly OverlayKind[], reason = "back"): boolean {
+    const layer = this.topLayer(kind);
+    return layer ? this.dismissLayer(layer, reason) : false;
+  }
+
+  dismissTop(reason = "back"): boolean {
+    const layer = this.topLayer();
+    return layer ? this.dismissLayer(layer, reason) : false;
+  }
+
+  snapshot(): readonly Readonly<{ id: string; kind: OverlayKind; zIndex: number }>[] {
+    return this.synchronize().map((layer) => ({
+      id: layer.element.dataset.overlayId || layer.element.id || layer.element.classList[0] || "",
+      kind: layer.kind,
+      zIndex: layer.zIndex
+    }));
+  }
+
+  openConfirmation(options: InteractionConfirmationOptions): HTMLElement {
+    const previous = options.id ? this.document.querySelector<HTMLElement>(`[data-overlay-id="${CSS.escape(options.id)}"]`) : undefined;
+    previous?.remove();
+    const overlay = this.document.createElement("div");
+    overlay.className = "interaction-confirmation";
+    overlay.dataset.overlayId = options.id || `confirmation-${Date.now()}`;
+    overlay.dataset.overlayKind = "dialog";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    const panel = this.document.createElement("section");
+    panel.className = "interaction-confirmation__panel";
+    const heading = this.document.createElement("h2");
+    heading.className = "interaction-confirmation__title";
+    heading.textContent = options.title;
+    const message = this.document.createElement("p");
+    message.className = "interaction-confirmation__message";
+    message.textContent = options.message;
+    const actions = this.document.createElement("div");
+    actions.className = "interaction-confirmation__actions";
+    const cancel = this.document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "interaction-confirmation__cancel";
+    cancel.textContent = options.cancelLabel || "取消";
+    const confirm = this.document.createElement("button");
+    confirm.type = "button";
+    confirm.className = `interaction-confirmation__confirm${options.danger ? " is-danger" : ""}`;
+    confirm.textContent = options.confirmLabel || "确定";
+    const close = (): void => { overlay.remove(); options.onCancel?.(); };
+    cancel.addEventListener("click", close);
+    confirm.addEventListener("click", () => options.onConfirm());
+    overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) close(); });
+    overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+    overlay.addEventListener("aromasense:request-overlay-dismiss", (event) => { event.preventDefault(); close(); });
+    if (!options.hideCancel) actions.append(cancel);
+    actions.append(confirm);
+    panel.append(heading, message, actions);
+    overlay.append(panel);
+    this.document.body.append(overlay);
+    this.manage(overlay, "dialog");
+    return overlay;
+  }
+
+  private ensureScrim(): HTMLElement {
+    let scrim = this.document.getElementById(this.scrimId);
+    if (scrim) return scrim;
+    scrim = this.document.createElement("div");
+    scrim.id = this.scrimId;
+    scrim.className = "app-interaction-scrim";
+    scrim.hidden = true;
+    scrim.setAttribute("aria-hidden", "true");
+    this.document.body.append(scrim);
     return scrim;
   }
 
-  private normalize(element: HTMLElement, kind: OverlayKind): void {
-    if (kind === OVERLAY_KINDS.PAGE) return;
-    element.dataset.interactionManaged = "true";
-    element.style.setProperty("background", "transparent", "important");
-    element.style.setProperty("backdrop-filter", "none", "important");
-    element.style.setProperty("-webkit-backdrop-filter", "none", "important");
+  private queueSynchronize(): void {
+    if (this.syncQueued) return;
+    this.syncQueued = true;
+    queueMicrotask(() => this.synchronize());
   }
 
-  private syncScrim(): void {
-    const scrim = this.ensureScrim();
-    if (!scrim) return;
-    const visible = this.entries.some((entry) => entry.scrim && isVisible(entry.element));
-    scrim.hidden = !visible;
-    scrim.setAttribute("aria-hidden", visible ? "false" : "true");
+  private watch(element: HTMLElement): void {
+    if (this.watchers.has(element)) return;
+    const parent = element.parentElement;
+    if (!parent) return;
+    const attributes = new MutationObserver(() => this.queueSynchronize());
+    attributes.observe(element, { attributes: true, attributeFilter: ["class", "hidden", "style"] });
+    const removal = new MutationObserver(() => {
+      if (element.isConnected) return;
+      this.unwatch(element);
+      this.queueSynchronize();
+    });
+    removal.observe(parent, { childList: true });
+    this.watchers.set(element, [attributes, removal]);
+  }
+
+  private unwatch(element: HTMLElement): void {
+    this.watchers.get(element)?.forEach((observer) => observer.disconnect());
+    this.watchers.delete(element);
+  }
+
+  private visible(element: Element): element is HTMLElement {
+    const HTMLElementClass = this.document.defaultView?.HTMLElement;
+    if (!HTMLElementClass || !(element instanceof HTMLElementClass) || element.hidden || !element.isConnected) return false;
+    const style = this.document.defaultView?.getComputedStyle(element);
+    return Boolean(style && style.display !== "none" && style.visibility !== "hidden" && !(style.opacity === "0" && style.pointerEvents === "none"));
+  }
+
+  private kindFor(element: HTMLElement): OverlayKind {
+    const declared = element.dataset.overlayKind as OverlayKind | undefined;
+    if (declared && ["picker", "popover", "dialog", "modal"].includes(declared)) return declared;
+    if (element.matches("[role='listbox']")) return "picker";
+    if (element.matches("[popover],[data-popover]")) return "popover";
+    if (element.matches(".batch-review,.seg-review,.yingxiang-overlay")) return "modal";
+    return "dialog";
+  }
+
+  private zIndexFor(element: HTMLElement): number {
+    const value = Number.parseInt(this.document.defaultView?.getComputedStyle(element).zIndex || "", 10);
+    return Number.isFinite(value) ? value : 90;
+  }
+
+  private collect(): ManagedLayer[] {
+    const seen = new Set<HTMLElement>();
+    return [...this.document.querySelectorAll(LAYER_SELECTOR)].filter((element): element is HTMLElement => {
+      if (element.id === this.scrimId || !this.visible(element) || seen.has(element)) return false;
+      const parentLayer = element.parentElement?.closest(LAYER_SELECTOR);
+      if (parentLayer) return false;
+      seen.add(element);
+      if (!element.dataset.overlaySequence) element.dataset.overlaySequence = String(++this.sequence);
+      element.dataset.overlayManaged = "true";
+      element.dataset.overlayKind = this.kindFor(element);
+      if (!element.matches("[role='listbox']")) element.dataset.interactionBackdrop = "true";
+      return true;
+    }).map((element) => ({
+      element,
+      kind: element.dataset.overlayKind as OverlayKind,
+      sequence: Number(element.dataset.overlaySequence) || 0,
+      zIndex: this.zIndexFor(element)
+    })).sort((left, right) => left.zIndex - right.zIndex || left.sequence - right.sequence);
+  }
+
+  private topLayer(kind?: OverlayKind | readonly OverlayKind[]): ManagedLayer | undefined {
+    const allowed = kind ? new Set(Array.isArray(kind) ? kind : [kind]) : undefined;
+    return this.synchronize().filter((layer) => !allowed || allowed.has(layer.kind)).at(-1);
+  }
+
+  private dismissControl(root: HTMLElement): HTMLElement | undefined {
+    const controls = [...root.querySelectorAll<HTMLElement>("button,[role='button']")].filter((control) => this.visible(control) && !(control as HTMLButtonElement).disabled);
+    return controls.find((control) => control.hasAttribute("data-overlay-dismiss"))
+      || controls.find((control) => /(?:^|__)(?:close|cancel|back)$/.test(control.className) || control.getAttribute("aria-label") === "关闭")
+      || controls.find((control) => /^(?:关闭|取消|返回|暂存退出|退出编辑)$/.test(control.textContent?.replace(/\s+/g, " ").trim() || ""));
+  }
+
+  private dismissLayer(layer: ManagedLayer, reason: string): boolean {
+    const CustomEventClass = this.document.defaultView?.CustomEvent;
+    if (CustomEventClass) {
+      const request = new CustomEventClass("aromasense:request-overlay-dismiss", { cancelable: true, detail: { reason } });
+      layer.element.dispatchEvent(request);
+      if (request.defaultPrevented || !layer.element.isConnected) { this.queueSynchronize(); return true; }
+    }
+    const control = this.dismissControl(layer.element);
+    if (control) control.click();
+    else if (layer.kind === "picker" || layer.kind === "popover") layer.element.hidden = true;
+    else if (!(layer.element.matches(".seg-review") && /识别中/.test(layer.element.textContent || ""))) layer.element.remove();
+    this.document.dispatchEvent(new (this.document.defaultView?.CustomEvent || CustomEvent)("aromasense:overlay-dismissed", {
+      detail: { id: layer.element.dataset.overlayId || layer.element.classList[0] || "", kind: layer.kind, reason }
+    }));
+    this.queueSynchronize();
+    return true;
   }
 }
 
-export class RootExitGuard {
-  private armedUntil = 0;
-  private confirmOpen = false;
+export interface NavigationEntry {
+  id: string;
+  previous(): void | boolean;
+  active?(): boolean;
+  canGoBack?(): boolean;
+}
 
-  constructor(private readonly options: {
-    draftGuard: DraftGuard;
-    notify(message: string): void;
-    openConfirmation(options: RootExitConfirmation): void;
-    exit(): void;
-    isNative(): boolean;
-    clock?: () => number;
-    windowMs?: number;
-  }) {}
-
-  canHandle(): boolean {
-    return this.options.isNative();
+function invokeEntry(entries: readonly NavigationEntry[]): boolean {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.active && !entry.active()) continue;
+    if (entry.canGoBack && !entry.canGoBack()) continue;
+    return entry.previous() !== false;
   }
+  return false;
+}
 
-  back(): boolean {
-    if (!this.canHandle()) return false;
-    if (this.confirmOpen) return true;
-    const now = (this.options.clock ?? Date.now)();
-    const windowMs = this.options.windowMs ?? 2000;
-    if (!this.armedUntil || now > this.armedUntil) {
-      this.armedUntil = now + windowMs;
-      this.options.notify("再按一次返回以打开退出确认");
-      return true;
-    }
-    this.armedUntil = 0;
-    this.confirmOpen = true;
-    this.options.openConfirmation({
-      dirty: this.options.draftGuard.decision() === "confirm",
-      onConfirm: () => {
-        this.confirmOpen = false;
-        this.options.exit();
-      },
-      onCancel: () => { this.confirmOpen = false; }
-    });
-    return true;
-  }
+export class FlowNavigation {
+  private readonly entries: NavigationEntry[] = [];
 
-  reset(): void {
-    this.armedUntil = 0;
-    this.confirmOpen = false;
-  }
-
-  snapshot(): { native: boolean; armed: boolean; confirmOpen: boolean } {
-    const now = (this.options.clock ?? Date.now)();
-    return {
-      native: this.canHandle(),
-      armed: Boolean(this.armedUntil && now <= this.armedUntil),
-      confirmOpen: this.confirmOpen
+  register(entry: NavigationEntry): () => void {
+    this.entries.push(entry);
+    return () => {
+      const index = this.entries.indexOf(entry);
+      if (index >= 0) this.entries.splice(index, 1);
     };
   }
+
+  previous(): boolean { return invokeEntry(this.entries); }
+  canGoBack(): boolean { return this.entries.some((entry) => (!entry.active || entry.active()) && (!entry.canGoBack || entry.canGoBack())); }
+  snapshot(): Readonly<{ depth: number }> { return { depth: this.entries.length }; }
+}
+
+export interface TopLevelRootAdapter {
+  current(): string;
+  isAtRoot(): boolean;
+  backToRoot(): void | boolean;
 }
 
 export class NavigationManager {
-  private childEntries: BackEntry[] = [];
-  private childSequence = 0;
-  private activePage = "setup";
+  private readonly children: NavigationEntry[] = [];
+  private root?: TopLevelRootAdapter;
 
-  constructor(private readonly options: {
-    overlayManager: OverlayManager;
-    flowNavigation: FlowNavigation;
-    draftGuard: DraftGuard;
-    rootExitGuard: RootExitGuard;
-    documentTarget?: Document;
-    confirmDraftLeave?: (options: { scope?: string; onConfirm(): void }) => void;
-  }) {}
-
-  setActivePage(page: string): void {
-    if (page) this.activePage = page;
-  }
-
-  registerChildBack(options: RegisterBackOptions): Cleanup {
-    const entry: BackEntry = {
-      id: options.id ?? `child-${this.childSequence + 1}`,
-      back: options.back,
-      canBack: options.canBack ?? (() => true),
-      priority: Number(options.priority ?? 0),
-      scope: options.scope,
-      leavesContext: options.leavesContext === true,
-      sequence: ++this.childSequence
-    };
-    this.childEntries.push(entry);
+  setTopLevelRoot(adapter: TopLevelRootAdapter): void { this.root = adapter; }
+  registerChild(entry: NavigationEntry): () => void {
+    this.children.push(entry);
     return () => {
-      this.childEntries = this.childEntries.filter((candidate) => candidate !== entry);
+      const index = this.children.indexOf(entry);
+      if (index >= 0) this.children.splice(index, 1);
     };
   }
+  backFromChild(): boolean { return invokeEntry(this.children); }
+  backToTopLevelRoot(): boolean {
+    if (!this.root || this.root.isAtRoot()) return false;
+    return this.root.backToRoot() !== false;
+  }
+  isAtAppRoot(): boolean { return this.root?.isAtRoot() ?? false; }
+  snapshot(): Readonly<{ screen: string; childDepth: number; topLevelHistoryDepth: 0 }> {
+    return { screen: this.root?.current() || "", childDepth: this.children.length, topLevelHistoryDepth: 0 };
+  }
+}
 
-  canGoBack(): boolean {
-    if (this.options.overlayManager.canDismiss([
-      OVERLAY_KINDS.TRANSIENT,
-      OVERLAY_KINDS.DIALOG,
-      OVERLAY_KINDS.MODAL,
-      OVERLAY_KINDS.SHEET
-    ])) return true;
-    if (this.options.flowNavigation.canBack()) return true;
-    if (this.topChild()) return true;
-    return this.options.rootExitGuard.canHandle();
+export interface RootExitGuardOptions {
+  windowMs?: number;
+  guardedSources?: readonly BackSource[];
+  onHint(): void;
+  onConfirm(): void;
+}
+
+export class RootExitGuard {
+  private lastBackAt?: number;
+  readonly windowMs: number;
+  private readonly guardedSources: ReadonlySet<BackSource>;
+
+  constructor(private readonly options: RootExitGuardOptions) {
+    this.windowMs = options.windowMs ?? 2200;
+    this.guardedSources = new Set(options.guardedSources ?? ["android", "native", "pwa", "programmatic"]);
   }
 
-  back(_options: { source?: string } = {}): boolean {
-    if (this.handleKeyboard()) return true;
-    const overlays = this.options.overlayManager;
-    if (overlays.dismissTop([OVERLAY_KINDS.TRANSIENT])) return true;
-    if (overlays.dismissTop([OVERLAY_KINDS.DIALOG])) return true;
-    if (overlays.dismissTop([OVERLAY_KINDS.MODAL, OVERLAY_KINDS.SHEET])) return true;
-
-    const flow = this.options.flowNavigation.peek();
-    if (flow) return this.runEntry(flow);
-    const child = this.topChild();
-    if (child) return this.runEntry(child);
-    return this.options.rootExitGuard.back();
-  }
-
-  snapshot(): InteractionSnapshot {
-    return {
-      page: this.activePage,
-      overlays: this.options.overlayManager.snapshot(),
-      flows: this.options.flowNavigation.snapshot(),
-      children: this.childEntries.map(({ id, scope, leavesContext }) => ({ id, scope, leavesContext })),
-      draft: this.options.draftGuard.snapshot(),
-      rootExit: this.options.rootExitGuard.snapshot()
-    };
-  }
-
-  private topChild(): BackEntry | undefined {
-    return this.childEntries
-      .filter((entry) => entry.canBack())
-      .sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)[0];
-  }
-
-  private runEntry(entry: BackEntry): boolean {
-    if (entry.leavesContext && this.options.draftGuard.decision(entry.scope) === "confirm") {
-      this.options.confirmDraftLeave?.({ scope: entry.scope, onConfirm: () => invoke(entry.back) });
+  request(source: BackSource, now = Date.now()): boolean {
+    if (!this.guardedSources.has(source)) return false;
+    if (this.lastBackAt !== undefined && now - this.lastBackAt <= this.windowMs) {
+      this.lastBackAt = undefined;
+      this.options.onConfirm();
       return true;
     }
-    invoke(entry.back);
+    this.lastBackAt = now;
+    this.options.onHint();
     return true;
   }
 
-  private handleKeyboard(): boolean {
-    const active = this.options.documentTarget?.activeElement;
-    if (!active || typeof HTMLElement === "undefined" || !(active instanceof HTMLElement)) return false;
-    if (active === this.options.documentTarget?.body) return false;
-    const tag = active.tagName.toLowerCase();
-    if (!["input", "textarea", "select"].includes(tag) && !active.isContentEditable) return false;
+  reset(): void { this.lastBackAt = undefined; }
+  snapshot(now = Date.now()): Readonly<{ armed: boolean; windowMs: number }> {
+    return { armed: this.lastBackAt !== undefined && now - this.lastBackAt <= this.windowMs, windowMs: this.windowMs };
+  }
+}
+
+function isEditable(element: Element | null, document: Document): element is HTMLElement {
+  const HTMLElementClass = document.defaultView?.HTMLElement;
+  if (!HTMLElementClass || !(element instanceof HTMLElementClass)) return false;
+  if (element.isContentEditable || element.matches("textarea,select")) return true;
+  if (!element.matches("input")) return false;
+  return !["button", "checkbox", "radio", "range", "submit", "reset", "file", "color"].includes((element as HTMLInputElement).type.toLowerCase());
+}
+
+export class BackGestureAdapter {
+  constructor(
+    private readonly document: Document,
+    private readonly overlays: OverlayManager,
+    private readonly flows: FlowNavigation,
+    private readonly navigation: NavigationManager,
+    private readonly rootExit: RootExitGuard
+  ) {}
+
+  handle({ source = "programmatic" as BackSource } = {}): boolean {
+    let rootStep = false;
+    const step = resolveBackStep({
+      keyboard: () => this.dismissKeyboard(),
+      picker: () => this.overlays.dismiss(["picker", "popover"]),
+      dialog: () => this.overlays.dismiss("dialog"),
+      modal: () => this.overlays.dismiss("modal"),
+      workflow: () => this.flows.previous(),
+      child: () => this.navigation.backFromChild(),
+      topLevelRoot: () => this.navigation.backToTopLevelRoot(),
+      appRoot: () => {
+        if (!this.navigation.isAtAppRoot()) return false;
+        rootStep = true;
+        return this.rootExit.request(source);
+      }
+    });
+    if (step && !rootStep) this.rootExit.reset();
+    return step !== undefined;
+  }
+
+  handleAndroidBack(): boolean { return this.handle({ source: "android" }); }
+  handlePwaBack(): boolean { return this.handle({ source: "pwa" }); }
+  handleBrowserBack(): false { return false; }
+
+  private dismissKeyboard(): boolean {
+    const active = this.document.activeElement;
+    if (!isEditable(active, this.document)) return false;
     active.blur();
     return true;
   }
 }
 
-export class BackGestureAdapter {
-  constructor(private readonly navigation: NavigationManager) {}
-
-  back(source = "system"): boolean {
-    return this.navigation.back({ source });
-  }
+export interface InteractionFoundation {
+  overlays: OverlayManager;
+  navigation: NavigationManager;
+  flows: FlowNavigation;
+  back: BackGestureAdapter;
+  rootExit: RootExitGuard;
 }
 
-export class InteractionFoundation {
-  readonly overlayManager: OverlayManager;
-  readonly flowNavigation: FlowNavigation;
-  readonly draftGuard: DraftGuard;
-  readonly rootExitGuard: RootExitGuard;
-  readonly navigationManager: NavigationManager;
-  readonly backGesture: BackGestureAdapter;
-  readonly api: AromaSenseNavigationApi;
+type InteractionGlobals = Window & {
+  AromaSenseInteraction?: InteractionFoundation;
+  AromaSenseOverlayManager?: OverlayManager;
+  OverlayManager?: OverlayManager;
+  NavigationManager?: NavigationManager;
+  FlowNavigation?: FlowNavigation;
+  BackGestureAdapter?: BackGestureAdapter;
+  RootExitGuard?: RootExitGuard;
+  AromaSenseBackGestureAdapter?: BackGestureAdapter;
+  AromaSenseNative?: { exitApp?(): void };
+};
 
-  constructor(options: {
-    documentTarget?: Document;
-    windowTarget?: Window;
-    isNative?: () => boolean;
-    exit?: () => void;
-  } = {}) {
-    const documentTarget = options.documentTarget ?? (typeof document === "undefined" ? undefined : document);
-    const windowTarget = options.windowTarget ?? (typeof window === "undefined" ? undefined : window);
+export function installInteractionFoundation(document: Document = globalThis.document): InteractionFoundation {
+  const globals = document.defaultView as InteractionGlobals;
+  if (globals.AromaSenseInteraction) return globals.AromaSenseInteraction;
+  const overlays = new OverlayManager(document);
+  const navigation = new NavigationManager();
+  const flows = new FlowNavigation();
+  let hintTimer: number | undefined;
+  const showHint = (): void => {
+    let hint = document.getElementById("aromasenseBackHint");
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.id = "aromasenseBackHint";
+      hint.className = "interaction-back-hint";
+      hint.setAttribute("role", "status");
+      document.body.append(hint);
+    }
+    hint.textContent = "再次返回可选择退出";
+    hint.classList.add("is-visible");
+    if (hintTimer !== undefined) globals.clearTimeout(hintTimer);
+    hintTimer = globals.setTimeout(() => hint?.classList.remove("is-visible"), 1800);
+  };
+  const requestExit = (): void => {
+    document.querySelector<HTMLElement>("[data-overlay-id='root-exit-confirmation']")?.remove();
+    overlays.synchronize();
+    document.dispatchEvent(new CustomEvent("aromasense:explicit-exit-requested"));
+    globals.AromaSenseNative?.exitApp?.();
+  };
+  const rootExit = new RootExitGuard({
+    onHint: showHint,
+    onConfirm: () => {
+      overlays.openConfirmation({
+        id: "root-exit-confirmation",
+        title: "退出 AromaSense？",
+        message: "已保存的数据会保留在本机。",
+        confirmLabel: "退出",
+        danger: true,
+        onConfirm: requestExit
+      });
+    }
+  });
+  const back = new BackGestureAdapter(document, overlays, flows, navigation, rootExit);
+  const foundation = { overlays, navigation, flows, back, rootExit };
+  globals.AromaSenseInteraction = foundation;
+  globals.AromaSenseOverlayManager = overlays;
+  globals.OverlayManager = overlays;
+  globals.NavigationManager = navigation;
+  globals.FlowNavigation = flows;
+  globals.BackGestureAdapter = back;
+  globals.RootExitGuard = rootExit;
+  globals.AromaSenseBackGestureAdapter = back;
+  overlays.start();
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && back.handle({ source: "keyboard" })) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+  document.addEventListener("pointerdown", () => rootExit.reset(), true);
+  return foundation;
+}
 
-    this.overlayManager = new OverlayManager(documentTarget).start();
-    this.flowNavigation = new FlowNavigation();
-    this.draftGuard = new DraftGuard(windowTarget);
+export function manageInteractionLayer<T extends HTMLElement>(element: T, kind?: OverlayKind): T {
+  installInteractionFoundation(element.ownerDocument).overlays.manage(element, kind);
+  return element;
+}
 
-    const isNative = options.isNative ?? (() => Boolean(windowTarget?.AromaSenseNative?.exitApp));
-    const exit = options.exit ?? (() => windowTarget?.AromaSenseNative?.exitApp());
-    this.rootExitGuard = new RootExitGuard({
-      draftGuard: this.draftGuard,
-      isNative,
-      exit,
-      notify: (message: string) => this.overlayManager.showNotice(message),
-      openConfirmation: ({ dirty, onConfirm, onCancel }: RootExitConfirmation) => {
-        this.overlayManager.openSystemDialog({
-          id: "interaction-root-exit-confirm",
-          title: "退出香迹？",
-          message: dirty ? "当前仍有未保存修改。退出应用可能丢失这些编辑内容。" : "确认退出应用。",
-          confirmLabel: "退出",
-          cancelLabel: "取消",
-          danger: true,
-          onConfirm,
-          onCancel
-        });
-      }
-    });
+export function interactionConfirm(options: Omit<InteractionConfirmationOptions, "onConfirm" | "onCancel">): Promise<boolean> {
+  const foundation = installInteractionFoundation();
+  let layer: HTMLElement | undefined;
+  return new Promise<boolean>((resolve) => {
+    layer = foundation.overlays.openConfirmation({ ...options, onConfirm: () => resolve(true), onCancel: () => resolve(false) });
+  }).finally(() => layer?.remove());
+}
 
-    this.navigationManager = new NavigationManager({
-      overlayManager: this.overlayManager,
-      flowNavigation: this.flowNavigation,
-      draftGuard: this.draftGuard,
-      rootExitGuard: this.rootExitGuard,
-      documentTarget,
-      confirmDraftLeave: ({ scope, onConfirm }: { scope?: string; onConfirm(): void }) => {
-        this.overlayManager.openSystemDialog({
-          id: "interaction-draft-confirm",
-          title: "存在未保存修改",
-          message: scope
-            ? `“${scope}”尚未保存。继续返回会离开当前编辑内容。`
-            : "当前编辑尚未保存。继续返回会离开当前编辑内容。",
-          confirmLabel: "继续返回",
-          cancelLabel: "留在这里",
-          danger: true,
-          onConfirm,
-          onCancel: () => undefined
-        });
-      }
-    });
-    this.backGesture = new BackGestureAdapter(this.navigationManager);
-
-    const api: AromaSenseNavigationApi = {
-      back: (backOptions: { source?: string } = {}) => this.navigationManager.back(backOptions),
-      systemBack: () => this.backGesture.back("android-system"),
-      canGoBack: () => this.navigationManager.canGoBack(),
-      snapshot: () => this.navigationManager.snapshot(),
-      registerOverlay: (registration: RegisterOverlayOptions) => this.overlayManager.register(registration),
-      registerFlowBack: (registration: RegisterBackOptions) => this.flowNavigation.register(registration),
-      registerChildBack: (registration: RegisterBackOptions) => this.navigationManager.registerChildBack(registration),
-      setDraftDirty: (scope: string, dirty = true) => this.draftGuard.setDirty(scope, dirty),
-      clearDraft: (scope: string) => this.draftGuard.clear(scope),
-      isDraftDirty: (scope?: string) => this.draftGuard.isDirty(scope)
-    };
-    this.api = Object.freeze(api);
-  }
-
-  dispose(): void {
-    this.draftGuard.dispose();
-    this.overlayManager.stop();
-  }
+export async function interactionAlert(message: string, title = "提示"): Promise<void> {
+  await interactionConfirm({ title, message, confirmLabel: "知道了", hideCancel: true });
 }

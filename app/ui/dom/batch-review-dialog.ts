@@ -1,4 +1,5 @@
 import { button, element } from "./dom-helpers";
+import { manageInteractionLayer } from "../interaction-foundation";
 
 export interface BatchReviewField {
   key: string;
@@ -231,6 +232,7 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   panel.append(footer);
   overlay.append(panel);
   options.root.append(overlay);
+  manageInteractionLayer(overlay, "modal");
   nameInput.focus();
 
   return {

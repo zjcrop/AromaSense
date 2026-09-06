@@ -1,4 +1,5 @@
 import { button, element } from "./dom-helpers";
+import { manageInteractionLayer } from "../interaction-foundation";
 
 export interface ImportSourceDialogOptions {
   root: HTMLElement;
@@ -115,5 +116,6 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
   panel.append(header, grid, linkForm);
   overlay.append(panel);
   options.root.append(overlay);
+  manageInteractionLayer(overlay, "dialog");
   return { close };
 }

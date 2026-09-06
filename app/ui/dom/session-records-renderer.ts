@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import type { SessionRecordSummary } from "../../storage/session-records-reader";
 import { button, clearElement, element } from "./dom-helpers";
+import { interactionAlert, interactionConfirm, manageInteractionLayer } from "../interaction-foundation";
 
 export interface SessionRecordsRendererOptions {
   records: readonly SessionRecordSummary[];
@@ -407,13 +408,14 @@ export class SessionRecordsRenderer {
       card.append(input, qr, actions);
       overlay.append(card);
       this.root.append(overlay);
+      manageInteractionLayer(overlay, "dialog");
     } catch (error) {
-      window.alert(`分享失败：${error instanceof Error ? error.message : String(error)}`);
+      await interactionAlert(`分享失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private async deleteRecords(ids: readonly string[]): Promise<void> {
-    if (!ids.length || !window.confirm(`删除 ${ids.length} 条杯测记录？`)) return;
+    if (!ids.length || !await interactionConfirm({ title: "删除杯测记录？", message: `将删除 ${ids.length} 条杯测记录。`, confirmLabel: "删除", danger: true })) return;
     await this.options.onDelete(ids);
     for (const id of ids) this.selected.delete(id);
   }

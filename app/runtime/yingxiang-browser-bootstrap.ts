@@ -8,6 +8,7 @@ import { YingxiangConsoleRenderer } from "../ui/dom/yingxiang-console-renderer";
 import type { YingxiangDeliveryService } from "../core/yingxiang-delivery-service";
 import { YingxiangHostLoginRenderer } from "../ui/dom/yingxiang-host-login-renderer";
 import { YingxiangJoinRenderer } from "../ui/dom/yingxiang-join-renderer";
+import { manageInteractionLayer } from "../ui/interaction-foundation";
 
 function installOverlayStyles(): void {
   if (document.head.querySelector("style[data-yingxiang-overlay]")) return;
@@ -16,7 +17,7 @@ function installOverlayStyles(): void {
   style.textContent = `
     .yingxiang-entry{min-width:0!important;min-height:26px!important;margin:0!important;padding:3px 1px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#d6ad63!important;font-size:11px!important;font-weight:700!important;letter-spacing:.08em!important;white-space:nowrap!important}
     .yingxiang-entry:hover,.yingxiang-entry:focus-visible{color:#ead3a6!important;outline:none!important}
-    .yingxiang-overlay{position:fixed;inset:0;z-index:2300;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.78)}
+    .yingxiang-overlay{position:fixed;inset:0;z-index:2300;display:grid;place-items:center;padding:18px;background:transparent}
     .yingxiang-overlay__panel{width:min(820px,calc(100vw - 28px));max-height:92dvh;overflow:auto;border:1px solid rgba(214,173,99,.28);border-radius:14px;background:#151515;box-shadow:0 18px 48px rgba(0,0,0,.48)}
     @media(max-width:620px){.yingxiang-overlay{padding:8px}.yingxiang-overlay__panel{width:calc(100vw - 16px);max-height:95dvh;border-radius:10px}}
   `;
@@ -118,7 +119,9 @@ export class YingxiangBrowserBootstrap {
     overlay.append(panel);
     overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) this.closeOverlay(); });
     overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") this.closeOverlay(); });
+    overlay.addEventListener("aromasense:request-overlay-dismiss", (event) => { event.preventDefault(); this.closeOverlay(); });
     document.body.append(overlay);
+    manageInteractionLayer(overlay, "modal");
     this.overlay = overlay;
     return { overlay, panel };
   }

@@ -18,6 +18,7 @@ import {
   type SegmentationReviewRegion
 } from "../../core/sample-segmentation-review";
 import type { RecognizedPage } from "../../core/sample-recognition-service";
+import { manageInteractionLayer } from "../interaction-foundation";
 import { button, element } from "./dom-helpers";
 
 export interface SegmentationReviewDialogOptions {
@@ -34,7 +35,7 @@ function installStyles(): void {
   const style = document.createElement("style");
   style.dataset.aromasenseSegmentationReview = "true";
   style.textContent = `
-    .seg-review{position:fixed;inset:0;z-index:1900;display:grid;place-items:center;padding:16px;background:rgba(0,0,0,.80)}
+    .seg-review{position:fixed;inset:0;z-index:1900;display:grid;place-items:center;padding:16px;background:transparent}
     .seg-review__panel{width:min(980px,100%);max-height:min(90vh,860px);overflow:auto;border:1px solid rgba(185,153,90,.35);border-radius:14px;padding:16px;background:#171717;color:#f1ede4;box-shadow:0 18px 42px rgba(0,0,0,.48)}
     .seg-review__header{display:flex;align-items:start;justify-content:space-between;gap:16px;margin-bottom:12px}
     .seg-review__title{margin:0;color:#d6ad63;font-size:17px;letter-spacing:.05em}.seg-review__note{margin:5px 0 0;color:#9e988d;font-size:11px;line-height:1.5}
@@ -533,7 +534,12 @@ export function openSegmentationReviewDialog(options: SegmentationReviewDialogOp
     overlay.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !busy()) finish(basePage);
     });
+    overlay.addEventListener("aromasense:request-overlay-dismiss", (event) => {
+      event.preventDefault();
+      if (!busy()) finish(basePage);
+    });
     options.root.append(overlay);
+    manageInteractionLayer(overlay, "modal");
     overlay.tabIndex = -1;
     overlay.focus();
     render();

@@ -5,6 +5,7 @@ import { scoreProfileForMetadata } from "../../core/cupping-score-profile";
 import { calculateCuppingScore } from "./final-assessment-renderer";
 import { renderRadarSummary } from "./radar-renderer";
 import { button, clearElement, element } from "./dom-helpers";
+import { interactionAlert } from "../interaction-foundation";
 import { comparisonFieldKey, comparisonFields, normalizeComparisonBundle, type ComparisonBundle, type ComparisonMapping } from "../../core/comparison-bundle";
 
 export interface RecordReplayComparisonOptions {
@@ -115,7 +116,7 @@ export class RecordReplayRenderer {
       if (!bundle) throw new Error("不支持的 Comparison/Submission Bundle");
       this.comparison = await this.comparisonOptions.onImport(bundle);
       this.render();
-    } catch (error) { window.alert(`加载对比失败：${error instanceof Error ? error.message : String(error)}`); }
+    } catch (error) { await interactionAlert(`加载对比失败：${error instanceof Error ? error.message : String(error)}`); }
   }
 
   private async clearComparison(): Promise<void> {

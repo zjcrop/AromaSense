@@ -33,6 +33,7 @@ import { openImportBundleDialog } from "./import-bundle-dialog";
 import { openImportSourceDialog } from "./import-source-dialog";
 import { openManualTextImportDialog } from "./manual-text-import-dialog";
 import { openQrScannerDialog } from "./qr-scanner-dialog";
+import { interactionConfirm, manageInteractionLayer } from "../interaction-foundation";
 
 export interface RecentSessionItem {
   sessionId: string;
@@ -121,7 +122,7 @@ function installCuppingTargetStyles(): void {
     .batch-setup__target-option:hover,.batch-setup__target-option:focus-visible,.batch-setup__target-option.is-selected{background:#3b3b3b;color:#fff;outline:none}
     .batch-setup__target-help{color:#928d84;font-size:10px;line-height:1.45}
     .batch-setup__blind-entry-note{margin:0 0 14px;padding:12px;border:1px dashed rgba(185,153,90,.28);border-radius:10px;color:#aaa39a;background:rgba(185,153,90,.05);font-size:11px;line-height:1.55}
-    .cupping-count-dialog{position:fixed;inset:0;z-index:1700;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(5px)}
+    .cupping-count-dialog{position:fixed;inset:0;z-index:1700;display:grid;place-items:center;padding:18px;background:transparent}
     .cupping-count-dialog__panel{width:min(420px,100%);border:1px solid rgba(185,153,90,.36);border-radius:14px;padding:18px;background:#181818;color:#f4efe4;box-shadow:0 18px 48px rgba(0,0,0,.55)}
     .cupping-count-dialog__title{margin:0 0 8px;font-size:18px}
     .cupping-count-dialog__note{margin:0 0 14px;color:#aaa39a;font-size:12px;line-height:1.5}
@@ -587,7 +588,7 @@ export class BatchSetupRenderer {
 
   private async clearAllRows(): Promise<void> {
     if (!this.rows().length) return;
-    if (!window.confirm("一次性清空全部已录入样品？此操作不会删除已建立的历史杯测。")) return;
+    if (!await interactionConfirm({ title: "清空本次样品？", message: "将一次性清空全部已录入样品；不会删除已建立的历史杯测。", confirmLabel: "清空", danger: true })) return;
     this.review?.close(); this.review = undefined;
     clearElement(this.rowsRoot);
     this.importQueue = undefined;
@@ -852,6 +853,7 @@ export class BatchSetupRenderer {
     overlay.append(panel);
     overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
     this.root.append(overlay);
+    manageInteractionLayer(overlay, "dialog");
     input.focus();
     input.select();
   }

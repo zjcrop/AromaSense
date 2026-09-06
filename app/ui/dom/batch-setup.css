@@ -100,8 +100,7 @@
   display: flex;
   justify-content: center;
   align-items: stretch;
-  background: rgba(5,5,5,.82);
-  backdrop-filter: blur(6px);
+  background: transparent;
   overscroll-behavior: contain;
 }
 .batch-review__panel {
@@ -123,8 +122,7 @@
   gap: 14px;
   padding: max(15px, env(safe-area-inset-top)) 18px 13px;
   border-bottom: 1px solid rgba(185,153,90,.22);
-  background: rgba(21,21,21,.97);
-  backdrop-filter: blur(12px);
+  background: #151515;
 }
 .batch-review__header-copy { min-width: 0; }
 .batch-review__title { margin: 0 0 3px; font-size: 21px; line-height: 1.2; }
@@ -202,8 +200,7 @@ textarea.batch-review__control { min-height: 58px; resize: vertical; line-height
   gap: 10px;
   padding: 12px 18px max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(185,153,90,.22);
-  background: rgba(21,21,21,.97);
-  backdrop-filter: blur(12px);
+  background: #151515;
 }
 .batch-review__secondary,
 .batch-review__primary {

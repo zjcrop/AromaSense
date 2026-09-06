@@ -1,4 +1,5 @@
 import { button, element } from "./dom-helpers";
+import { manageInteractionLayer } from "../interaction-foundation";
 
 interface BarcodeResult { rawValue?: string }
 interface BarcodeDetectorLike { detect(source: CanvasImageSource): Promise<BarcodeResult[]> }
@@ -47,6 +48,7 @@ export async function openQrScannerDialog(options: QrScannerDialogOptions): Prom
     video.srcObject = null;
     overlay.remove();
   };
+  overlay.addEventListener("aromasense:request-overlay-dismiss", (event) => { event.preventDefault(); stop(); });
   actions.append(
     button("qr-scanner__secondary", "选择二维码图片", () => { stop(); options.onFallbackImage(); }),
     button("qr-scanner__secondary", "取消", stop)
@@ -54,6 +56,7 @@ export async function openQrScannerDialog(options: QrScannerDialogOptions): Prom
   panel.append(header, stage, status, actions);
   overlay.append(panel);
   options.root.append(overlay);
+  manageInteractionLayer(overlay, "dialog");
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({

@@ -13,6 +13,8 @@ import { cuppingModeFromMetadata } from "../../core/session-metadata";
 import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import type { FlavorGroupPreferenceService, FlavorGroupPreferences } from "../flavor-group-preferences";
+import { previousStage } from "../cupping-view-model";
+import { interactionConfirm } from "../interaction-foundation";
 import { attachDragReorder } from "./drag-reorder";
 import { button, clearElement, element } from "./dom-helpers";
 import { finalAssessmentPhase, renderFinalAssessment } from "./final-assessment-renderer";
@@ -266,7 +268,7 @@ export class CuppingScreenRenderer {
 
   private async leaveSession(): Promise<void> {
     const state = this.state; if (!state) return;
-    if (!window.confirm("退出当前杯测？已输入内容会保留在本地，下次可继续。")) return;
+    if (!await interactionConfirm({ title: "退出当前杯测？", message: "已输入内容会保留在本地，下次可继续。", confirmLabel: "暂存退出" })) return;
     this.setBusy(true);
     try { await this.controller.leaveSession(); await this.options.onExit?.(state.sessionId); }
     catch (error) { this.setStatus(`退出前保存失败：${error instanceof Error ? error.message : String(error)}`, true); }
@@ -561,6 +563,8 @@ export class CuppingScreenRenderer {
     const stepCompleted = finalPhase ? currentPhaseState?.status === "completed" : active.slice.stageStatus === "completed";
     const completionHint = finalPhase ? currentPhaseState?.completionHint : stage?.completionHint;
     const previous = button("cupping-nav cupping-nav--previous", "上一步", previousAction);
+    previous.disabled = !(active.context.stageId === "final" && (finalPhase === "overall" || finalPhase === "score"))
+      && !previousStage(active.context.stageId);
     const nextLabel = (active.context.stageId === "final" && finalPhase === "score") || active.context.stageId === "scoring" ? "完成本样品" : "下一步";
     const next = button("cupping-nav cupping-nav--next", nextLabel, nextAction);
     next.disabled = !stepCompleted;

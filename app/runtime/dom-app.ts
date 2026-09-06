@@ -27,12 +27,12 @@ import { mapComparison } from "../core/comparison-bundle";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { CuppingScreenController } from "../ui/cupping-screen-controller";
 import { FlavorGroupPreferenceService } from "../ui/flavor-group-preferences";
-import { InteractionFoundation, OVERLAY_KINDS, type AromaSenseNavigationApi, type Cleanup } from "../ui/interaction-foundation";
 import { AccountRenderer } from "../ui/dom/account-renderer";
 import { BatchSetupRenderer } from "../ui/dom/batch-setup-renderer";
 import { CuppingScreenRenderer } from "../ui/dom/stable-cupping-screen-renderer";
 import { RecordReplayRenderer } from "../ui/dom/record-replay-renderer";
 import { SessionRecordsRenderer } from "../ui/dom/session-records-renderer";
+import { manageInteractionLayer } from "../ui/interaction-foundation";
 
 const BATCH_SETUP_DRAFT_KEY = "batch.setup.draft.v2";
 const RECORD_ORDER_KEY = "records.order.v1";
@@ -72,14 +72,10 @@ export class AromaSenseDomApp {
   private readonly syncEngine?: SyncEngine;
   private readonly revisions: RevisionCheckpointService;
   private readonly submissions: SubmissionBundleStore;
-  private readonly interaction: InteractionFoundation;
   readonly yingxiangDelivery?: YingxiangDeliveryService;
   private readonly recognizer = new SampleRecognitionService();
   private preloadPromise?: Promise<AppPreloadState>;
   private homeModal?: HTMLElement;
-  private homeModalCleanup?: Cleanup;
-  private rootBackCleanup?: Cleanup;
-  private sessionFlowCleanup?: Cleanup;
 
   constructor(private readonly root: HTMLElement, private readonly db: SQLiteDriver, private readonly options: AromaSenseDomAppOptions) {
     this.preferences = new UserPreferencesRepository(db);
@@ -87,7 +83,6 @@ export class AromaSenseDomApp {
     this.pendingRegistrationStore = new LocalPendingRegistrationStore(this.preferences, options.now);
     this.syncQueue = new SyncQueueStore(db);
     this.submissions = new SubmissionBundleStore(db);
-    this.interaction = new InteractionFoundation();
     const repository = new LocalCuppingRepository(db);
     this.revisions = new RevisionCheckpointService(db, repository, this.syncQueue, { revisionId: () => crypto.randomUUID(), queueId: () => crypto.randomUUID() });
 
@@ -97,10 +92,6 @@ export class AromaSenseDomApp {
       const remote = new CloudflareSyncRepository(options.cloudBaseUrl!, { token: async () => (await this.authClient?.current())?.token });
       this.syncEngine = new SyncEngine(this.syncQueue, remote);
     }
-  }
-
-  navigationApi(): AromaSenseNavigationApi {
-    return this.interaction.api;
   }
 
   preload(): Promise<AppPreloadState> {
@@ -129,8 +120,7 @@ export class AromaSenseDomApp {
 
   async showAccount(returnSessionId?: string): Promise<void> {
     this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("account", () => returnSessionId ? this.openSession(returnSessionId) : this.showSetup());
+    this.screen?.dispose(); this.screen = undefined; this.setRootMode("account");
     await new AccountRenderer(this.root, this.authClient, {
       onAuthenticated: async () => { await this.syncPending(); if (returnSessionId) await this.openSession(returnSessionId); else await this.showSetup(); },
       onSkip: async () => { if (returnSessionId) await this.openSession(returnSessionId); else await this.showSetup(); },
@@ -166,8 +156,7 @@ export class AromaSenseDomApp {
 
   async openSession(sessionId: string): Promise<void> {
     this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("cupping", () => this.showSetup());
+    this.screen?.dispose(); this.screen = undefined; this.setRootMode("cupping");
     const repository = new LocalCuppingRepository(this.db);
     const editor = new CuppingSessionController(repository, this.options.observationIdFactory);
     const controller = new CuppingScreenController(repository, new StageProgressReader(this.db), editor, this.revisions);
@@ -178,27 +167,15 @@ export class AromaSenseDomApp {
       onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); },
       onOpenRecords: async () => { await this.showRecords(); },
       onSessionFinished: async (sessionId) => { void this.syncPending([sessionId]); }
-    }, this.interaction.overlayManager);
-    await this.screen.initialize(sessionId);
-    this.sessionFlowCleanup = this.interaction.flowNavigation.register({
-      id: `cupping-flow:${sessionId}`,
-      priority: 500,
-      canBack: () => {
-        const state = controller.current();
-        if (!state?.active || state.sessionStatus === "completed" || state.sessionStatus === "archived") return false;
-        if (state.active.context.stageId === "preparation") return false;
-        return Boolean(this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])"));
-      },
-      back: () => { this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])")?.click(); }
     });
+    await this.screen.initialize(sessionId);
     this.root.dataset.sessionId = sessionId;
     void this.yingxiangDelivery?.sync();
   }
 
   async showRecords(): Promise<void> {
     this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("records", () => this.showSetup());
+    this.screen?.dispose(); this.screen = undefined; this.setRootMode("records");
     const repository = new LocalCuppingRepository(this.db);
     const recordService = new SessionRecordService(repository, this.options.now);
     const records = await new SessionRecordsReader(this.db).list(300);
@@ -225,8 +202,7 @@ export class AromaSenseDomApp {
 
   async showReplay(sessionId: string): Promise<void> {
     this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("replay", () => this.showRecords());
+    this.screen?.dispose(); this.screen = undefined; this.setRootMode("replay");
     const snapshot = await new SessionRecordService(new LocalCuppingRepository(this.db), this.options.now).snapshot(sessionId);
     const store = new ComparisonMappingStore(this.db);
     new RecordReplayRenderer(this.root, snapshot, () => this.showRecords(), {
@@ -249,21 +225,31 @@ export class AromaSenseDomApp {
 
   async syncCounts() { return this.syncQueue.counts(); }
 
-  dispose(): void {
-    this.closeHomeModal();
-    this.rootBackCleanup?.(); this.rootBackCleanup = undefined;
-    this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined;
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("empty");
-    this.interaction.dispose();
+  handleNavigationBack(): boolean {
+    const screen = this.root.dataset.screen;
+    const selector = screen === "cupping" ? ".cupping-rail-footer__exit,.cupping-nav--exit"
+      : screen === "records" ? ".session-records__back"
+        : screen === "replay" ? ".record-replay__back"
+          : screen === "account" ? ".account-card__link"
+            : "";
+    if (!selector) return false;
+    const controls = [...this.root.querySelectorAll<HTMLButtonElement>(selector)];
+    const control = screen === "account"
+      ? controls.find((candidate) => /返回|离线使用/.test(candidate.textContent || ""))
+      : controls[0];
+    if (!control || control.disabled) return false;
+    control.click();
+    return true;
   }
+
+  dispose(): void { this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("empty"); }
 
   private installHomeModalStyles(): void {
     if (document.head.querySelector("style[data-aromasense-home-modal]")) return;
     const style = document.createElement("style");
     style.dataset.aromasenseHomeModal = "true";
     style.textContent = `
-      .home-modal{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:22px;background:transparent;backdrop-filter:none}
+      .home-modal{position:fixed;inset:0;z-index:2200;display:grid;place-items:center;padding:22px;background:transparent}
       .home-modal__content{width:min(860px,calc(100vw - 32px));max-height:min(86dvh,820px);overflow:auto;border:1px solid rgba(214,173,99,.28);border-radius:16px;background:#151515;box-shadow:0 16px 42px rgba(0,0,0,.44)}
       .home-modal__content.account-screen{min-height:0;padding:1px 0 24px}
       .home-modal__content .account-card{margin:28px auto 18px}
@@ -286,37 +272,20 @@ export class AromaSenseDomApp {
     const content = document.createElement("div");
     content.className = "home-modal__content";
     overlay.append(content);
-    let unregister: Cleanup = () => undefined;
     const close = (): void => {
-      unregister();
-      if (this.homeModal === overlay) {
-        this.homeModal = undefined;
-        this.homeModalCleanup = undefined;
-      }
+      if (this.homeModal === overlay) this.homeModal = undefined;
       overlay.remove();
     };
     overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) close(); });
-    overlay.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      this.interaction.api.back({ source: "escape" });
-    });
+    overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+    overlay.addEventListener("aromasense:request-overlay-dismiss", (event) => { event.preventDefault(); close(); });
     document.body.append(overlay);
-    unregister = this.interaction.overlayManager.register({
-      id: `home-modal:${label}`,
-      element: overlay,
-      kind: OVERLAY_KINDS.MODAL,
-      priority: 100,
-      dismiss: close
-    });
+    manageInteractionLayer(overlay, "dialog");
     this.homeModal = overlay;
-    this.homeModalCleanup = unregister;
     return { overlay, content, close };
   }
 
   private closeHomeModal(): void {
-    this.homeModalCleanup?.();
-    this.homeModalCleanup = undefined;
     this.homeModal?.remove();
     this.homeModal = undefined;
   }
@@ -421,11 +390,7 @@ export class AromaSenseDomApp {
     return Boolean(this.options.cloudBaseUrl && this.options.firebaseApiKey && this.options.firebaseProjectId);
   }
 
-  private setRootMode(mode: RootMode, back?: () => void | Promise<void>): void {
-    this.rootBackCleanup?.();
-    this.rootBackCleanup = undefined;
-    this.sessionFlowCleanup?.();
-    this.sessionFlowCleanup = undefined;
+  private setRootMode(mode: RootMode): void {
     this.root.replaceChildren();
     if (mode !== "cupping") delete this.root.dataset.sessionId;
     this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen", "session-records", "record-replay");
@@ -435,7 +400,5 @@ export class AromaSenseDomApp {
     if (mode === "records") this.root.classList.add("session-records");
     if (mode === "replay") this.root.classList.add("record-replay");
     this.root.dataset.screen = mode;
-    this.interaction.navigationManager.setActivePage(mode);
-    if (back) this.rootBackCleanup = this.interaction.navigationManager.registerChildBack({ id: `screen:${mode}`, back });
   }
 }

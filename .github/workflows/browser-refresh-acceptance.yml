@@ -38,18 +38,6 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build browser application
         run: npm run bundle:web
-      - name: Record Stage 0 six-phase recognition baseline
-        shell: bash
-        run: |
-          set -o pipefail
-          node scripts/stage0-recognition-baseline.mjs 2>&1 | tee /tmp/aromasense-stage0-recognition.log
-      - name: Upload Stage 0 recognition benchmark log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: aromasense-stage0-recognition-${{ github.sha }}
-          path: /tmp/aromasense-stage0-recognition.log
-          if-no-files-found: error
       - name: Run homepage and records UI acceptance
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'

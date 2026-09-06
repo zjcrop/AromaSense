@@ -12,6 +12,9 @@ import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import { AromaSenseDomApp } from "./dom-app";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
+import { installInteractionFoundation } from "../ui/interaction-foundation";
+
+const interaction = installInteractionFoundation();
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
   if (window.AromaSenseSQLite) return AndroidSQLiteDriver.fromWindow();
@@ -69,7 +72,25 @@ async function main(): Promise<void> {
     firebaseApiKey: document.documentElement.dataset.firebaseApiKey || undefined,
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
-  window.AromaSenseNavigation = app.navigationApi();
+  interaction.navigation.setTopLevelRoot({
+    current: () => root.dataset.screen || "",
+    isAtRoot: () => ["startup", "setup", "empty"].includes(root.dataset.screen || ""),
+    backToRoot: () => app?.handleNavigationBack() ?? false
+  });
+  interaction.flows.register({
+    id: "cupping-workflow",
+    active: () => root.dataset.screen === "cupping",
+    canGoBack: () => {
+      const control = root.querySelector<HTMLButtonElement>(".cupping-nav--previous");
+      return Boolean(control && !control.disabled);
+    },
+    previous: () => {
+      const control = root.querySelector<HTMLButtonElement>(".cupping-nav--previous");
+      if (!control || control.disabled) return false;
+      control.click();
+      return true;
+    }
+  });
 
   yingxiang = new YingxiangBrowserBootstrap(root, db, {
     now,

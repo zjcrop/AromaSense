@@ -322,9 +322,8 @@
   justify-content: center;
   gap: 20px;
   padding: 12px max(16px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom));
-  background: rgba(8,9,9,.96);
+  background: #080909;
   border-top: 1px solid var(--as-01c-line);
-  backdrop-filter: blur(12px);
 }
 .session-records__batch-action.is-danger,
 .session-record__action:last-child { color: var(--as-01c-danger) !important; }
@@ -337,7 +336,7 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(0,0,0,.76);
+  background: transparent;
 }
 .session-share__card {
   width: min(430px, 92vw);
