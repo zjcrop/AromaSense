@@ -78,7 +78,8 @@ export function legacyBlindModeFromCuppingMode(mode: CuppingMode): BlindMode {
   return "open";
 }
 
-export function cuppingModeFromMetadata(metadata: Partial<CuppingSessionMetadata>): CanonicalCuppingMode {
+/** Runtime value is canonical; the wider return type keeps legacy callers source-compatible during migration. */
+export function cuppingModeFromMetadata(metadata: Partial<CuppingSessionMetadata>): CuppingMode {
   return normalizeCuppingMode(metadata.cuppingMode, metadata.blindMode);
 }
 
