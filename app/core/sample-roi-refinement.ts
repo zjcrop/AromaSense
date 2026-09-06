@@ -5,10 +5,11 @@ import {
   type LuckyBeanRecognitionRegion,
   type LuckyBeanRegionRecognitionResult
 } from "./luckybean-upstream-adapter";
-import type {
-  SegmentationReviewLine,
-  SegmentationReviewModel,
-  SegmentationReviewRegion
+import {
+  assignSegmentationLinesByGeometry,
+  type SegmentationReviewLine,
+  type SegmentationReviewModel,
+  type SegmentationReviewRegion
 } from "./sample-segmentation-review";
 import type { RecognizedPage, RecognizedSample } from "./sample-recognition-service";
 
@@ -235,7 +236,10 @@ export async function refineSegmentationRegionEvidence(input: {
   model: SegmentationReviewModel;
   regionIndex: number;
 }): Promise<ROIRefinementResult> {
-  const region = input.model.regions[input.regionIndex];
+  // Geometry is authoritative. Synchronize old automatic line ownership before
+  // deciding which evidence the ROI result replaces.
+  const synchronizedModel = assignSegmentationLinesByGeometry(input.model);
+  const region = synchronizedModel.regions[input.regionIndex];
   if (!region) throw new Error("待局部重识别的分区不存在");
   const core = requireLuckyBeanRecognitionCore();
   if (typeof core.recognizeImageRegion !== "function") {
@@ -257,7 +261,7 @@ export async function refineSegmentationRegionEvidence(input: {
   const refinedLines = linesFromRegionResult(result, region);
   if (!refinedLines.length) throw new Error("局部重新识别没有得到可用文字，已保留原识别证据");
   return {
-    model: replaceRegionEvidence(input.model, input.regionIndex, refinedLines),
+    model: replaceRegionEvidence(synchronizedModel, input.regionIndex, refinedLines),
     provenance: {
       protocol: ROI_RECOGNITION_PROTOCOL,
       status: "success",
