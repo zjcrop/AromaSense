@@ -51,7 +51,7 @@ function ensureScoreConfirmationStyles(): void {
     .final-assessment__score-lock-note{display:block;margin:8px auto 0;max-width:620px;text-align:center;color:#989289;font-size:11px;line-height:1.55}
     .final-assessment__sca-note{margin:6px 0 0;color:#9a958d;font-size:10px;line-height:1.5}.final-assessment__sca-note.is-warning{color:#c8a57d}
     .final-assessment__sca-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 16px}.final-assessment__sca-scale{display:grid;grid-template-columns:72px minmax(0,1fr) 34px;gap:8px;align-items:center;padding:7px 0}
-    .final-assessment__sca-scale-label{font-size:11px;color:#cfc8bc}.final-assessment__sca-scale-input{width:100%}.final-assessment__sca-scale-value{text-align:center;font-variant-numeric:tabular-nums;color:#d9c28f}.final-assessment__sca-scale.is-unset .final-assessment__sca-scale-value{color:#6e6a64}
+    .final-assessment__sca-scale-label{font-size:11px;color:#cfc8bc}.final-assessment__sca-scale-input{width:100%}.final-assessment__sca-scale-value{text-align:center;font-variant-numeric:tabular-nums;color:#d9c28f}.final-assessment__sca-scale.is-unset .final-assessment__sca-scale-value,.final-assessment__scale.is-unset .final-assessment__scale-value{color:#6e6a64}
     .final-assessment__cup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;margin-top:10px}.final-assessment__cup-field{display:grid;gap:5px;font-size:11px;color:#b6afa4}.final-assessment__cup-field select{min-height:38px;border:1px solid rgba(185,153,90,.32);border-radius:7px;background:#151515;color:#eee;padding:6px 8px}
     .final-assessment__zero-cups{margin-top:9px;border:1px solid rgba(185,153,90,.3);border-radius:7px;background:transparent;color:#d6c49e;padding:8px 11px}
     .cupping-completion-stamp{margin:9px auto 0;padding:7px 10px;max-width:520px;text-align:center;border:1px solid rgba(185,153,90,.18);border-radius:8px;background:rgba(185,153,90,.05);color:#aaa398;font-size:11px;line-height:1.45}.cupping-completion-stamp strong{color:#c9bea4;font-weight:700}
@@ -103,14 +103,16 @@ export function calculateCuppingScore(
 }
 
 function renderStructureScale(map: ReadonlyMap<string, unknown>, callbacks: FinalAssessmentCallbacks): HTMLElement {
-  const field = element("label", "final-assessment__scale");
+  const current = map.get("quality_clean");
+  const hasValue = typeof current === "number" && Number.isFinite(current) && current >= 0 && current <= 10;
+  const field = element("label", `final-assessment__scale${hasValue ? "" : " is-unset"}`);
   field.dataset.fieldKey = "quality_clean";
   const header = element("span", "final-assessment__scale-label", "洁净度 · 香迹结构");
-  const output = element("output", "final-assessment__scale-value");
+  const output = element("output", "final-assessment__scale-value", hasValue ? String(current) : "—");
   const input = element("input", "final-assessment__scale-input");
   input.type = "range"; input.min = "0"; input.max = "10"; input.step = "0.5";
-  input.value = String(numeric(map, "quality_clean")); output.value = input.value;
-  input.addEventListener("input", () => { output.value = input.value; });
+  input.value = hasValue ? String(current) : "5";
+  input.addEventListener("input", () => { output.value = input.value; field.classList.remove("is-unset"); });
   input.addEventListener("change", () => void callbacks.saveField("quality_clean", Number(input.value)));
   field.append(header, input, output);
   return field;

@@ -28,7 +28,8 @@ function ensureStyles(): void {
   const style = document.createElement("style");
   style.dataset.aromasenseSensoryProfileConclusion = "true";
   style.textContent = `
-    .sensory-conclusion{display:grid;gap:14px;margin:18px 0}.sensory-conclusion__grid{display:grid;grid-template-columns:minmax(260px,.82fr) minmax(360px,1.18fr);gap:14px;align-items:start}
+    .sensory-conclusion{display:grid;gap:8px;margin:18px 0}.sensory-conclusion__completeness{margin:0;color:#8f8981;font-size:10px;line-height:1.45}
+    .sensory-conclusion__grid{display:grid;grid-template-columns:minmax(260px,.82fr) minmax(360px,1.18fr);gap:14px;align-items:start}
     .sensory-conclusion__panel{min-width:0}.temperature-flavor-profile{padding:12px;border:1px solid rgba(185,153,90,.42);border-radius:14px;background:#1d1d1d}
     .temperature-flavor-profile__title{margin:0;font-size:15px}.temperature-flavor-profile__note{margin:5px 0 8px;color:#9c968d;font-size:10px;line-height:1.45}
     .temperature-flavor-profile__canvas{display:block;width:100%;height:auto;max-width:760px;margin:0 auto}.temperature-flavor-profile__legend{display:flex;gap:14px;flex-wrap:wrap;margin:5px 0 0;color:#aaa39a;font-size:10px}
@@ -41,8 +42,8 @@ function ensureStyles(): void {
   document.head.append(style);
 }
 
-function yFor(value: number | undefined, top: number, bottom: number): number {
-  const bounded = Math.max(0, Math.min(15, value ?? 0));
+function yFor(value: number, top: number, bottom: number): number {
+  const bounded = Math.max(0, Math.min(15, value));
   return bottom - (bounded / 15) * (bottom - top);
 }
 
@@ -56,6 +57,59 @@ function traceThreePointCurve(ctx: CanvasRenderingContext2D, xs: readonly number
     const dx = (x1 - x0) / 2;
     ctx.bezierCurveTo(x0 + dx, y0, x1 - dx, y1, x1, y1);
   }
+}
+
+function stageEnvelopeValue(point: TemperatureFlavorPoint): number | undefined {
+  const present = [point.acidity, point.sweetness, point.bitterness]
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return present.length ? Math.max(...present) : undefined;
+}
+
+function drawSeries(
+  ctx: CanvasRenderingContext2D,
+  xs: readonly number[],
+  values: readonly (number | undefined)[],
+  top: number,
+  bottom: number,
+  dash: readonly number[],
+  alpha: number
+): void {
+  const ys = values.map((value) => value === undefined ? undefined : yFor(value, top, bottom));
+  ctx.save();
+  ctx.strokeStyle = "#eee9df";
+  ctx.fillStyle = "#eee9df";
+  ctx.globalAlpha = alpha;
+  ctx.lineWidth = 2.2;
+  ctx.setLineDash([...dash]);
+
+  if (ys.every((value): value is number => value !== undefined)) {
+    ctx.beginPath();
+    traceThreePointCurve(ctx, xs, ys);
+    ctx.stroke();
+  } else {
+    for (let index = 0; index < 2; index += 1) {
+      const y0 = ys[index];
+      const y1 = ys[index + 1];
+      if (y0 === undefined || y1 === undefined) continue;
+      const x0 = xs[index]!;
+      const x1 = xs[index + 1]!;
+      const dx = (x1 - x0) / 2;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.bezierCurveTo(x0 + dx, y0, x1 - dx, y1, x1, y1);
+      ctx.stroke();
+    }
+  }
+
+  ctx.setLineDash([]);
+  for (let index = 0; index < xs.length; index += 1) {
+    const y = ys[index];
+    if (y === undefined) continue;
+    ctx.beginPath();
+    ctx.arc(xs[index]!, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawTemperatureProfile(canvas: HTMLCanvasElement, points: readonly TemperatureFlavorPoint[]): void {
@@ -85,44 +139,29 @@ function drawTemperatureProfile(canvas: HTMLCanvasElement, points: readonly Temp
     ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
   }
 
-  const envelopeValues = points.map((point) => Math.max(point.acidity ?? 0, point.sweetness ?? 0, point.bitterness ?? 0));
-  const envelopeYs = envelopeValues.map((value) => yFor(value, top, bottom));
-  const gradient = ctx.createLinearGradient(left, 0, right, 0);
-  gradient.addColorStop(0, FLAVOR_FAMILY_COLORS[points[0]!.flavorFamily]);
-  gradient.addColorStop(0.5, FLAVOR_FAMILY_COLORS[points[1]!.flavorFamily]);
-  gradient.addColorStop(1, FLAVOR_FAMILY_COLORS[points[2]!.flavorFamily]);
-  ctx.save();
-  ctx.globalAlpha = 0.26;
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.moveTo(xs[0]!, bottom);
-  ctx.lineTo(xs[0]!, envelopeYs[0]!);
-  traceThreePointCurve(ctx, xs, envelopeYs);
-  ctx.lineTo(xs[2]!, bottom);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-
-  const series = [
-    { key: "acidity" as const, dash: [] as number[], alpha: 1 },
-    { key: "sweetness" as const, dash: [9, 5], alpha: 0.75 },
-    { key: "bitterness" as const, dash: [2, 5], alpha: 0.52 }
-  ];
-  for (const item of series) {
-    const ys = points.map((point) => yFor(point[item.key], top, bottom));
+  const envelopeValues = points.map(stageEnvelopeValue);
+  if (envelopeValues.every((value): value is number => value !== undefined)) {
+    const envelopeYs = envelopeValues.map((value) => yFor(value, top, bottom));
+    const gradient = ctx.createLinearGradient(left, 0, right, 0);
+    gradient.addColorStop(0, FLAVOR_FAMILY_COLORS[points[0]!.flavorFamily]);
+    gradient.addColorStop(0.5, FLAVOR_FAMILY_COLORS[points[1]!.flavorFamily]);
+    gradient.addColorStop(1, FLAVOR_FAMILY_COLORS[points[2]!.flavorFamily]);
     ctx.save();
-    ctx.strokeStyle = "#eee9df";
-    ctx.globalAlpha = item.alpha;
-    ctx.lineWidth = 2.2;
-    ctx.setLineDash(item.dash);
-    ctx.beginPath(); traceThreePointCurve(ctx, xs, ys); ctx.stroke();
-    ctx.setLineDash([]);
-    for (let index = 0; index < xs.length; index += 1) {
-      if (points[index]?.[item.key] === undefined) continue;
-      ctx.beginPath(); ctx.arc(xs[index]!, ys[index]!, 3, 0, Math.PI * 2); ctx.fillStyle = "#eee9df"; ctx.fill();
-    }
+    ctx.globalAlpha = 0.26;
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(xs[0]!, bottom);
+    ctx.lineTo(xs[0]!, envelopeYs[0]!);
+    traceThreePointCurve(ctx, xs, envelopeYs);
+    ctx.lineTo(xs[2]!, bottom);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
+
+  drawSeries(ctx, xs, points.map((point) => point.acidity), top, bottom, [], 1);
+  drawSeries(ctx, xs, points.map((point) => point.sweetness), top, bottom, [9, 5], 0.75);
+  drawSeries(ctx, xs, points.map((point) => point.bitterness), top, bottom, [2, 5], 0.52);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
@@ -137,7 +176,13 @@ function tagLabel(tagId: string): string {
 export function renderSensoryProfileConclusion(root: HTMLElement, observations: readonly SensoryObservation[]): void {
   ensureStyles();
   const profile = deriveSensoryProfileConclusion(observations);
+  const recordedAxes = profile.radar.filter((axis) => axis.recorded).length;
   const section = element("section", "sensory-conclusion");
+  section.append(element(
+    "p",
+    "sensory-conclusion__completeness",
+    `结构画像 ${recordedAxes}/7 维已记录；未记录维度显示为—，不按0处理。`
+  ));
   const grid = element("div", "sensory-conclusion__grid");
   const radar = element("div", "sensory-conclusion__panel");
   renderRadarSummary(radar, profile.radar, {
@@ -148,7 +193,7 @@ export function renderSensoryProfileConclusion(root: HTMLElement, observations: 
   const evolution = element("section", "sensory-conclusion__panel temperature-flavor-profile");
   evolution.append(
     element("h3", "temperature-flavor-profile__title", "温度—风味演化"),
-    element("p", "temperature-flavor-profile__note", "横轴表示高温→中温→低温；线高为0–15强度。填充色仅表达风味倾向，不表示温度、质量或得分。")
+    element("p", "temperature-flavor-profile__note", "横轴表示高温→中温→低温；线高为0–15强度。填充色仅表达风味倾向，不表示温度、质量或得分；未记录点留空，不以0补线。")
   );
   const canvas = element("canvas", "temperature-flavor-profile__canvas");
   canvas.width = 760; canvas.height = 330;

@@ -1,11 +1,12 @@
 import type { SensoryObservation, StageId } from "../../shared/protocol/aromasense-v1";
 import type { SQLiteDriver } from "./local-cupping-repository";
 
-/**
- * Compatibility name retained for existing summary consumers. Summary reads now
- * return the canonical persisted observation shape instead of dropping metadata.
- */
-export type SummaryObservation = SensoryObservation;
+/** Lightweight projection accepted by summary-only models and tests. */
+export interface SummaryObservation {
+  stageId: StageId;
+  fieldKey: string;
+  value: unknown;
+}
 
 interface SummaryRow {
   observation_id: string;
@@ -21,7 +22,12 @@ interface SummaryRow {
 export class SampleSummaryReader {
   constructor(private readonly db: SQLiteDriver) {}
 
-  async listObservations(sampleId: string): Promise<readonly SummaryObservation[]> {
+  /**
+   * Reads the canonical persisted observation shape. A SensoryObservation is
+   * structurally compatible with SummaryObservation, while retaining the real
+   * identifiers/version/timestamp needed by richer conclusion renderers.
+   */
+  async listObservations(sampleId: string): Promise<readonly SensoryObservation[]> {
     const rows = await this.db.all<SummaryRow>(
       `SELECT observation_id, session_id, sample_id, stage_id, field_key, value_json, dictionary_version, updated_at
        FROM observations

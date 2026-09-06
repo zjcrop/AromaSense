@@ -72,6 +72,17 @@ async function waitUntil(check, label, timeoutMs = TIMEOUT_MS) {
   throw new Error(`${label} timed out`);
 }
 
+async function stopChrome(chrome) {
+  if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+  const gracefulExit = new Promise((resolveExit) => chrome.once("exit", resolveExit));
+  chrome.kill("SIGTERM");
+  await Promise.race([gracefulExit, delay(3000)]);
+  if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+  const forcedExit = new Promise((resolveExit) => chrome.once("exit", resolveExit));
+  chrome.kill("SIGKILL");
+  await Promise.race([forcedExit, delay(3000)]);
+}
+
 class Cdp {
   constructor(url) { this.url = url; this.id = 0; this.pending = new Map(); this.errors = []; }
   async open() {
@@ -182,10 +193,9 @@ async function run() {
     requireCondition(relevantErrors.length === 0, `Browser errors during benchmark: ${relevantErrors.join(" | ")}`);
   } finally {
     cdp?.close();
-    chrome.kill("SIGKILL");
-    await new Promise((resolveKill) => chrome.once("exit", resolveKill)).catch(() => {});
+    await stopChrome(chrome);
     await new Promise((resolveClose) => server.close(resolveClose));
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
     await rm(benchmarkOutput, { force: true });
   }
 }

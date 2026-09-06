@@ -59,6 +59,18 @@ test("product shell visibly exposes three-state progress and current-step comple
   assert.match(renderer, /stage\.stageId === activeStageId/);
 });
 
+test("sensory conclusion visibly preserves missing values instead of fabricating zero", () => {
+  const finalAssessment = readFileSync(resolve(root, "app/ui/dom/final-assessment-renderer.ts"), "utf8");
+  const conclusion = readFileSync(resolve(root, "app/ui/dom/sensory-profile-conclusion-renderer.ts"), "utf8");
+  const radar = readFileSync(resolve(root, "app/ui/dom/radar-renderer.ts"), "utf8");
+
+  assert.match(finalAssessment, /hasValue \? String\(current\) : "—"/);
+  assert.match(finalAssessment, /final-assessment__scale\$\{hasValue \? "" : " is-unset"\}/);
+  assert.match(conclusion, /未记录维度显示为—，不按0处理/);
+  assert.match(conclusion, /未记录点留空，不以0补线/);
+  assert.match(radar, /axis\.recorded !== false/);
+});
+
 test("legacy near-complete input cannot create a fourth visual progress state", () => {
   const template = readFileSync(resolve(root, "web/index.template.html"), "utf8");
   assert.match(
