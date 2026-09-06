@@ -11,8 +11,8 @@ export type BackHandler = () => void | Promise<void>;
 export type Cleanup = () => void;
 
 interface EventTargetPort {
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
-  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
+  addEventListener(type: string, listener: EventListener): void;
+  removeEventListener(type: string, listener: EventListener): void;
 }
 
 interface BackEntry {
@@ -54,6 +54,24 @@ export interface AromaSenseNativeBridge {
   exitApp(): void;
 }
 
+export interface RegisterBackOptions {
+  id?: string;
+  back: BackHandler;
+  canBack?: () => boolean;
+  priority?: number;
+  scope?: string;
+  leavesContext?: boolean;
+}
+
+export interface RegisterOverlayOptions {
+  id?: string;
+  element: HTMLElement;
+  kind?: OverlayKind;
+  dismiss?: BackHandler;
+  scrim?: boolean;
+  priority?: number;
+}
+
 export interface AromaSenseNavigationApi {
   back(options?: { source?: string }): boolean;
   systemBack(): boolean;
@@ -74,29 +92,13 @@ declare global {
   }
 }
 
-export interface RegisterBackOptions {
-  id?: string;
-  back: BackHandler;
-  canBack?: () => boolean;
-  priority?: number;
-  scope?: string;
-  leavesContext?: boolean;
-}
-
-export interface RegisterOverlayOptions {
-  id?: string;
-  element: HTMLElement;
-  kind?: OverlayKind;
-  dismiss?: BackHandler;
-  scrim?: boolean;
-  priority?: number;
-}
-
 function invoke(handler: BackHandler): void {
   try {
     const result = handler();
     if (result && typeof (result as Promise<void>).catch === "function") {
-      void (result as Promise<void>).catch((error) => console.error("AromaSense navigation handler failed", error));
+      void (result as Promise<void>).catch((error: unknown) => {
+        console.error("AromaSense navigation handler failed", error);
+      });
     }
   } catch (error) {
     console.error("AromaSense navigation handler failed", error);
@@ -104,10 +106,8 @@ function invoke(handler: BackHandler): void {
 }
 
 function isVisible(element: HTMLElement): boolean {
-  if (element.hidden || element.getAttribute("aria-hidden") === "true") return false;
-  if (!element.isConnected) return false;
-  const view = element.ownerDocument.defaultView;
-  const style = view?.getComputedStyle(element);
+  if (!element.isConnected || element.hidden || element.getAttribute("aria-hidden") === "true") return false;
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
   return !style || (style.display !== "none" && style.visibility !== "hidden");
 }
 
@@ -156,7 +156,7 @@ export class DraftGuard {
 
   private syncBeforeUnload(): void {
     const shouldAttach = this.isDirty();
-    if (shouldAttach === this.beforeUnloadAttached || !this.windowTarget) return;
+    if (!this.windowTarget || shouldAttach === this.beforeUnloadAttached) return;
     if (shouldAttach) this.windowTarget.addEventListener("beforeunload", this.boundBeforeUnload);
     else this.windowTarget.removeEventListener("beforeunload", this.boundBeforeUnload);
     this.beforeUnloadAttached = shouldAttach;
@@ -178,7 +178,9 @@ export class FlowNavigation {
       sequence: ++this.sequence
     };
     this.entries.push(entry);
-    return () => { this.entries = this.entries.filter((candidate) => candidate !== entry); };
+    return () => {
+      this.entries = this.entries.filter((candidate) => candidate !== entry);
+    };
   }
 
   peek(): BackEntry | undefined {
@@ -225,7 +227,7 @@ export class OverlayManager {
       priority: Number(options.priority ?? 0),
       sequence: ++this.sequence
     };
-    this.normalize(options.element, kind);
+    this.normalize(entry.element, kind);
     this.entries.push(entry);
     this.syncScrim();
     return () => {
@@ -235,7 +237,7 @@ export class OverlayManager {
   }
 
   top(kinds?: readonly OverlayKind[]): OverlayEntry | undefined {
-    const wanted = kinds ? new Set(kinds) : undefined;
+    const wanted = kinds ? new Set<OverlayKind>(kinds) : undefined;
     return this.entries
       .filter((entry) => isVisible(entry.element) && (!wanted || wanted.has(entry.kind)))
       .sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)[0];
@@ -261,15 +263,16 @@ export class OverlayManager {
   }
 
   showNotice(message: string): void {
-    if (!this.documentTarget?.body) return;
-    this.documentTarget.getElementById("interactionNotice")?.remove();
-    const notice = this.documentTarget.createElement("div");
+    const doc = this.documentTarget;
+    if (!doc?.body) return;
+    doc.getElementById("interactionNotice")?.remove();
+    const notice = doc.createElement("div");
     notice.id = "interactionNotice";
     notice.className = "interaction-notice";
     notice.setAttribute("role", "status");
     notice.setAttribute("aria-live", "polite");
     notice.textContent = message;
-    this.documentTarget.body.append(notice);
+    doc.body.append(notice);
     setTimeout(() => notice.remove(), 1800);
   }
 
@@ -283,38 +286,42 @@ export class OverlayManager {
     onConfirm(): void;
     onCancel?(): void;
   }): Cleanup {
-    if (!this.documentTarget?.body) return () => undefined;
-    const overlay = this.documentTarget.createElement("div");
+    const doc = this.documentTarget;
+    if (!doc?.body) return () => undefined;
+
+    const overlay = doc.createElement("div");
     overlay.id = options.id;
     overlay.className = "interaction-system-overlay";
     overlay.dataset.interactionKind = OVERLAY_KINDS.DIALOG;
-    overlay.setAttribute("role", "presentation");
 
-    const panel = this.documentTarget.createElement("section");
+    const panel = doc.createElement("section");
     panel.className = "interaction-system-dialog";
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
 
-    const title = this.documentTarget.createElement("h2");
+    const title = doc.createElement("h2");
     title.textContent = options.title;
-    const message = this.documentTarget.createElement("p");
+    const message = doc.createElement("p");
     message.textContent = options.message;
-    const actions = this.documentTarget.createElement("div");
+    const actions = doc.createElement("div");
     actions.className = "interaction-system-dialog__actions";
-    const cancel = this.documentTarget.createElement("button");
+    const cancel = doc.createElement("button");
     cancel.type = "button";
     cancel.textContent = options.cancelLabel ?? "取消";
-    const confirm = this.documentTarget.createElement("button");
+    const confirm = doc.createElement("button");
     confirm.type = "button";
     confirm.textContent = options.confirmLabel;
     if (options.danger) confirm.dataset.danger = "true";
     actions.append(cancel, confirm);
     panel.append(title, message, actions);
     overlay.append(panel);
-    this.documentTarget.body.append(overlay);
+    doc.body.append(overlay);
 
     let unregister: Cleanup = () => undefined;
+    let closed = false;
     const close = (cancelled: boolean): void => {
+      if (closed) return;
+      closed = true;
       unregister();
       overlay.remove();
       this.syncScrim();
@@ -336,15 +343,16 @@ export class OverlayManager {
   }
 
   private ensureScrim(): HTMLElement | undefined {
-    if (!this.documentTarget?.body) return undefined;
-    let scrim = this.documentTarget.getElementById(this.scrimId);
+    const doc = this.documentTarget;
+    if (!doc?.body) return undefined;
+    let scrim = doc.getElementById(this.scrimId);
     if (!scrim) {
-      scrim = this.documentTarget.createElement("div");
+      scrim = doc.createElement("div");
       scrim.id = this.scrimId;
       scrim.className = "interaction-scrim";
       scrim.hidden = true;
       scrim.setAttribute("aria-hidden", "true");
-      this.documentTarget.body.append(scrim);
+      doc.body.append(scrim);
     }
     return scrim;
   }
@@ -414,7 +422,11 @@ export class RootExitGuard {
 
   snapshot(): { native: boolean; armed: boolean; confirmOpen: boolean } {
     const now = (this.options.clock ?? Date.now)();
-    return { native: this.canHandle(), armed: Boolean(this.armedUntil && now <= this.armedUntil), confirmOpen: this.confirmOpen };
+    return {
+      native: this.canHandle(),
+      armed: Boolean(this.armedUntil && now <= this.armedUntil),
+      confirmOpen: this.confirmOpen
+    };
   }
 }
 
@@ -429,7 +441,6 @@ export class NavigationManager {
     draftGuard: DraftGuard;
     rootExitGuard: RootExitGuard;
     documentTarget?: Document;
-    legacyBack?: BackHandler;
     confirmDraftLeave?: (options: { scope?: string; onConfirm(): void }) => void;
   }) {}
 
@@ -448,12 +459,18 @@ export class NavigationManager {
       sequence: ++this.childSequence
     };
     this.childEntries.push(entry);
-    return () => { this.childEntries = this.childEntries.filter((candidate) => candidate !== entry); };
+    return () => {
+      this.childEntries = this.childEntries.filter((candidate) => candidate !== entry);
+    };
   }
 
   canGoBack(): boolean {
-    const overlays = this.options.overlayManager;
-    if (overlays.canDismiss([OVERLAY_KINDS.TRANSIENT, OVERLAY_KINDS.DIALOG, OVERLAY_KINDS.MODAL, OVERLAY_KINDS.SHEET])) return true;
+    if (this.options.overlayManager.canDismiss([
+      OVERLAY_KINDS.TRANSIENT,
+      OVERLAY_KINDS.DIALOG,
+      OVERLAY_KINDS.MODAL,
+      OVERLAY_KINDS.SHEET
+    ])) return true;
     if (this.options.flowNavigation.canBack()) return true;
     if (this.topChild()) return true;
     return this.options.rootExitGuard.canHandle();
@@ -470,10 +487,6 @@ export class NavigationManager {
     if (flow) return this.runEntry(flow);
     const child = this.topChild();
     if (child) return this.runEntry(child);
-    if (this.options.legacyBack) {
-      invoke(this.options.legacyBack);
-      return true;
-    }
     return this.options.rootExitGuard.back();
   }
 
@@ -505,7 +518,8 @@ export class NavigationManager {
 
   private handleKeyboard(): boolean {
     const active = this.options.documentTarget?.activeElement;
-    if (!(active instanceof HTMLElement) || active === this.options.documentTarget?.body) return false;
+    if (!active || typeof HTMLElement === "undefined" || !(active instanceof HTMLElement)) return false;
+    if (active === this.options.documentTarget?.body) return false;
     const tag = active.tagName.toLowerCase();
     if (!["input", "textarea", "select"].includes(tag) && !active.isContentEditable) return false;
     active.blur();
@@ -515,6 +529,7 @@ export class NavigationManager {
 
 export class BackGestureAdapter {
   constructor(private readonly navigation: NavigationManager) {}
+
   back(source = "system"): boolean {
     return this.navigation.back({ source });
   }
@@ -537,17 +552,19 @@ export class InteractionFoundation {
   } = {}) {
     const documentTarget = options.documentTarget ?? (typeof document === "undefined" ? undefined : document);
     const windowTarget = options.windowTarget ?? (typeof window === "undefined" ? undefined : window);
+
     this.overlayManager = new OverlayManager(documentTarget).start();
     this.flowNavigation = new FlowNavigation();
     this.draftGuard = new DraftGuard(windowTarget);
+
     const isNative = options.isNative ?? (() => Boolean(windowTarget?.AromaSenseNative?.exitApp));
     const exit = options.exit ?? (() => windowTarget?.AromaSenseNative?.exitApp());
     this.rootExitGuard = new RootExitGuard({
       draftGuard: this.draftGuard,
       isNative,
       exit,
-      notify: (message) => this.overlayManager.showNotice(message),
-      openConfirmation: ({ dirty, onConfirm, onCancel }) => {
+      notify: (message: string) => this.overlayManager.showNotice(message),
+      openConfirmation: ({ dirty, onConfirm, onCancel }: RootExitConfirmation) => {
         this.overlayManager.openSystemDialog({
           id: "interaction-root-exit-confirm",
           title: "退出香迹？",
@@ -560,17 +577,20 @@ export class InteractionFoundation {
         });
       }
     });
+
     this.navigationManager = new NavigationManager({
       overlayManager: this.overlayManager,
       flowNavigation: this.flowNavigation,
       draftGuard: this.draftGuard,
       rootExitGuard: this.rootExitGuard,
       documentTarget,
-      confirmDraftLeave: ({ scope, onConfirm }) => {
+      confirmDraftLeave: ({ scope, onConfirm }: { scope?: string; onConfirm(): void }) => {
         this.overlayManager.openSystemDialog({
           id: "interaction-draft-confirm",
           title: "存在未保存修改",
-          message: scope ? `“${scope}”尚未保存。继续返回会离开当前编辑内容。` : "当前编辑尚未保存。继续返回会离开当前编辑内容。",
+          message: scope
+            ? `“${scope}”尚未保存。继续返回会离开当前编辑内容。`
+            : "当前编辑尚未保存。继续返回会离开当前编辑内容。",
           confirmLabel: "继续返回",
           cancelLabel: "留在这里",
           danger: true,
@@ -580,18 +600,20 @@ export class InteractionFoundation {
       }
     });
     this.backGesture = new BackGestureAdapter(this.navigationManager);
-    this.api = Object.freeze({
-      back: (backOptions = {}) => this.navigationManager.back(backOptions),
+
+    const api: AromaSenseNavigationApi = {
+      back: (backOptions: { source?: string } = {}) => this.navigationManager.back(backOptions),
       systemBack: () => this.backGesture.back("android-system"),
       canGoBack: () => this.navigationManager.canGoBack(),
       snapshot: () => this.navigationManager.snapshot(),
-      registerOverlay: (registration) => this.overlayManager.register(registration),
-      registerFlowBack: (registration) => this.flowNavigation.register(registration),
-      registerChildBack: (registration) => this.navigationManager.registerChildBack(registration),
-      setDraftDirty: (scope, dirty = true) => this.draftGuard.setDirty(scope, dirty),
-      clearDraft: (scope) => this.draftGuard.clear(scope),
-      isDraftDirty: (scope) => this.draftGuard.isDirty(scope)
-    });
+      registerOverlay: (registration: RegisterOverlayOptions) => this.overlayManager.register(registration),
+      registerFlowBack: (registration: RegisterBackOptions) => this.flowNavigation.register(registration),
+      registerChildBack: (registration: RegisterBackOptions) => this.navigationManager.registerChildBack(registration),
+      setDraftDirty: (scope: string, dirty = true) => this.draftGuard.setDirty(scope, dirty),
+      clearDraft: (scope: string) => this.draftGuard.clear(scope),
+      isDraftDirty: (scope?: string) => this.draftGuard.isDirty(scope)
+    };
+    this.api = Object.freeze(api);
   }
 
   dispose(): void {
