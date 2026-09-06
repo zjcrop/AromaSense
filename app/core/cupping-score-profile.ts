@@ -1,7 +1,7 @@
 import { SCA_CVA_CALCULATOR_VERSION } from "./sca-cva-score-engine";
 import { cuppingModeFromMetadata, type CuppingMode, type CuppingSessionMetadata } from "./session-metadata";
 
-export type CuppingScoreProfileId = "open" | "blind" | "semi_blind";
+export type CuppingScoreProfileId = CuppingMode;
 export type CuppingCalculatorVersion = typeof SCA_CVA_CALCULATOR_VERSION | "aromasense-quality-0.1c";
 
 export interface CuppingScoreProfile {
@@ -15,12 +15,21 @@ export interface CuppingScoreProfile {
 }
 
 const PROFILES: Record<CuppingScoreProfileId, CuppingScoreProfile> = {
-  open: {
-    id: "open",
-    mode: "open",
-    label: "公开杯测",
+  free: {
+    id: "free",
+    mode: "free",
+    label: "自由杯测",
     scoreLabel: "SCA CVA Affective Score",
-    scoreNote: "按SCA-104 Affective Assessment计算；香迹描述性强度与风味侧写不进入该分数。",
+    scoreNote: "按SCA-104 Affective Assessment计算；自由杯测仅改变计时与样品编辑约束，不改变评分公式。",
+    metadataPolicy: "visible",
+    calculatorVersion: SCA_CVA_CALCULATOR_VERSION
+  },
+  timed: {
+    id: "timed",
+    mode: "timed",
+    label: "计时杯测",
+    scoreLabel: "SCA CVA Affective Score",
+    scoreNote: "按SCA-104 Affective Assessment计算；计时与样品锁定不改变评分公式。",
     metadataPolicy: "visible",
     calculatorVersion: SCA_CVA_CALCULATOR_VERSION
   },
