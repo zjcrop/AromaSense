@@ -17,19 +17,23 @@ function manifest(): string {
   ]});
 }
 
-test("Yingxiang D1 migrations execute and enforce invite, calibration, host and sequence guards", () => {
+test("Yingxiang D1 migrations execute and enforce invite, calibration, host, recovery and sequence guards", () => {
   const db = new DatabaseSync(":memory:");
   try {
     db.exec("PRAGMA foreign_keys = ON; CREATE TABLE users (user_id TEXT PRIMARY KEY);");
     db.exec(sql("cloud/worker/migrations/0007_yingxiang_events.sql"));
     db.exec(sql("cloud/worker/migrations/0008_account_display_name.sql"));
     db.exec(sql("cloud/worker/migrations/0010_yingxiang_host_accounts_and_sequence.sql"));
+    db.exec(sql("cloud/worker/migrations/0011_yingxiang_host_recovery.sql"));
 
     db.prepare("INSERT INTO users (user_id, display_name) VALUES (?, ?)").run("host-1", "主办方账户");
     db.prepare("INSERT INTO users (user_id, display_name) VALUES (?, ?)").run("host-shadow-2", "独立迎香账户");
-    db.prepare(`INSERT INTO yingxiang_host_accounts (account_id, account_key, account_name, owner_user_id, device_secret_hash, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run("yx-account-1", "roaster lab", "Roaster Lab", "host-shadow-2", "hash", "2026-09-06T00:00:00.000Z", "2026-09-06T00:00:00.000Z");
+    db.prepare(`INSERT INTO yingxiang_host_accounts (account_id, account_key, account_name, owner_user_id, device_secret_hash, created_at, updated_at, recovery_secret_hash, recovery_updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("yx-account-1", "roaster lab", "Roaster Lab", "host-shadow-2", "hash", "2026-09-06T00:00:00.000Z", "2026-09-06T00:00:00.000Z", "recovery-hash", "2026-09-06T00:00:00.000Z");
+    const recovery = db.prepare("SELECT recovery_secret_hash, recovery_updated_at FROM yingxiang_host_accounts WHERE account_id = ?").get("yx-account-1") as { recovery_secret_hash: string; recovery_updated_at: string };
+    assert.equal(recovery.recovery_secret_hash, "recovery-hash");
+    assert.equal(recovery.recovery_updated_at, "2026-09-06T00:00:00.000Z");
     assert.throws(() => db.prepare(`INSERT INTO yingxiang_host_accounts (account_id, account_key, account_name, owner_user_id, device_secret_hash, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run("yx-account-2", "roaster lab", "Duplicate", "host-1", "hash-2", "2026-09-06T00:00:00.000Z", "2026-09-06T00:00:00.000Z"), /UNIQUE/i);
