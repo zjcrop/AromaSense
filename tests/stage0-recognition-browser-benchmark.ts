@@ -136,41 +136,35 @@ async function multiEntryFixture(): Promise<File> {
 async function recognizeCase(file: File): Promise<{ result: Awaited<ReturnType<SampleRecognitionService["recognizePage"]>>; times: CaseResult }> {
   const original = await waitForRuntime();
   const phases: PhaseTimes = { imagePreparationMs: 0, ocrMs: 0, canonicalMs: 0 };
-  const proxy = new Proxy(original, {
-    get(target, property, receiver) {
-      if (property === "preparePackageImage") {
-        return async (...args: Parameters<LuckyBeanRecognitionCore["preparePackageImage"]>) => {
-          const started = performance.now();
-          try { return await target.preparePackageImage(...args); }
-          finally { phases.imagePreparationMs += performance.now() - started; }
-        };
-      }
-      if (property === "recognizeCoffeeBag") {
-        return async (...args: Parameters<LuckyBeanRecognitionCore["recognizeCoffeeBag"]>) => {
-          const started = performance.now();
-          try { return await target.recognizeCoffeeBag(...args); }
-          finally { phases.ocrMs += performance.now() - started; }
-        };
-      }
-      if (property === "createRecognitionDocument") {
-        return (...args: Parameters<LuckyBeanRecognitionCore["createRecognitionDocument"]>) => {
-          const started = performance.now();
-          try { return target.createRecognitionDocument(...args); }
-          finally { phases.canonicalMs += performance.now() - started; }
-        };
-      }
-      if (property === "analyzeRecognitionDocument") {
-        return (...args: Parameters<LuckyBeanRecognitionCore["analyzeRecognitionDocument"]>) => {
-          const started = performance.now();
-          try { return target.analyzeRecognitionDocument(...args); }
-          finally { phases.canonicalMs += performance.now() - started; }
-        };
-      }
-      return Reflect.get(target as object, property, receiver);
-    }
-  }) as LuckyBeanRecognitionCore;
 
-  window.LuckyBeanRecognitionCore = proxy;
+  // LuckyBean deliberately exposes the production recognition contract via Object.freeze().
+  // A Proxy cannot legally return replacement values for its frozen non-configurable properties,
+  // so benchmark timing uses a plain wrapper object and restores the original global afterwards.
+  const timedCore: LuckyBeanRecognitionCore = {
+    ...original,
+    preparePackageImage: async (...args: Parameters<LuckyBeanRecognitionCore["preparePackageImage"]>) => {
+      const started = performance.now();
+      try { return await original.preparePackageImage(...args); }
+      finally { phases.imagePreparationMs += performance.now() - started; }
+    },
+    recognizeCoffeeBag: async (...args: Parameters<LuckyBeanRecognitionCore["recognizeCoffeeBag"]>) => {
+      const started = performance.now();
+      try { return await original.recognizeCoffeeBag(...args); }
+      finally { phases.ocrMs += performance.now() - started; }
+    },
+    createRecognitionDocument: (...args: Parameters<LuckyBeanRecognitionCore["createRecognitionDocument"]>) => {
+      const started = performance.now();
+      try { return original.createRecognitionDocument(...args); }
+      finally { phases.canonicalMs += performance.now() - started; }
+    },
+    analyzeRecognitionDocument: (...args: Parameters<LuckyBeanRecognitionCore["analyzeRecognitionDocument"]>) => {
+      const started = performance.now();
+      try { return original.analyzeRecognitionDocument(...args); }
+      finally { phases.canonicalMs += performance.now() - started; }
+    }
+  };
+
+  window.LuckyBeanRecognitionCore = timedCore;
   const started = performance.now();
   try {
     const result = await new SampleRecognitionService().recognizePage(file, 0);
