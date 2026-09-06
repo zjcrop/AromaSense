@@ -25,7 +25,10 @@ interface SharedRecordCandidateResult {
 
 type RecordCandidateCore = ReturnType<typeof requireLuckyBeanRecognitionCore> & {
   RECOGNITION_RECORD_CANDIDATE_SCHEMA?: string;
-  groupRecognitionRecordCandidates?(document: LuckyBeanRecognitionDocument): SharedRecordCandidateResult;
+  groupRecognitionRecordCandidates?(
+    document: LuckyBeanRecognitionDocument,
+    options?: { sourceWidth?: number; sourceHeight?: number }
+  ): SharedRecordCandidateResult;
 };
 
 function unionBox(lines: readonly OCRLayoutLine[]): OCRBox {
@@ -77,20 +80,33 @@ function upstreamDocument(document: OCRLayoutDocument, core: RecordCandidateCore
   });
 }
 
+function optionalRecordCandidateCore(): RecordCandidateCore | undefined {
+  try {
+    return requireLuckyBeanRecognitionCore() as RecordCandidateCore;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Adapter only: LuckyBean owns generic record-boundary detection; AromaSense owns
  * product-specific table/catalog hints. A shared candidate is accepted only when
  * every block id maps back to the current OCR layout and no line is assigned to
- * more than one record.
+ * more than one record. If the shared runtime is not loaded, callers may safely
+ * continue to their compatibility segmentation path.
  */
 export function sharedRecordCandidateLayout(document: OCRLayoutDocument): SampleLayoutResult | undefined {
-  const core = requireLuckyBeanRecognitionCore() as RecordCandidateCore;
+  const core = optionalRecordCandidateCore();
   if (
+    !core ||
     core.RECOGNITION_RECORD_CANDIDATE_SCHEMA !== "recognition-record-candidate/1.0" ||
     typeof core.groupRecognitionRecordCandidates !== "function"
   ) return undefined;
 
-  const grouped = core.groupRecognitionRecordCandidates(upstreamDocument(document, core));
+  const grouped = core.groupRecognitionRecordCandidates(upstreamDocument(document, core), {
+    sourceWidth: document.sourceWidth,
+    sourceHeight: document.sourceHeight
+  });
   const candidates = Array.isArray(grouped?.candidates) ? grouped.candidates : [];
   if (grouped?.grouped !== true || candidates.length < 2 || grouped.schemaVersion !== core.RECOGNITION_RECORD_CANDIDATE_SCHEMA) {
     return undefined;
