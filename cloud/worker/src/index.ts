@@ -2,6 +2,7 @@ import { handleYingxiangManagementRoute, handleYingxiangParticipantRoute } from 
 import { decodeProtectedHeader, importX509, jwtVerify, type JWTPayload } from "jose";
 import { createZhipuAiAdapter } from "../.foundation/runtime/ai-adapter.mjs";
 import { handleYingxiangAuthenticatedRoute, handleYingxiangPublicRoute } from "./yingxiang-api";
+import { authenticateYingxiangHost, handleYingxiangHostAuthRoute } from "./yingxiang-host-auth";
 
 interface Env {
   BUILD_SHA?: string;
@@ -259,6 +260,10 @@ export default {
     }
 
     if (!env.DB) return dbUnavailable();
+
+    const hostAuthResponse = await handleYingxiangHostAuthRoute(request, url, env.DB);
+    if (hostAuthResponse) return hostAuthResponse;
+
     if (url.pathname.startsWith("/api/v1/yingxiang/participants/")) {
       const response = await handleYingxiangParticipantRoute(request, url, env.DB);
       if (response) return response;
@@ -275,6 +280,19 @@ export default {
     if (url.pathname === "/api/v1/auth/exchange" && request.method === "POST") return handleExchange(request, env);
     if (url.pathname === "/api/v1/auth/logout" && request.method === "POST") return handleLogout(request, env.DB);
     if (url.pathname.startsWith("/api/v1/auth/") && request.method !== "OPTIONS") return json({ ok: false, error: "AUTH_PROVIDER_MIGRATED", provider: "firebase" }, 410);
+
+    // New Yingxiang host sessions are independent from the AromaSense/Firebase account.
+    // Existing Firebase-owned Yingxiang events still fall through to the legacy authenticated path below.
+    if (url.pathname.startsWith("/api/v1/yingxiang/events")) {
+      const hostUser = await authenticateYingxiangHost(request, env.DB);
+      if (hostUser) {
+        const managementResponse = await handleYingxiangManagementRoute(request, url, env.DB, hostUser);
+        if (managementResponse) return managementResponse;
+        const yingxiangResponse = await handleYingxiangAuthenticatedRoute(request, url, env.DB, hostUser, env.PUBLIC_APP_URL);
+        if (yingxiangResponse) return yingxiangResponse;
+        return json({ ok: false, error: "NOT_FOUND" }, 404);
+      }
+    }
 
     const user = await authenticate(request, env.DB);
     if (!user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
