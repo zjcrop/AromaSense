@@ -2,8 +2,9 @@ import type { CuppingRecordSnapshot } from "../../core/session-record-service";
 import type { SensoryObservation } from "../../../shared/protocol/aromasense-v1";
 import { cuppingModeLabel, cuppingModeFromMetadata } from "../../core/session-metadata";
 import { scoreProfileForMetadata } from "../../core/cupping-score-profile";
-import { calculateCuppingScore } from "./final-assessment-renderer";
-import { renderRadarSummary } from "./radar-renderer";
+import { calculateSCACVAScore } from "../../core/sca-cva-score-engine";
+import { calculateAromaSenseScore } from "./final-assessment-renderer";
+import { renderSensoryProfileConclusion } from "./sensory-profile-conclusion-renderer";
 import { button, clearElement, element } from "./dom-helpers";
 import { comparisonFieldKey, comparisonFields, normalizeComparisonBundle, type ComparisonBundle, type ComparisonMapping } from "../../core/comparison-bundle";
 
@@ -13,18 +14,13 @@ export interface RecordReplayComparisonOptions {
   onClear(): void | Promise<void>;
 }
 
-const PROFILE_AXES = [
-  ["profile_floral", "花香"], ["profile_fruit", "果香"], ["profile_tea", "茶感"],
-  ["profile_nut", "坚果"], ["profile_ferment", "酵感"], ["profile_spice", "香料"]
-] as const;
-const QUALITY_AXES = [
-  ["quality_flavor", "风味"], ["quality_aftertaste", "余韵"], ["quality_acidity", "酸质"], ["quality_sweetness", "甜感"],
-  ["quality_body", "醇厚度"], ["quality_clean", "干净度"], ["quality_uniformity", "一致性"], ["quality_balance", "平衡性"]
+const LEGACY_QUALITY_FIELDS = [
+  "quality_flavor", "quality_aftertaste", "quality_acidity", "quality_sweetness",
+  "quality_body", "quality_clean", "quality_uniformity", "quality_balance"
 ] as const;
 
-function numeric(observations: readonly SensoryObservation[], key: string): number {
-  const item = observations.find((entry) => entry.fieldKey === key);
-  return typeof item?.value === "number" && Number.isFinite(item.value) ? item.value : 0;
+function hasLegacyScore(observations: readonly SensoryObservation[]): boolean {
+  return LEGACY_QUALITY_FIELDS.every((fieldKey) => observations.some((item) => item.fieldKey === fieldKey && typeof item.value === "number"));
 }
 
 function readable(value: unknown): string {
@@ -73,15 +69,20 @@ export class RecordReplayRenderer {
       const section = element("section", "record-replay__sample");
       section.append(element("h2", "record-replay__sample-title", `${String(sample.displayNumber).padStart(2, "0")} · ${sample.label ?? "未命名样品"}`));
 
-      const radars = element("div", "record-replay__radars");
-      const profile = element("div", "record-replay__radar");
-      renderRadarSummary(profile, PROFILE_AXES.map(([key, label]) => ({ key, label, value: numeric(observations, key), max: 10 })), { title: "风味倾向雷达图" });
-      const quality = element("div", "record-replay__radar");
-      renderRadarSummary(quality, QUALITY_AXES.map(([key, label]) => ({ key, label, value: numeric(observations, key), max: 10 })), { title: "感官质量雷达图" });
-      radars.append(profile, quality); section.append(radars);
+      const sca = calculateSCACVAScore(observations);
+      if (sca.complete && sca.score !== undefined) {
+        section.append(element("div", "record-replay__score", `${scoreProfile.scoreLabel} ${sca.score.toFixed(2)}`));
+      } else if (hasLegacyScore(observations)) {
+        const legacy = calculateAromaSenseScore(observations);
+        section.append(
+          element("div", "record-replay__score", `历史 AromaSense 0.1c ${legacy.toFixed(1)}`),
+          element("small", "record-replay__score-note", "该历史记录缺少完整SCA-104输入，不能把旧分数换算或标注为SCA得分。")
+        );
+      } else {
+        section.append(element("div", "record-replay__score", `${scoreProfile.scoreLabel} —`));
+      }
 
-      const score = calculateCuppingScore(observations, scoreProfile);
-      section.append(element("div", "record-replay__score", `${scoreProfile.scoreLabel} ${score.toFixed(1)}`));
+      renderSensoryProfileConclusion(section, observations);
 
       const fields = element("dl", "record-replay__fields");
       const comparison = this.comparison ? new Map(comparisonFields(this.snapshot, this.comparison.bundle, this.comparison.mapping, sample.sampleId).map((item) => [comparisonFieldKey(item.flowStep, item.fieldKey), item] as const)) : new Map();

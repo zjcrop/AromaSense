@@ -1,6 +1,8 @@
+import { SCA_CVA_CALCULATOR_VERSION } from "./sca-cva-score-engine";
 import { cuppingModeFromMetadata, type CuppingMode, type CuppingSessionMetadata } from "./session-metadata";
 
 export type CuppingScoreProfileId = "open" | "blind" | "semi_blind";
+export type CuppingCalculatorVersion = typeof SCA_CVA_CALCULATOR_VERSION | "aromasense-quality-0.1c";
 
 export interface CuppingScoreProfile {
   id: CuppingScoreProfileId;
@@ -9,36 +11,36 @@ export interface CuppingScoreProfile {
   scoreLabel: string;
   scoreNote: string;
   metadataPolicy: "visible" | "hidden" | "semi_hidden";
-  calculatorVersion: "aromasense-quality-0.1c";
+  calculatorVersion: CuppingCalculatorVersion;
 }
 
 const PROFILES: Record<CuppingScoreProfileId, CuppingScoreProfile> = {
   open: {
     id: "open",
     mode: "open",
-    label: "公开杯测评分",
-    scoreLabel: "公开杯测总分",
-    scoreNote: "依据本次综合质量分项与缺陷记录计算。",
+    label: "公开杯测",
+    scoreLabel: "SCA CVA Affective Score",
+    scoreNote: "按SCA-104 Affective Assessment计算；香迹描述性强度与风味侧写不进入该分数。",
     metadataPolicy: "visible",
-    calculatorVersion: "aromasense-quality-0.1c"
+    calculatorVersion: SCA_CVA_CALCULATOR_VERSION
   },
   blind: {
     id: "blind",
     mode: "blind",
-    label: "盲测评分",
-    scoreLabel: "盲测感官总分",
-    scoreNote: "仅使用盲测过程中记录的感官质量与缺陷数据计算，不读取样品身份或豆子元数据。",
+    label: "盲测",
+    scoreLabel: "SCA CVA Affective Score",
+    scoreNote: "按SCA-104 Affective Assessment计算；样品身份与豆子元数据不参与计分。",
     metadataPolicy: "hidden",
-    calculatorVersion: "aromasense-quality-0.1c"
+    calculatorVersion: SCA_CVA_CALCULATOR_VERSION
   },
   semi_blind: {
     id: "semi_blind",
     mode: "semi_blind",
-    label: "半盲测评分",
-    scoreLabel: "半盲测感官总分",
-    scoreNote: "仅使用杯测过程中记录的感官质量与缺陷数据计算；被隐藏的样品身份字段不参与计分。",
+    label: "半盲测",
+    scoreLabel: "SCA CVA Affective Score",
+    scoreNote: "按SCA-104 Affective Assessment计算；被隐藏的样品身份字段不参与计分。",
     metadataPolicy: "semi_hidden",
-    calculatorVersion: "aromasense-quality-0.1c"
+    calculatorVersion: SCA_CVA_CALCULATOR_VERSION
   }
 };
 

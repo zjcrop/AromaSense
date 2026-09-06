@@ -1,6 +1,7 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import type { StageStatus } from "./cupping-state-machine";
 import { completionForStage } from "./completion-engine";
+import { SCA_CVA_REQUIRED_FIELD_KEYS } from "./sca-cva-score-engine";
 
 export const FINAL_ASSESSMENT_PHASES = ["flavor", "overall", "score"] as const;
 export type FinalAssessmentPhase = (typeof FINAL_ASSESSMENT_PHASES)[number];
@@ -18,27 +19,21 @@ export const STAGE_COMPLETION_HINTS: Readonly<Record<Exclude<StageId, "final">, 
   mid_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
   low_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
   flavor: "选择至少一个最终风味描述",
-  overall: "完成风味、余韵、酸质、甜感、醇厚度、干净度、一致性与平衡性八项综评",
-  scoring: "查看计算结果后主动确认评分"
+  overall: "完成SCA 8项Affective评分、非一致/缺陷杯数与香迹洁净度",
+  scoring: "查看SCA得分与风味侧写后主动确认"
 };
 
 const FINAL_OVERALL_REQUIRED_FIELDS = [
-  "quality_flavor",
-  "quality_aftertaste",
-  "quality_acidity",
-  "quality_sweetness",
-  "quality_body",
-  "quality_clean",
-  "quality_uniformity",
-  "quality_balance"
+  ...SCA_CVA_REQUIRED_FIELD_KEYS,
+  "quality_clean"
 ] as const;
 
 const CONTROL_FIELDS = new Set(["final_phase"]);
 
 export const FINAL_PHASE_COMPLETION_HINTS: Readonly<Record<FinalAssessmentPhase, string>> = {
   flavor: "选择至少一个最终风味描述",
-  overall: "完成风味、余韵、酸质、甜感、醇厚度、干净度、一致性与平衡性八项综评",
-  score: "查看计算结果后主动确认评分"
+  overall: "完成SCA 8项Affective评分、非一致/缺陷杯数与香迹洁净度",
+  score: "查看SCA得分、结构雷达与温度—风味演化后主动确认"
 };
 
 export function hasMeaningfulValue(value: unknown): boolean {
@@ -83,7 +78,8 @@ export function deriveFinalPhaseStatus(
   if (phase === "overall") {
     if (allPresent(map, FINAL_OVERALL_REQUIRED_FIELDS)) return "completed";
     const started = anyObservation(observations, (fieldKey) =>
-      fieldKey.startsWith("profile_")
+      fieldKey.startsWith("final_sca_")
+      || fieldKey.startsWith("profile_")
       || fieldKey.startsWith("quality_")
       || fieldKey.startsWith("defect_")
       || fieldKey.startsWith("off_flavor_")
@@ -120,7 +116,7 @@ export function deriveStageStatus(stageId: StageId, observations: readonly Senso
 
 export function stageCompletionHint(stageId: StageId): string {
   return stageId === "final"
-    ? "最终得分确认后，本样品即视为完成"
+    ? "最终SCA得分确认后，本样品即视为完成"
     : STAGE_COMPLETION_HINTS[stageId];
 }
 
@@ -131,7 +127,8 @@ export function meaningfulObservationCount(observations: readonly SensoryObserva
 }
 
 export function scoreAffectingField(fieldKey: string): boolean {
-  return fieldKey.startsWith("quality_")
+  return fieldKey.startsWith("final_sca_")
+    || fieldKey.startsWith("quality_")
     || fieldKey.startsWith("defect_")
     || fieldKey.startsWith("off_flavor_");
 }

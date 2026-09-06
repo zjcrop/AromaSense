@@ -6,12 +6,18 @@ import {
 } from "../../core/cupping-progress-policy";
 import { scoreProfileForMode, type CuppingScoreProfile } from "../../core/cupping-score-profile";
 import type { CuppingCompletionTiming } from "../../core/cupping-timing";
+import {
+  calculateSCACVAScore,
+  SCA_CVA_AFFECTIVE_FIELDS,
+  SCA_CVA_CALCULATOR_VERSION,
+  SCA_DEFECTIVE_CUPS_FIELD,
+  SCA_NON_UNIFORM_CUPS_FIELD
+} from "../../core/sca-cva-score-engine";
 import type { FlavorGroupPreferences } from "../flavor-group-preferences";
-import type { RadarAxisValue } from "../sample-summary-model";
 import { button, clearElement, element, setPressed } from "./dom-helpers";
-import { renderRadarSummary } from "./radar-renderer";
 import { renderSensoryEditor } from "./sensory-editor-renderer";
 import { DEFECT_ITEMS, defectPenalty } from "../../core/defect-dictionary";
+import { renderSensoryProfileConclusion } from "./sensory-profile-conclusion-renderer";
 
 export type { FinalAssessmentPhase } from "../../core/cupping-progress-policy";
 
@@ -22,6 +28,7 @@ export interface FinalAssessmentCallbacks {
 
 export interface FinalAssessmentInput {
   observations: readonly SensoryObservation[];
+  profileObservations?: readonly SensoryObservation[];
   flavorPreferences: FlavorGroupPreferences;
   callbacks: FinalAssessmentCallbacks;
   scoreProfile?: CuppingScoreProfile;
@@ -29,14 +36,9 @@ export interface FinalAssessmentInput {
   completionTiming?: CuppingCompletionTiming;
 }
 
-const PROFILE_AXES = [
-  ["profile_floral", "花香"], ["profile_fruit", "果香"], ["profile_tea", "茶感"],
-  ["profile_nut", "坚果"], ["profile_ferment", "酵感"], ["profile_spice", "香料"]
-] as const;
-
-const QUALITY_AXES = [
-  ["quality_flavor", "风味"], ["quality_aftertaste", "余韵"], ["quality_acidity", "酸质"], ["quality_sweetness", "甜感"],
-  ["quality_body", "醇厚度"], ["quality_clean", "干净度"], ["quality_uniformity", "一致性"], ["quality_balance", "平衡性"]
+const LEGACY_QUALITY_AXES = [
+  "quality_flavor", "quality_aftertaste", "quality_acidity", "quality_sweetness",
+  "quality_body", "quality_clean", "quality_uniformity", "quality_balance"
 ] as const;
 
 function ensureScoreConfirmationStyles(): void {
@@ -45,19 +47,26 @@ function ensureScoreConfirmationStyles(): void {
   style.dataset.aromasenseScoreConfirmation = "true";
   style.textContent = `
     .final-assessment__score-confirm{display:block;min-width:min(320px,90%);margin:24px auto 0;padding:14px 24px;text-align:center;font-size:18px!important;font-weight:800!important;letter-spacing:.04em}
-    .final-assessment__score-confirm.is-confirmed{font-weight:800!important}
-    .final-assessment__score-lock-note{display:block;margin:8px auto 0;max-width:520px;text-align:center;color:#989289;font-size:11px;line-height:1.55}
-    .cupping-completion-stamp{margin:9px auto 0;padding:7px 10px;max-width:520px;text-align:center;border:1px solid rgba(185,153,90,.18);border-radius:8px;background:rgba(185,153,90,.05);color:#aaa398;font-size:11px;line-height:1.45}
-    .cupping-completion-stamp strong{color:#c9bea4;font-weight:700}
+    .final-assessment__score-confirm.is-confirmed{font-weight:800!important}.final-assessment__score-confirm:disabled:not(.is-confirmed){opacity:.42}
+    .final-assessment__score-lock-note{display:block;margin:8px auto 0;max-width:620px;text-align:center;color:#989289;font-size:11px;line-height:1.55}
+    .final-assessment__sca-note{margin:6px 0 0;color:#9a958d;font-size:10px;line-height:1.5}.final-assessment__sca-note.is-warning{color:#c8a57d}
+    .final-assessment__sca-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 16px}.final-assessment__sca-scale{display:grid;grid-template-columns:72px minmax(0,1fr) 34px;gap:8px;align-items:center;padding:7px 0}
+    .final-assessment__sca-scale-label{font-size:11px;color:#cfc8bc}.final-assessment__sca-scale-input{width:100%}.final-assessment__sca-scale-value{text-align:center;font-variant-numeric:tabular-nums;color:#d9c28f}.final-assessment__sca-scale.is-unset .final-assessment__sca-scale-value{color:#6e6a64}
+    .final-assessment__cup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;margin-top:10px}.final-assessment__cup-field{display:grid;gap:5px;font-size:11px;color:#b6afa4}.final-assessment__cup-field select{min-height:38px;border:1px solid rgba(185,153,90,.32);border-radius:7px;background:#151515;color:#eee;padding:6px 8px}
+    .final-assessment__zero-cups{margin-top:9px;border:1px solid rgba(185,153,90,.3);border-radius:7px;background:transparent;color:#d6c49e;padding:8px 11px}
+    .cupping-completion-stamp{margin:9px auto 0;padding:7px 10px;max-width:520px;text-align:center;border:1px solid rgba(185,153,90,.18);border-radius:8px;background:rgba(185,153,90,.05);color:#aaa398;font-size:11px;line-height:1.45}.cupping-completion-stamp strong{color:#c9bea4;font-weight:700}
+    @media(max-width:620px){.final-assessment__sca-grid,.final-assessment__cup-grid{grid-template-columns:1fr}}
   `;
   document.head.append(style);
 }
 
 function values(observations: readonly SensoryObservation[]): Map<string, unknown> {
-  return new Map(observations.map((item) => [item.fieldKey, item.value] as const));
+  const map = new Map<string, unknown>();
+  for (const item of observations) map.set(item.fieldKey, item.value);
+  return map;
 }
 
-function numeric(map: Map<string, unknown>, key: string): number {
+function numeric(map: ReadonlyMap<string, unknown>, key: string): number {
   const value = map.get(key);
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -67,12 +76,8 @@ export function finalAssessmentPhase(observations: readonly SensoryObservation[]
   return raw === "overall" || raw === "score" ? raw : "flavor";
 }
 
-function axisValues(map: Map<string, unknown>, axes: readonly (readonly [string, string])[]): RadarAxisValue[] {
-  return axes.map(([key, label]) => ({ key, label, value: numeric(map, key), max: 10 }));
-}
-
-function scoreFromMap(map: Map<string, unknown>): number {
-  const quality = QUALITY_AXES.map(([key]) => numeric(map, key));
+function legacyScoreFromMap(map: ReadonlyMap<string, unknown>): number {
+  const quality = LEGACY_QUALITY_AXES.map((key) => numeric(map, key));
   const base = quality.length ? quality.reduce((sum, value) => sum + value, 0) / quality.length * 10 : 0;
   const overtPenalty = (map.get("defect_overt_mold") === true ? 5 : 0)
     + (map.get("defect_overt_bad_fermentation") === true ? 5 : 0);
@@ -82,184 +87,181 @@ function scoreFromMap(map: Map<string, unknown>): number {
   return Math.max(0, Math.min(100, Math.round((base - overtPenalty - latentPenalty - offFlavorPenalty - canonicalDefectPenalty) * 10) / 10));
 }
 
+export function calculateAromaSenseScore(observations: readonly SensoryObservation[]): number {
+  return legacyScoreFromMap(values(observations));
+}
+
 export function calculateCuppingScore(
   observations: readonly SensoryObservation[],
   profile: CuppingScoreProfile = scoreProfileForMode("open")
 ): number {
-  if (profile.calculatorVersion !== "aromasense-quality-0.1c") throw new Error(`UNKNOWN_SCORE_CALCULATOR:${profile.calculatorVersion}`);
-  return scoreFromMap(values(observations));
+  if (profile.calculatorVersion === "aromasense-quality-0.1c") return calculateAromaSenseScore(observations);
+  if (profile.calculatorVersion !== SCA_CVA_CALCULATOR_VERSION) throw new Error(`UNKNOWN_SCORE_CALCULATOR:${profile.calculatorVersion}`);
+  const result = calculateSCACVAScore(observations);
+  if (!result.complete || result.score === undefined) throw new Error(`SCA_CVA_AFFECTIVE_INCOMPLETE:${[...result.missing, ...result.invalid].join(",")}`);
+  return result.score;
 }
 
-/** Backward-compatible public name used by existing reports/tests. */
-export function calculateAromaSenseScore(observations: readonly SensoryObservation[]): number {
-  return calculateCuppingScore(observations, scoreProfileForMode("open"));
-}
-
-function renderScale(
-  map: Map<string, unknown>,
-  key: string,
-  label: string,
-  callbacks: FinalAssessmentCallbacks,
-  onLive?: (key: string, value: number) => void
-): HTMLElement {
+function renderStructureScale(map: ReadonlyMap<string, unknown>, callbacks: FinalAssessmentCallbacks): HTMLElement {
   const field = element("label", "final-assessment__scale");
-  field.dataset.fieldKey = key;
-  const header = element("span", "final-assessment__scale-label", label);
+  field.dataset.fieldKey = "quality_clean";
+  const header = element("span", "final-assessment__scale-label", "洁净度 · 香迹结构");
   const output = element("output", "final-assessment__scale-value");
   const input = element("input", "final-assessment__scale-input");
-  input.type = "range";
-  input.min = "0";
-  input.max = "10";
-  input.step = "0.5";
-  input.value = String(numeric(map, key));
-  output.value = input.value;
-  input.addEventListener("input", () => {
-    output.value = input.value;
-    onLive?.(key, Number(input.value));
-  });
-  input.addEventListener("change", () => void callbacks.saveField(key, Number(input.value)));
+  input.type = "range"; input.min = "0"; input.max = "10"; input.step = "0.5";
+  input.value = String(numeric(map, "quality_clean")); output.value = input.value;
+  input.addEventListener("input", () => { output.value = input.value; });
+  input.addEventListener("change", () => void callbacks.saveField("quality_clean", Number(input.value)));
   field.append(header, input, output);
   return field;
+}
+
+function renderSCAScale(map: ReadonlyMap<string, unknown>, key: string, label: string, callbacks: FinalAssessmentCallbacks): HTMLElement {
+  const current = map.get(key);
+  const hasValue = typeof current === "number" && Number.isInteger(current) && current >= 1 && current <= 9;
+  const field = element("label", `final-assessment__sca-scale${hasValue ? "" : " is-unset"}`);
+  field.dataset.fieldKey = key;
+  const caption = element("span", "final-assessment__sca-scale-label", label);
+  const output = element("output", "final-assessment__sca-scale-value", hasValue ? String(current) : "—");
+  const range = element("input", "final-assessment__sca-scale-input");
+  range.type = "range"; range.min = "1"; range.max = "9"; range.step = "1"; range.value = hasValue ? String(current) : "5";
+  range.addEventListener("input", () => { output.value = range.value; field.classList.remove("is-unset"); });
+  range.addEventListener("change", () => void callbacks.saveField(key, Number(range.value)));
+  field.append(caption, range, output);
+  return field;
+}
+
+function renderCupCount(map: ReadonlyMap<string, unknown>, key: string, label: string, callbacks: FinalAssessmentCallbacks): HTMLLabelElement {
+  const wrapper = element("label", "final-assessment__cup-field");
+  wrapper.append(element("span", "", label));
+  const select = element("select", "");
+  select.append(new Option("未记录", ""));
+  for (let value = 0; value <= 5; value += 1) select.append(new Option(String(value), String(value)));
+  const current = map.get(key);
+  select.value = typeof current === "number" && Number.isInteger(current) && current >= 0 && current <= 5 ? String(current) : "";
+  select.addEventListener("change", () => { if (select.value !== "") void callbacks.saveField(key, Number(select.value)); });
+  wrapper.append(select);
+  return wrapper;
 }
 
 function renderOverall(root: HTMLElement, input: FinalAssessmentInput): void {
   const map = values(input.observations);
   const profile = input.scoreProfile ?? scoreProfileForMode("open");
+  const score = calculateSCACVAScore(input.observations);
   const liveScore = element("section", "final-assessment__live-score");
-  const liveValue = element("strong", "final-assessment__live-score-value", scoreFromMap(map).toFixed(1));
   liveScore.append(
-    element("span", "final-assessment__live-score-label", `实时总分 · ${profile.label}`),
-    liveValue,
-    element("small", "final-assessment__live-score-note", `${profile.scoreNote} 缺陷与异味在确认后同步扣减。`)
+    element("span", "final-assessment__live-score-label", `SCA CVA · ${profile.label}`),
+    element("strong", "final-assessment__live-score-value", score.complete && score.score !== undefined ? score.score.toFixed(2) : "—"),
+    element("small", `final-assessment__live-score-note${score.complete ? "" : " is-warning"}`, score.complete
+      ? "SCA-104 Affective Assessment：8项1–9分 + 非一致杯/缺陷杯扣分。"
+      : `待完成：${score.missing.length + score.invalid.length} 项；缺失不会按0自动计入。`)
   );
   root.append(liveScore);
 
-  const radarGrid = element("div", "final-assessment__radars");
-  const flavorRadar = element("div", "final-assessment__radar");
-  const qualityRadar = element("div", "final-assessment__radar");
-  renderRadarSummary(flavorRadar, axisValues(map, PROFILE_AXES), {
-    title: "风味倾向雷达图",
-    ariaLabel: "花香、果香、茶感、坚果、酵感、香料风味倾向雷达图"
-  });
-  renderRadarSummary(qualityRadar, axisValues(map, QUALITY_AXES), {
-    title: "感官质量雷达图",
-    ariaLabel: "风味、余韵、酸质、甜感、醇厚度、干净度、一致性、平衡性感官质量雷达图"
-  });
-  radarGrid.append(flavorRadar, qualityRadar);
-  root.append(radarGrid);
+  const sca = element("section", "final-assessment__section");
+  sca.append(
+    element("h3", "final-assessment__section-title", "SCA CVA Affective Assessment"),
+    element("p", "final-assessment__sca-note", "以下8项均使用1–9分最终情感/质量评价。酸甜苦等描述性强度与风味标签不会直接改变SCA得分。")
+  );
+  const grid = element("div", "final-assessment__sca-grid");
+  for (const field of SCA_CVA_AFFECTIVE_FIELDS) grid.append(renderSCAScale(map, field.key, field.label, input.callbacks));
+  sca.append(grid);
+  const cups = element("div", "final-assessment__cup-grid");
+  cups.append(
+    renderCupCount(map, SCA_NON_UNIFORM_CUPS_FIELD, "非一致杯数（每杯 −2）", input.callbacks),
+    renderCupCount(map, SCA_DEFECTIVE_CUPS_FIELD, "缺陷杯数（每杯 −4）", input.callbacks)
+  );
+  sca.append(cups, button("final-assessment__zero-cups", "两项均为 0", async () => {
+    await input.callbacks.saveField(SCA_NON_UNIFORM_CUPS_FIELD, 0);
+    await input.callbacks.saveField(SCA_DEFECTIVE_CUPS_FIELD, 0);
+  }));
+  root.append(sca);
 
-  const profileSection = element("section", "final-assessment__section");
-  profileSection.append(element("h3", "final-assessment__section-title", "风味倾向"));
-  const profileGrid = element("div", "final-assessment__scale-grid");
-  for (const [key, label] of PROFILE_AXES) {
-    profileGrid.append(renderScale(map, key, label, input.callbacks, (fieldKey, next) => map.set(fieldKey, next)));
-  }
-  profileSection.append(profileGrid);
-  root.append(profileSection);
-
-  const quality = element("section", "final-assessment__section");
-  quality.append(element("h3", "final-assessment__section-title", "综合质量"));
-  const qualityGrid = element("div", "final-assessment__scale-grid");
-  for (const [key, label] of QUALITY_AXES) {
-    qualityGrid.append(renderScale(map, key, label, input.callbacks, (fieldKey, next) => {
-      map.set(fieldKey, next);
-      liveValue.textContent = scoreFromMap(map).toFixed(1);
-    }));
-  }
-  quality.append(qualityGrid);
-  root.append(quality);
+  const structure = element("section", "final-assessment__section");
+  structure.append(
+    element("h3", "final-assessment__section-title", "香迹结构补充"),
+    element("p", "final-assessment__sca-note", "洁净度进入风味结构雷达图，但不进入SCA总分；平衡感不设独立轴，由酸、甜、苦结构关系体现。"),
+    renderStructureScale(map, input.callbacks)
+  );
+  root.append(structure);
 
   const defect = element("section", "final-assessment__section final-assessment__defects");
-  defect.append(element("h3", "final-assessment__section-title", "缺陷与异味"));
+  defect.append(
+    element("h3", "final-assessment__section-title", "具体缺陷 / 异味记录"),
+    element("p", "final-assessment__sca-note", "具体缺陷标签用于侧写与追溯，不直接代替SCA缺陷杯数扣分。")
+  );
   const selectedDefects = new Set(Array.isArray(map.get("defect_ids")) ? map.get("defect_ids") as string[] : []);
   const canonical = element("div", "final-assessment__choice-group");
-  canonical.append(element("strong", "final-assessment__choice-heading", "基座缺陷词典"));
   for (const item of DEFECT_ITEMS) {
     const control = button("final-assessment__choice", item.names["zh-Hans"], () => {
       if (selectedDefects.has(item.id)) selectedDefects.delete(item.id); else selectedDefects.add(item.id);
       void input.callbacks.saveField("defect_ids", [...selectedDefects]);
     });
-    setPressed(control, selectedDefects.has(item.id));
-    canonical.append(control);
+    setPressed(control, selectedDefects.has(item.id)); canonical.append(control);
   }
   const offNotes = element("textarea", "final-assessment__notes");
-  offNotes.rows = 2;
-  offNotes.placeholder = "缺陷 / 异味补充说明（可选）";
+  offNotes.rows = 2; offNotes.placeholder = "缺陷 / 异味补充说明（可选）";
   offNotes.value = typeof map.get("off_flavor_notes") === "string" ? String(map.get("off_flavor_notes")) : "";
   offNotes.addEventListener("change", () => void input.callbacks.saveField("off_flavor_notes", offNotes.value));
-  defect.append(canonical, offNotes);
-  root.append(defect);
+  defect.append(canonical, offNotes); root.append(defect);
 
   const summary = element("section", "final-assessment__section");
-  summary.append(element("h3", "final-assessment__section-title", "总结行"));
+  summary.append(element("h3", "final-assessment__section-title", "总结"));
   const textArea = element("textarea", "final-assessment__notes");
-  textArea.rows = 3;
-  textArea.placeholder = "用一句或数句总结本样品的综合表现";
+  textArea.rows = 3; textArea.placeholder = "用一句或数句总结本样品的综合表现";
   textArea.value = typeof map.get("overall_summary") === "string" ? String(map.get("overall_summary")) : "";
   textArea.addEventListener("change", () => void input.callbacks.saveField("overall_summary", textArea.value));
-  summary.append(textArea);
-  root.append(summary);
+  summary.append(textArea); root.append(summary);
 }
 
 function renderScore(root: HTMLElement, input: FinalAssessmentInput): void {
   const map = values(input.observations);
   const profile = input.scoreProfile ?? scoreProfileForMode("open");
-  const score = scoreFromMap(map);
+  const score = calculateSCACVAScore(input.observations);
   const hero = element("section", "final-assessment__score-hero");
   hero.append(
     element("span", "final-assessment__score-label", profile.scoreLabel),
-    element("strong", "final-assessment__score-value", score.toFixed(1)),
-    element("small", "final-assessment__score-note", `${profile.scoreNote} 当前使用 ${profile.calculatorVersion}。`)
+    element("strong", "final-assessment__score-value", score.complete && score.score !== undefined ? score.score.toFixed(2) : "—"),
+    element("small", `final-assessment__score-note${score.complete ? "" : " is-warning"}`, score.complete
+      ? `SCA-104 · ${score.calculatorVersion} · 非一致杯 −${score.nonUniformPenalty ?? 0} · 缺陷杯 −${score.defectivePenalty ?? 0}`
+      : `SCA输入未完成：${[...score.missing, ...score.invalid].join("、") || "未知字段"}`)
   );
   root.append(hero);
 
   const list = element("div", "final-assessment__score-list");
-  for (const [key, label] of QUALITY_AXES) {
+  for (const field of SCA_CVA_AFFECTIVE_FIELDS) {
     const row = element("div", "final-assessment__score-row");
-    row.append(element("span", "final-assessment__score-name", label), element("strong", "final-assessment__score-number", numeric(map, key).toFixed(1)));
+    const value = map.get(field.key);
+    row.append(element("span", "final-assessment__score-name", field.label), element("strong", "final-assessment__score-number", typeof value === "number" ? value.toFixed(0) : "—"));
     list.append(row);
   }
   root.append(list);
 
-  const penalties = element("div", "final-assessment__penalties");
-  if (map.get("defect_overt_mold") === true) penalties.append(element("span", "final-assessment__penalty", "霉腐 −5"));
-  if (map.get("defect_overt_bad_fermentation") === true) penalties.append(element("span", "final-assessment__penalty", "坏发酵 −5"));
-  if (map.get("defect_latent_mild_astringency") === true) penalties.append(element("span", "final-assessment__penalty", "轻微涩 −2"));
-  if (map.get("off_flavor_present") === true) penalties.append(element("span", "final-assessment__penalty", "异味 −3"));
-  const selectedDefects = Array.isArray(map.get("defect_ids")) ? map.get("defect_ids") as string[] : [];
-  for (const item of DEFECT_ITEMS.filter((candidate) => selectedDefects.includes(candidate.id))) {
-    penalties.append(element("span", "final-assessment__penalty", `${item.names["zh-Hans"]} −${item.severity === "overt" ? 5 : 2}`));
-  }
-  if (!penalties.childElementCount) penalties.append(element("span", "final-assessment__penalty is-none", "无缺陷扣分"));
-  root.append(penalties);
+  const source = input.profileObservations ?? input.observations;
+  renderSensoryProfileConclusion(root, source);
 
   const confirmationKey = input.phase === "score" ? "score_confirmed" : "final_score_confirmed";
   const confirmed = map.get(confirmationKey) === true;
   const confirm = button(
     `final-assessment__next final-assessment__score-confirm${confirmed ? " is-confirmed" : ""}`,
-    confirmed ? "得分已确认" : "确认得分",
+    confirmed ? "得分已确认" : score.complete ? "确认 SCA 得分" : "SCA 输入未完成",
     () => void input.callbacks.saveField(confirmationKey, true)
   );
-  confirm.disabled = confirmed;
+  confirm.disabled = confirmed || !score.complete;
   confirm.setAttribute("aria-pressed", String(confirmed));
-  confirm.title = confirmed ? "得分已确认；本样品杯测记录已锁定为只读" : FINAL_PHASE_COMPLETION_HINTS.score;
-  root.append(
-    confirm,
-    element("small", "final-assessment__score-lock-note", "确认得分后，本样品杯测记录将被锁定，无法修改。")
-  );
+  confirm.title = confirmed ? "得分已确认；本样品杯测记录已锁定为只读" : score.complete ? FINAL_PHASE_COMPLETION_HINTS.score : "返回综评补全SCA评分字段与异常杯数";
+  root.append(confirm, element("small", "final-assessment__score-lock-note", score.complete
+    ? "确认后锁定本样品。香迹雷达图与温度—风味演化图仅用于结构侧写，不参与SCA得分。"
+    : "SCA字段未完成时不能确认得分；缺失值不会被自动当作0。"));
   if (input.completionTiming) {
     const stamp = element("div", "cupping-completion-stamp");
-    stamp.append(
-      element("strong", "", "本分支完成"),
-      document.createTextNode(` · ${input.completionTiming.elapsedLabel} · ${input.completionTiming.clockLabel}`)
-    );
+    stamp.append(element("strong", "", "本分支完成"), document.createTextNode(` · ${input.completionTiming.elapsedLabel} · ${input.completionTiming.clockLabel}`));
     root.append(stamp);
   }
 }
 
 export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentInput): void {
-  ensureScoreConfirmationStyles();
-  clearElement(root);
+  ensureScoreConfirmationStyles(); clearElement(root);
   const phase = input.phase ?? finalAssessmentPhase(input.observations);
   const nav = element("nav", "final-assessment__phase-nav");
   const phaseSpec: Array<[FinalAssessmentPhase, string]> = [["flavor", "风味描述"], ["overall", "综评"], ["score", "评分"]];
@@ -272,9 +274,7 @@ export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentI
     nav.append(item);
   }
   root.append(nav);
-
-  const body = element("div", "final-assessment__body");
-  root.append(body);
+  const body = element("div", "final-assessment__body"); root.append(body);
 
   if (phase === "flavor") {
     renderSensoryEditor(body, {
@@ -287,7 +287,6 @@ export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentI
     if (!input.phase) body.append(button("final-assessment__next", "下一环节 · 综评", () => void input.callbacks.saveField("final_phase", "overall")));
     return;
   }
-
   if (phase === "overall") {
     renderOverall(body, input);
     if (!input.phase) {
@@ -295,14 +294,10 @@ export function renderFinalAssessment(root: HTMLElement, input: FinalAssessmentI
       actions.append(
         button("final-assessment__previous", "返回风味描述", () => void input.callbacks.saveField("final_phase", "flavor")),
         button("final-assessment__next", "下一环节 · 评分", () => void input.callbacks.saveField("final_phase", "score"))
-      );
-      body.append(actions);
+      ); body.append(actions);
     }
     return;
   }
-
   renderScore(body, input);
-  if (!input.phase) {
-    body.append(button("final-assessment__previous", "返回综评", () => void input.callbacks.saveField("final_phase", "overall")));
-  }
+  if (!input.phase) body.append(button("final-assessment__previous", "返回综评", () => void input.callbacks.saveField("final_phase", "overall")));
 }

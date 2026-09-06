@@ -493,6 +493,7 @@ export class CuppingScreenRenderer {
     if (active.context.stageId === "final") {
       renderFinalAssessment(this.editorRoot, {
         observations: active.slice.observations,
+        profileObservations: finalPhase === "score" ? await this.summaryReader.listObservations(active.context.sampleId) : undefined,
         flavorPreferences: preferences,
         callbacks,
         scoreProfile: scoreProfileForMetadata(state.sessionMetadata),
@@ -501,9 +502,11 @@ export class CuppingScreenRenderer {
     } else if (active.context.stageId === "flavor") {
       renderSensoryEditor(this.editorRoot, { stageId: "flavor", observations: active.slice.observations, flavorPreferences: preferences, callbacks, fieldFilter: new Set(["flavor_tags", "notes"]) });
     } else if (active.context.stageId === "overall" || active.context.stageId === "scoring") {
+      const allSampleObservations = active.context.stageId === "scoring"
+        ? await this.summaryReader.listObservations(active.context.sampleId)
+        : undefined;
       const scoringObservations = active.context.stageId === "scoring"
-        ? (await this.summaryReader.listObservations(active.context.sampleId))
-            .filter((item) => item.stageId === "overall" || item.stageId === "final")
+        ? (allSampleObservations ?? []).filter((item) => item.stageId === "overall" || item.stageId === "final")
             .map((item, index) => ({
               observationId: `score-source:${index}`, sessionId: state.sessionId, sampleId: active.context.sampleId,
               stageId: "scoring" as const, fieldKey: item.fieldKey, value: item.value,
@@ -514,6 +517,7 @@ export class CuppingScreenRenderer {
         observations: active.context.stageId === "scoring"
           ? [...scoringObservations, ...active.slice.observations.filter((item) => item.fieldKey === "score_confirmed")]
           : scoringObservations,
+        profileObservations: allSampleObservations,
         flavorPreferences: preferences,
         callbacks,
         scoreProfile: scoreProfileForMetadata(state.sessionMetadata),
