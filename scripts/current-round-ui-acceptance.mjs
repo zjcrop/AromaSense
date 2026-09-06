@@ -194,7 +194,7 @@ async function runAcceptance(appUrl) {
         currentId: current?.dataset.stageId, currentClass: current?.className,
         currentHint: current ? getComputedStyle(current,'::after').content : '',
         currentBorder: current ? getComputedStyle(current).borderBottomColor : '',
-        timer: timer?.textContent?.replace(/\s+/g,' ').trim() || '',
+        timer: timer?.textContent?.replace(/\\s+/g,' ').trim() || '',
         compactTimerLines: timer?.querySelectorAll('.cupping-rail-timer__compact-line').length || 0
       };
     })()`);
@@ -207,7 +207,7 @@ async function runAcceptance(appUrl) {
     await click(cdp, "[data-rail-toggle]");
     const legend = await waitExpression(cdp, `(() => {
       const node=document.querySelector('.cupping-progress-legend');
-      return node ? node.textContent?.replace(/\s+/g,' ').trim() : false;
+      return node ? node.textContent?.replace(/\\s+/g,' ').trim() : false;
     })()`, "three-state legend");
     requireCondition(/灰色\s*未开始/.test(legend) && /浅蓝\s*已开始/.test(legend) && /绿色\s*已完成/.test(legend), `Progress legend incomplete: ${legend}`);
 
@@ -249,7 +249,7 @@ async function runAcceptance(appUrl) {
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-completed')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma completed state");
     const completedBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(completedBorder !== activeBorder, `Completed state did not visibly change progress color: ${completedBorder}`);
-    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\s+/g,' ').trim() || ''`);
+    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\\s+/g,' ').trim() || ''`);
     requireCondition(/本进程完成/.test(aromaStamp) && /分\s*\d{2}秒/.test(aromaStamp) && /\d{2}:\d{2}/.test(aromaStamp), `Aroma completion timestamp missing: ${aromaStamp}`);
 
     await click(cdp, '[data-stage-id="scoring"]');
@@ -281,7 +281,7 @@ async function runAcceptance(appUrl) {
     const locked = await cdp.evaluate(`(() => ({
       banner: document.querySelector('.cupping-main__lock-status')?.textContent?.trim() || '',
       confirm: document.querySelector('.final-assessment__score-confirm')?.textContent?.trim() || '',
-      stamp: document.querySelector('.cupping-completion-stamp')?.textContent?.replace(/\s+/g,' ').trim() || '',
+      stamp: document.querySelector('.cupping-completion-stamp')?.textContent?.replace(/\\s+/g,' ').trim() || '',
       readonly: document.querySelector('.cupping-main__editor')?.getAttribute('aria-readonly') || ''
     }))()`);
     requireCondition(/得分已确认/.test(locked?.confirm || "") && locked?.readonly === "true", `Score confirmation did not lock the sample: ${JSON.stringify(locked)}`);
