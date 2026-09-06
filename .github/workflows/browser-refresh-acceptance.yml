@@ -36,12 +36,6 @@ jobs:
         run: node scripts/live-pages-smoke.mjs
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Upload reconciled Stage 2 package lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: aromasense-stage2-package-lock-${{ github.sha }}
-          path: package-lock.json
-          if-no-files-found: error
       - name: Build browser application
         run: npm run bundle:web
       - name: Record Stage 0 six-phase recognition baseline
