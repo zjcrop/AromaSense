@@ -6,11 +6,15 @@ import test from "node:test";
 const root = process.cwd();
 const source = (path: string) => readFileSync(resolve(root, path), "utf8");
 
-test("home records modal uses a plain dark overlay and paints loading state before the database query", () => {
+test("home records modal uses the shared Stage 1 scrim and paints loading state before the database query", () => {
   const app = source("app/runtime/dom-app.ts");
+  const shell = source("app/ui/dom/product-shell.css");
   const modalStyle = app.match(/\.home-modal\{[^}]+\}/u)?.[0] ?? "";
-  assert.match(modalStyle, /background:rgba\(0,0,0,\.74\)/u);
-  assert.doesNotMatch(modalStyle, /backdrop-filter/u);
+  assert.match(modalStyle, /background:transparent/u);
+  assert.match(modalStyle, /backdrop-filter:none/u);
+  assert.match(shell, /\.interaction-scrim\s*\{[^}]*background:var\(--interaction-scrim\)/u);
+  assert.match(shell, /\.interaction-scrim\s*\{[^}]*backdrop-filter:none!important/u);
+  assert.match(app, /overlayManager\.register/u);
   assert.match(app, /loading\.textContent = "正在读取杯测记录…"/u);
   assert.match(app, /requestAnimationFrame/u);
   assert.match(app, /new SessionRecordsReader\(this\.db\)\.list\(300\)/u);

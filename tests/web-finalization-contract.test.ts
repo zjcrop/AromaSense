@@ -10,6 +10,7 @@ const records = readFileSync("app/ui/dom/session-records-renderer.ts", "utf8");
 const cupping = readFileSync("app/ui/dom/cupping-screen-renderer.ts", "utf8");
 const stableCupping = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");
 const cuppingCss = readFileSync("app/ui/dom/aromasense-cupping.css", "utf8");
+const productShell = readFileSync("app/ui/dom/product-shell.css", "utf8");
 const rail = readFileSync("app/ui/dom/sample-rail-renderer.ts", "utf8");
 
 test("Web startup is brand plus five equal readiness gates and auto-enters after completion", () => {
@@ -54,15 +55,18 @@ test("Homepage header preserves distinct Yingxiang and account actions while rec
   assert.match(home, /min-height:68px!important/);
 });
 
-test("Homepage account and records stay in centered lightweight modals after a record scope is selected", () => {
+test("Homepage account and records stay in centered lightweight modals backed by the shared Stage 1 scrim", () => {
   assert.match(app, /onOpenAccount: \(\) => this\.showHomeAccountModal\(\)/);
   assert.match(app, /onOpenRecords: \(\) => this\.showHomeRecordsModal\(\)/);
   const modalStyle = app.match(/\.home-modal\{[^}]+\}/)?.[0] ?? "";
-  assert.match(modalStyle, /position:fixed;inset:0;z-index:2200;display:grid;place-items:center/);
-  assert.match(modalStyle, /background:rgba\(0,0,0,\.74\)/);
-  assert.doesNotMatch(modalStyle, /backdrop-filter/);
+  assert.match(modalStyle, /position:fixed;inset:0;z-index:10000;display:grid;place-items:center/);
+  assert.match(modalStyle, /background:transparent/);
+  assert.match(modalStyle, /backdrop-filter:none/);
+  assert.match(productShell, /\.interaction-scrim\s*\{[^}]*background:var\(--interaction-scrim\)/);
+  assert.match(productShell, /\.interaction-scrim\s*\{[^}]*backdrop-filter:none!important/);
+  assert.match(app, /overlayManager\.register/);
   assert.match(app, /if \(event\.target === overlay\) close\(\)/);
-  assert.match(app, /if \(event\.key === "Escape"\) close\(\)/);
+  assert.match(app, /this\.interaction\.api\.back\(\{ source: "escape" \}\)/);
   assert.match(app, /session-records__tool/);
   assert.match(home, /await this\.options\.onOpenRecords\?\.\(\)/);
   assert.match(home, /data-record-scope-tab="\$\{scope\}"/);

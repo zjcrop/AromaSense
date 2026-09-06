@@ -2,6 +2,7 @@ import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
 import type { SampleRecord } from "../../core/sample-batch-service";
 import type { CuppingScreenController } from "../cupping-screen-controller";
 import type { FlavorGroupPreferenceService } from "../flavor-group-preferences";
+import { OVERLAY_KINDS, type Cleanup, type OverlayManager } from "../interaction-foundation";
 import {
   CuppingScreenRenderer as BaseCuppingScreenRenderer,
   type CuppingScreenRendererOptions
@@ -39,6 +40,7 @@ export class CuppingScreenRenderer {
   private readonly base: BaseCuppingScreenRenderer;
   private editor?: HTMLElement;
   private observer?: MutationObserver;
+  private blindOverlayCleanup?: Cleanup;
   private lastScrollTop = 0;
   private lockedScrollTop?: number;
   private suppressScrollCapture = false;
@@ -80,7 +82,8 @@ export class CuppingScreenRenderer {
     private readonly controller: CuppingScreenController,
     flavorService: FlavorGroupPreferenceService,
     summaryReader: SampleSummaryReader,
-    private readonly options: CuppingScreenRendererOptions
+    private readonly options: CuppingScreenRendererOptions,
+    private readonly overlayManager?: OverlayManager
   ) {
     this.base = new BaseCuppingScreenRenderer(root, controller, flavorService, summaryReader, options);
   }
@@ -94,6 +97,8 @@ export class CuppingScreenRenderer {
   dispose(): void {
     this.observer?.disconnect();
     this.observer = undefined;
+    this.blindOverlayCleanup?.();
+    this.blindOverlayCleanup = undefined;
     if (this.releaseTimer) clearTimeout(this.releaseTimer);
     this.releaseTimer = undefined;
     this.editor?.removeEventListener("scroll", this.captureUserScroll);
@@ -178,7 +183,7 @@ export class CuppingScreenRenderer {
       .cupping-main__blind-status.is-editable{cursor:pointer;user-select:none}
       .cupping-main__blind-status.is-editable:focus-visible{outline:1px solid rgba(214,173,99,.62);outline-offset:2px}
       .cupping-main__blind-edit-hint{margin-left:auto;color:#d6ad63;font-size:10px;white-space:nowrap}
-      .blind-identity-editor{position:fixed;inset:0;z-index:10020;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));background:rgba(0,0,0,.76);backdrop-filter:blur(7px)}
+      .blind-identity-editor{position:fixed;inset:0;z-index:10010;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));background:transparent;backdrop-filter:none}
       .blind-identity-editor__panel{width:min(620px,100%);max-height:min(82dvh,760px);overflow:auto;box-sizing:border-box;padding:20px 22px 18px;border:1px solid rgba(214,173,99,.22);background:#111212;box-shadow:0 20px 52px rgba(0,0,0,.44)}
       .blind-identity-editor__head{display:flex;align-items:flex-start;gap:16px;margin-bottom:14px}
       .blind-identity-editor__titles{min-width:0;flex:1}
@@ -296,10 +301,19 @@ export class CuppingScreenRenderer {
     };
     populate();
 
-    const dismiss = (): void => overlay.remove();
+    let unregister: Cleanup = () => undefined;
+    const dismiss = (): void => {
+      unregister();
+      if (this.blindOverlayCleanup === unregister) this.blindOverlayCleanup = undefined;
+      overlay.remove();
+    };
     close.onclick = dismiss;
     overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) dismiss(); });
-    overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") dismiss(); });
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      dismiss();
+    });
     selector.onchange = populate;
     save.onclick = async () => {
       const sample = findSample();
@@ -324,6 +338,14 @@ export class CuppingScreenRenderer {
     panel.append(head, selector, grid, footer);
     overlay.append(panel);
     this.root.append(overlay);
+    unregister = this.overlayManager?.register({
+      id: "blind-identity-editor",
+      element: overlay,
+      kind: OVERLAY_KINDS.MODAL,
+      priority: 200,
+      dismiss
+    }) ?? (() => undefined);
+    this.blindOverlayCleanup = unregister;
     requestAnimationFrame(() => nameInput.focus());
   }
 
