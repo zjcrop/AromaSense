@@ -1,5 +1,8 @@
-// AromaSense consumes LuckyBean's Worker-only PP-OCR implementation.
-// No browser/main-thread OCR fallback or Canvas image-quality pass is loaded here.
+// AromaSense consumes LuckyBean's audited browser-safe PP-OCR implementation.
+// Chromium/Android Web use a module Worker; WebKit intentionally uses the bounded
+// direct-WASM/no-SIMD compatibility mode. ROI preprocessing remains Worker-only.
+// No generic main-thread OCR fallback, Tesseract fallback, or Canvas image-quality
+// pass is loaded here.
 import 'luckybean-static-app/src/recognition-paddle-ocr.js';
 
 import {
@@ -34,9 +37,9 @@ async function preparePackageImage(file) {
   // Critical anti-freeze path:
   // - Android: nativeSource=true makes LuckyBean's native bridge send no Base64;
   //   the Android bridge reads the already-retained content:// URI directly.
-  // - Web: hand the original Blob directly to LuckyBean's PP-OCR Worker. Do not
-  //   decode the camera image, inspect pixels, rotate, resize or re-encode it on
-  //   the UI thread before recognition.
+  // - Web: hand the original Blob directly to LuckyBean's audited PP-OCR runtime.
+  //   Do not decode the camera image, inspect pixels, rotate, resize or re-encode
+  //   it on the UI thread before recognition.
   return {
     blob: file,
     originalName: file?.name || 'coffee-bag-image',
@@ -47,7 +50,7 @@ async function preparePackageImage(file) {
     processedHeight: 0,
     metrics: null,
     score: 100,
-    status: android ? 'native-direct' : 'worker-direct',
+    status: android ? 'native-direct' : 'runtime-direct',
     nativeSource: android,
     warnings: []
   };
