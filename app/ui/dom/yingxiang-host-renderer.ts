@@ -7,6 +7,7 @@ import {
 import { YingxiangClient, YingxiangClientError, type YingxiangInviteResult, type YingxiangRemoteEvent } from "../../core/yingxiang-client";
 import { YingxiangCoffeeListEditor } from "./yingxiang-coffee-list-editor";
 import { renderYingxiangInviteShare } from "./yingxiang-invite-share";
+import { YingxiangSampleCodeImporter } from "./yingxiang-sample-code-importer";
 
 export interface YingxiangHostRendererOptions {
   onRequireAccount(): void | Promise<void>;
@@ -61,6 +62,7 @@ export class YingxiangHostRenderer {
   private event?: YingxiangRemoteEvent;
   private invite?: YingxiangInviteResult;
   private coffeeEditor?: YingxiangCoffeeListEditor;
+  private sampleCodeImporter?: YingxiangSampleCodeImporter;
 
   constructor(private readonly root: HTMLElement, private readonly client: YingxiangClient | undefined, private readonly options: YingxiangHostRendererOptions) {}
 
@@ -78,8 +80,10 @@ export class YingxiangHostRenderer {
     const organizerName = Object.assign(document.createElement("input"), { type: "text", maxLength: 120, placeholder: "参与者可见，例如：某某咖啡" });
     const cuppingMode = document.createElement("select"); cuppingMode.append(new Option("盲测", "blind"), new Option("半盲测", "semi_blind"), new Option("公开杯测", "open"));
     const sampleCodes = Object.assign(document.createElement("textarea"), { placeholder: "一行一个样品编号，例如：\nA01\nA02\nA03" });
-    grid.append(field("活动名称", eventTitle, true), field("组织方显示名称", organizerName), field("杯测模式", cuppingMode), field("样品编号（一行一个）", sampleCodes, true));
-    eventSection.append(grid, Object.assign(document.createElement("p"), { className: "yingxiang-host__hint", textContent: "盲测和半盲测只向参与者发布样品槽位；下方真实咖啡信息保存在主办方活动数据中，不随邀请公开。" }));
+    const sampleCodeField = field("样品编号（一行一个）", sampleCodes, true);
+    const sampleCodeTools = document.createElement("div"); sampleCodeField.append(sampleCodeTools);
+    grid.append(field("活动名称", eventTitle, true), field("组织方显示名称", organizerName), field("杯测模式", cuppingMode), sampleCodeField);
+    eventSection.append(grid, Object.assign(document.createElement("p"), { className: "yingxiang-host__hint", textContent: "样品编号可直接输入，也可拍照、上传图片、导入表格或粘贴识别。盲测和半盲测只向参与者发布样品槽位；下方真实咖啡信息不会随邀请公开。" }));
 
     const coffeeSection = document.createElement("section"); coffeeSection.className = "yingxiang-host__section"; coffeeSection.append(Object.assign(document.createElement("h3"), { textContent: "真实咖啡对应" }));
     coffeeSection.append(Object.assign(document.createElement("p"), { className: "yingxiang-host__hint", textContent: "录入方式与香迹样品输入共用同一识别基础：拍照/图片、表格、粘贴。导入后按当前位置对应上方样品编号；拖动时原位置保留虚拟占位，松手后落到最终占位位置。" }));
@@ -133,6 +137,10 @@ export class YingxiangHostRenderer {
     }
     updateNamingUi();
 
+    this.sampleCodeImporter = new YingxiangSampleCodeImporter(sampleCodeTools, sampleCodes, {
+      onCodesChanged: (codes) => this.coffeeEditor?.setSampleCodes(codes)
+    });
+    this.sampleCodeImporter.render();
     this.coffeeEditor = new YingxiangCoffeeListEditor(coffeeRoot, {
       sampleCodes: normalizedLines(sampleCodes.value),
       initial: initial?.manifest.samples.map((sample) => sample.coffee),
@@ -143,6 +151,7 @@ export class YingxiangHostRenderer {
 
     if (this.options.structureLocked) {
       for (const control of [organizerName, cuppingMode, sampleCodes, namingMode, prefix, maxNameLength, allowAccount.input, uniqueName.input, calibration.input]) control.disabled = true;
+      this.sampleCodeImporter.setDisabled(true);
       coffeeRoot.classList.add("yingxiang-host__coffee-lock");
       status.textContent = "已有参与者，样品、真实咖啡对应关系和身份规则已锁定；当前仍可修改活动名称。重新发布后需生成新邀请。";
     } else if (initial) {
