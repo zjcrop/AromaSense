@@ -1,11 +1,17 @@
-export type CuppingMode = "open" | "blind" | "semi_blind";
+export type CuppingMode = "free" | "timed" | "blind" | "semi_blind";
 
 /** Legacy storage compatibility only. New code should use CuppingMode. */
 export type BlindMode = "open" | "semi_blind" | "full_blind";
 
-export const CUPPING_MODES: readonly CuppingMode[] = ["open", "blind", "semi_blind"] as const;
+export const CUPPING_MODES: readonly CuppingMode[] = ["free", "timed", "blind", "semi_blind"] as const;
 export const BLIND_MODES: readonly BlindMode[] = ["open", "semi_blind", "full_blind"] as const;
 export const DEFAULT_SEMI_BLIND_VISIBLE_FIELDS = ["country", "region", "process", "roast"] as const;
+
+export interface CuppingModePolicy {
+  timerEnabled: boolean;
+  runtimeRosterMutable: boolean;
+  runtimeIdentityEditable: boolean;
+}
 
 export interface CuppingSessionMetadata {
   date: string;
@@ -48,15 +54,18 @@ export function normalizeBlindMode(value: unknown): BlindMode {
   return BLIND_MODES.includes(value as BlindMode) ? value as BlindMode : "open";
 }
 
+/** Legacy blind-mode "open" was historically a timed public cupping. */
 export function cuppingModeFromBlindMode(value: unknown): CuppingMode {
   const legacy = normalizeBlindMode(value);
   if (legacy === "full_blind") return "blind";
   if (legacy === "semi_blind") return "semi_blind";
-  return "open";
+  return "timed";
 }
 
 export function normalizeCuppingMode(value: unknown, legacyBlindMode?: unknown): CuppingMode {
   if (CUPPING_MODES.includes(value as CuppingMode)) return value as CuppingMode;
+  // Historical metadata stored `open`; preserve its old timed behavior after upgrade.
+  if (value === "open") return "timed";
   return cuppingModeFromBlindMode(legacyBlindMode);
 }
 
@@ -71,9 +80,20 @@ export function cuppingModeFromMetadata(metadata: Partial<CuppingSessionMetadata
 }
 
 export function cuppingModeLabel(mode: CuppingMode): string {
+  if (mode === "free") return "自由杯测";
+  if (mode === "timed") return "计时杯测";
   if (mode === "blind") return "盲测";
-  if (mode === "semi_blind") return "半盲测";
-  return "公开杯测";
+  return "半盲测";
+}
+
+/** Central runtime contract so timer and edit permissions cannot drift between renderers/controllers. */
+export function cuppingModePolicy(mode: CuppingMode): CuppingModePolicy {
+  return {
+    timerEnabled: mode !== "free",
+    runtimeRosterMutable: mode === "free",
+    // Blind/semi-blind retain their existing late identity-entry workflow; timed public cupping is locked.
+    runtimeIdentityEditable: mode === "free" || mode === "blind" || mode === "semi_blind"
+  };
 }
 
 export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>): CuppingSessionMetadata {
@@ -106,7 +126,7 @@ export function defaultSessionMetadata(now: string): CuppingSessionMetadata {
     date: localDate.slice(0, 10),
     time: localDate.slice(11, 16),
     organizer: "",
-    cuppingMode: "open"
+    cuppingMode: "free"
   };
 }
 
