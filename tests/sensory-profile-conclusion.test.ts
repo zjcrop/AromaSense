@@ -29,5 +29,27 @@ test("profile uses seven structural axes, excludes balance and keeps temperature
   assert.deepEqual(profile.radar.map((item) => item.key), ["aroma", "acidity", "sweetness", "bitterness", "mouthfeel", "finish", "cleanliness"]);
   assert.equal(profile.radar.some((item) => item.key === "balance"), false);
   assert.equal(profile.radar.find((item) => item.key === "acidity")?.value, 9);
+  assert.equal(profile.radar.every((item) => item.recorded), true);
   assert.deepEqual(profile.temperature.map((item) => item.flavorFamily), ["white_floral", "citrus", "tea"]);
+});
+
+test("profile distinguishes an observed zero from an unrecorded dimension", () => {
+  const profile = deriveSensoryProfileConclusion([
+    obs("aroma", "wet_aroma_intensity", 8),
+    obs("high_temp", "acidity_intensity", 0),
+    obs("high_temp", "flavor_tags", ["lemon"])
+  ]);
+
+  const aroma = profile.radar.find((item) => item.key === "aroma");
+  const acidity = profile.radar.find((item) => item.key === "acidity");
+  const sweetness = profile.radar.find((item) => item.key === "sweetness");
+  const cleanliness = profile.radar.find((item) => item.key === "cleanliness");
+
+  assert.deepEqual({ value: aroma?.value, recorded: aroma?.recorded }, { value: 8, recorded: true });
+  assert.deepEqual({ value: acidity?.value, recorded: acidity?.recorded }, { value: 0, recorded: true });
+  assert.deepEqual({ value: sweetness?.value, recorded: sweetness?.recorded }, { value: 0, recorded: false });
+  assert.deepEqual({ value: cleanliness?.value, recorded: cleanliness?.recorded }, { value: 0, recorded: false });
+  assert.equal(profile.temperature[0]?.acidity, 0);
+  assert.equal(profile.temperature[1]?.acidity, undefined);
+  assert.equal(profile.temperature[2]?.acidity, undefined);
 });
