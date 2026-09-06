@@ -1,12 +1,18 @@
 import { SCA_CVA_CALCULATOR_VERSION } from "./sca-cva-score-engine";
-import { cuppingModeFromMetadata, type CuppingMode, type CuppingSessionMetadata } from "./session-metadata";
+import {
+  cuppingModeFromMetadata,
+  normalizeCuppingMode,
+  type CanonicalCuppingMode,
+  type CuppingMode,
+  type CuppingSessionMetadata
+} from "./session-metadata";
 
-export type CuppingScoreProfileId = CuppingMode;
+export type CuppingScoreProfileId = CanonicalCuppingMode;
 export type CuppingCalculatorVersion = typeof SCA_CVA_CALCULATOR_VERSION | "aromasense-quality-0.1c";
 
 export interface CuppingScoreProfile {
   id: CuppingScoreProfileId;
-  mode: CuppingMode;
+  mode: CanonicalCuppingMode;
   label: string;
   scoreLabel: string;
   scoreNote: string;
@@ -54,9 +60,9 @@ const PROFILES: Record<CuppingScoreProfileId, CuppingScoreProfile> = {
 };
 
 export function scoreProfileForMode(mode: CuppingMode): CuppingScoreProfile {
-  return PROFILES[mode];
+  return PROFILES[normalizeCuppingMode(mode)];
 }
 
 export function scoreProfileForMetadata(metadata: Partial<CuppingSessionMetadata>): CuppingScoreProfile {
-  return scoreProfileForMode(cuppingModeFromMetadata(metadata));
+  return PROFILES[cuppingModeFromMetadata(metadata)];
 }
