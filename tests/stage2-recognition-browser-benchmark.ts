@@ -21,16 +21,13 @@ import { LocalCuppingRepository } from "../app/storage/local-cupping-repository"
 import { CuppingSetupService } from "../app/core/cupping-setup-service";
 import { openBatchReviewDialog, type BatchReviewField } from "../app/ui/dom/batch-review-dialog";
 
-interface RuntimeProbeEvent {
-  source: string;
-  status: string;
-  progress: number;
-  atMs: number;
-}
-
-interface RuntimeProbe {
-  navigationStartMs: number;
-  events: RuntimeProbeEvent[];
+interface DiagnosticEvent {
+  scope: string;
+  phase: string;
+  durationMs: number;
+  engaged?: boolean;
+  mode?: string;
+  [key: string]: unknown;
 }
 
 interface Fixture {
@@ -42,20 +39,24 @@ interface Fixture {
 interface Stage2CaseResult {
   imagePreparationMs: number;
   ocrMs: number;
+  ocrRuntimeInitMs: number;
+  ocrPredictMs: number;
   layoutDocumentMs: number;
   primarySegmentationMs: number;
   recordGroupingRefinementMs: number;
   recognitionDocumentMs: number;
-  semanticCanonicalMs: number;
+  semanticMs: number;
+  canonicalMs: number;
   aiMs: number;
   aiEngaged: boolean;
+  analysisEnvelopeMs: number;
   totalRecognitionMs: number;
   samples: number;
   layoutType: string;
   requiresSegmentationReview: boolean;
   engine: string;
   segmentProfiles: string[];
-  analyses: number;
+  diagnostics: DiagnosticEvent[];
 }
 
 interface Stage2BenchmarkResult {
@@ -66,18 +67,14 @@ interface Stage2BenchmarkResult {
     browserSafe: boolean | null;
     primaryIsolation: string;
     autoPreload: boolean | null;
-    initObserved: boolean;
-    initMs: number | null;
-    firstRuntimeEventAtMs: number | null;
-    events: RuntimeProbeEvent[];
   };
-  single: Stage2CaseResult;
-  multiEntry: Stage2CaseResult;
+  singleCold: Stage2CaseResult;
+  multiEntryWarm: Stage2CaseResult;
   persistenceMs: number;
   persistedSamples: number;
   uiRenderMs: number;
   uiFieldCount: number;
-  semanticCanonicalSplitAvailable: false;
+  semanticCanonicalSplitAvailable: true;
   note: string;
 }
 
@@ -85,13 +82,20 @@ declare global {
   interface Window {
     LuckyBeanRecognitionCore?: LuckyBeanRecognitionCore;
     LuckyBeanPaddleOCR?: Record<string, unknown>;
-    __Stage2RuntimeProbe?: RuntimeProbe;
+    __LUCKYBEAN_RECOGNITION_DIAGNOSTICS__?: { record(event: DiagnosticEvent): void };
     Stage2AromaSenseBenchmark?: { run(): Promise<Stage2BenchmarkResult> };
   }
 }
 
 function round(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function sum(events: readonly DiagnosticEvent[], scope: string, phases: readonly string[]): number {
+  const selected = new Set(phases);
+  return round(events
+    .filter((event) => event.scope === scope && selected.has(event.phase))
+    .reduce((total, event) => total + Number(event.durationMs || 0), 0));
 }
 
 async function canvasFixture(
@@ -151,15 +155,13 @@ async function multiEntryFixture(): Promise<Fixture> {
 function blockLine(block: LuckyBeanCoreBlock, index: number): OCRLineInput | undefined {
   const text = String(block.text ?? block.rawValue ?? block.value ?? "").trim();
   if (!text) return undefined;
-  const polygon = Array.isArray(block.polygon) ? block.polygon : undefined;
-  const box = block.boundingBox;
   return {
     id: String(block.id ?? `stage2-line-${index + 1}`),
     blockId: String(block.blockId ?? `stage2-block-${index + 1}`),
     text,
     confidence: Number(block.confidence ?? block.score ?? 0.75),
-    ...(polygon ? { polygon } : {}),
-    ...(box ? { box } : {})
+    ...(Array.isArray(block.polygon) ? { polygon: block.polygon } : {}),
+    ...(block.boundingBox ? { box: block.boundingBox } : {})
   };
 }
 
@@ -173,16 +175,20 @@ function metadataFromAnalysis(analysis: LuckyBeanRecognitionAnalysis): Record<st
   return metadata;
 }
 
-function analysisUsesAi(analysis: LuckyBeanRecognitionAnalysis): boolean {
-  const text = JSON.stringify(analysis.parsed ?? {});
-  return /aiEnrichment|aiAdvisory|zhipu|glm/iu.test(text);
-}
-
-async function recognizeCase(fixture: Fixture): Promise<{ result: Stage2CaseResult; samples: Array<{ label: string; metadata: Record<string, unknown> }> }> {
+async function recognizeCase(fixture: Fixture): Promise<{
+  result: Stage2CaseResult;
+  samples: Array<{ label: string; metadata: Record<string, unknown> }>;
+}> {
   const core = requireLuckyBeanRecognitionCore();
   const book = loadBundledLuckyBeanRecognitionBook();
-  const startTotal = performance.now();
+  const diagnostics: DiagnosticEvent[] = [];
+  window.__LUCKYBEAN_RECOGNITION_DIAGNOSTICS__ = {
+    record(event) {
+      diagnostics.push({ ...event, durationMs: round(Number(event.durationMs || 0)) });
+    }
+  };
 
+  const totalStarted = performance.now();
   let started = performance.now();
   const prepared = await core.preparePackageImage(fixture.file);
   const imagePreparationMs = performance.now() - started;
@@ -219,8 +225,7 @@ async function recognizeCase(fixture: Fixture): Promise<{ result: Stage2CaseResu
   const recordGroupingRefinementMs = performance.now() - started;
 
   let recognitionDocumentMs = 0;
-  let semanticCanonicalMs = 0;
-  let aiEngaged = false;
+  let analysisEnvelopeMs = 0;
   const samples: Array<{ label: string; metadata: Record<string, unknown> }> = [];
   for (let index = 0; index < layout.segments.length; index += 1) {
     const segment = layout.segments[index]!;
@@ -243,33 +248,46 @@ async function recognizeCase(fixture: Fixture): Promise<{ result: Stage2CaseResu
 
     started = performance.now();
     const analysis = core.analyzeRecognitionDocument(recognitionDocument, book);
-    semanticCanonicalMs += performance.now() - started;
-    aiEngaged ||= analysisUsesAi(analysis);
-    const metadata = metadataFromAnalysis(analysis);
-    samples.push({ label: String(segment.hints?.sourceTitle ?? `Stage 2 sample ${index + 1}`), metadata });
+    analysisEnvelopeMs += performance.now() - started;
+    samples.push({
+      label: String(segment.hints?.sourceTitle ?? `Stage 2 sample ${index + 1}`),
+      metadata: metadataFromAnalysis(analysis)
+    });
   }
 
-  return {
-    result: {
-      imagePreparationMs: round(imagePreparationMs),
-      ocrMs: round(ocrMs),
-      layoutDocumentMs: round(layoutDocumentMs),
-      primarySegmentationMs: round(primarySegmentationMs),
-      recordGroupingRefinementMs: round(recordGroupingRefinementMs),
-      recognitionDocumentMs: round(recognitionDocumentMs),
-      semanticCanonicalMs: round(semanticCanonicalMs),
-      aiMs: 0,
-      aiEngaged,
-      totalRecognitionMs: round(performance.now() - startTotal),
-      samples: layout.segments.length,
-      layoutType: layout.layoutType,
-      requiresSegmentationReview: layout.requiresReview,
-      engine,
-      segmentProfiles: layout.segments.map((segment) => String(segment.hints?.profile ?? "")),
-      analyses: samples.length
-    },
-    samples
+  const semanticMs = sum(diagnostics, "semantic", [
+    "semantic-normalization", "semantic-repair", "semantic-parse", "semantic-finalization"
+  ]);
+  const canonicalMs = sum(diagnostics, "semantic", [
+    "canonical-variety-safety", "canonical-entity-safety", "canonical-field-arbitration"
+  ]);
+  const aiMs = sum(diagnostics, "semantic", ["ai-advisory"]);
+  const aiEngaged = diagnostics.some((event) => event.scope === "semantic" && event.phase === "ai-advisory" && event.engaged === true);
+
+  const result: Stage2CaseResult = {
+    imagePreparationMs: round(imagePreparationMs),
+    ocrMs: round(ocrMs),
+    ocrRuntimeInitMs: sum(diagnostics, "ocr", ["runtime-init"]),
+    ocrPredictMs: sum(diagnostics, "ocr", ["ocr-predict"]),
+    layoutDocumentMs: round(layoutDocumentMs),
+    primarySegmentationMs: round(primarySegmentationMs),
+    recordGroupingRefinementMs: round(recordGroupingRefinementMs),
+    recognitionDocumentMs: round(recognitionDocumentMs),
+    semanticMs,
+    canonicalMs,
+    aiMs,
+    aiEngaged,
+    analysisEnvelopeMs: round(analysisEnvelopeMs),
+    totalRecognitionMs: round(performance.now() - totalStarted),
+    samples: layout.segments.length,
+    layoutType: layout.layoutType,
+    requiresSegmentationReview: layout.requiresReview,
+    engine,
+    segmentProfiles: layout.segments.map((segment) => String(segment.hints?.profile ?? "")),
+    diagnostics: [...diagnostics]
   };
+  delete window.__LUCKYBEAN_RECOGNITION_DIAGNOSTICS__;
+  return { result, samples };
 }
 
 async function measurePersistence(samples: readonly { label: string; metadata: Record<string, unknown> }[]): Promise<number> {
@@ -306,9 +324,13 @@ async function measurePersistence(samples: readonly { label: string; metadata: R
 async function measureUi(sample: { label: string; metadata: Record<string, unknown> }): Promise<{ ms: number; fields: number }> {
   const root = document.createElement("div");
   document.body.append(root);
-  const entries = Object.entries(sample.metadata).filter(([, value]) => typeof value === "string" && String(value).trim()).slice(0, 10);
+  const entries = Object.entries(sample.metadata)
+    .filter(([, value]) => typeof value === "string" && String(value).trim())
+    .slice(0, 10);
   if (!entries.length) entries.push(["diagnostic", "Stage 2"]);
-  const fields: BatchReviewField[] = entries.map(([key, value]) => ({ key, label: key, group: "Stage 2", value: String(value), tier: "core" }));
+  const fields: BatchReviewField[] = entries.map(([key, value]) => ({
+    key, label: key, group: "Stage 2", value: String(value), tier: "core"
+  }));
   const started = performance.now();
   const handle = openBatchReviewDialog({
     root,
@@ -330,39 +352,32 @@ async function measureUi(sample: { label: string; metadata: Record<string, unkno
 
 function runtimeSummary(): Stage2BenchmarkResult["runtime"] {
   const provider = window.LuckyBeanPaddleOCR ?? {};
-  const events = [...(window.__Stage2RuntimeProbe?.events ?? [])];
-  const initStart = events.find((event) => /后台准备|加载本地|准备本地/u.test(event.status));
-  const initEnd = events.find((event) => /模型已就绪|Worker 已在后台预热/u.test(event.status));
   return {
     providerVersion: String(provider.version ?? "unknown"),
     workerOnly: typeof provider.workerOnly === "boolean" ? provider.workerOnly : null,
     browserSafe: typeof provider.browserSafe === "boolean" ? provider.browserSafe : null,
     primaryIsolation: String(provider.primaryIsolation ?? ""),
-    autoPreload: typeof provider.autoPreload === "boolean" ? provider.autoPreload : null,
-    initObserved: Boolean(initStart && initEnd),
-    initMs: initStart && initEnd ? round(Math.max(0, initEnd.atMs - initStart.atMs)) : null,
-    firstRuntimeEventAtMs: events[0] ? round(events[0].atMs) : null,
-    events: events.slice(0, 24)
+    autoPreload: typeof provider.autoPreload === "boolean" ? provider.autoPreload : null
   };
 }
 
 window.Stage2AromaSenseBenchmark = {
   async run(): Promise<Stage2BenchmarkResult> {
-    const single = await recognizeCase(await singleFixture());
-    const multi = await recognizeCase(await multiEntryFixture());
-    const persistenceMs = await measurePersistence(multi.samples);
-    const ui = await measureUi(single.samples[0] ?? { label: "Stage 2", metadata: {} });
+    const singleCold = await recognizeCase(await singleFixture());
+    const multiEntryWarm = await recognizeCase(await multiEntryFixture());
+    const persistenceMs = await measurePersistence(multiEntryWarm.samples);
+    const ui = await measureUi(singleCold.samples[0] ?? { label: "Stage 2", metadata: {} });
     return {
       fixtureKind: "deterministic-camera-like-jpeg",
       runtime: runtimeSummary(),
-      single: single.result,
-      multiEntry: multi.result,
+      singleCold: singleCold.result,
+      multiEntryWarm: multiEntryWarm.result,
       persistenceMs,
-      persistedSamples: multi.samples.length,
+      persistedSamples: multiEntryWarm.samples.length,
       uiRenderMs: ui.ms,
       uiFieldCount: ui.fields,
-      semanticCanonicalSplitAvailable: false,
-      note: "Pinned LuckyBean analyzeRecognitionDocument is monolithic; semantic parsing and canonical safety cannot be timed separately without upstream instrumentation. AI is not invoked by this photo path, therefore aiMs=0."
+      semanticCanonicalSplitAvailable: true,
+      note: "LuckyBean Stage 2 optional diagnostic sink separates runtime init/predict, semantic parse/repair, canonical safety/arbitration and AI advisory without changing recognition output."
     };
   }
 };
