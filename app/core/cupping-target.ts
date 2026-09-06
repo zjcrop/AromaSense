@@ -20,7 +20,10 @@ export function resolveCuppingTarget(choice: CuppingTargetChoice): ResolvedCuppi
 function modeFromLegacyTarget(target: string | undefined): CuppingTargetChoice | undefined {
   const normalized = target?.normalize("NFKC").trim().toLocaleLowerCase("zh-CN");
   if (!normalized) return undefined;
-  if (["公开杯测", "公开", "open", "open cupping"].includes(normalized)) return "open";
+  if (["自由杯测", "自由", "free", "free cupping"].includes(normalized)) return "free";
+  if (["计时杯测", "计时", "timed", "timed cupping"].includes(normalized)) return "timed";
+  // Historical “公开杯测/open” used the timed runtime, so legacy records stay timed.
+  if (["公开杯测", "公开", "open", "open cupping"].includes(normalized)) return "timed";
   if (["盲测", "全盲", "blind", "full blind", "full_blind"].includes(normalized)) return "blind";
   if (["半盲测", "半盲", "semi blind", "semi_blind"].includes(normalized)) return "semi_blind";
   return undefined;
