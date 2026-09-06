@@ -9,8 +9,15 @@ function source(path: string): string {
   return readFileSync(resolve(root, path), "utf8");
 }
 
+function homeSource(): string {
+  return [
+    source("app/ui/dom/batch-setup-renderer.ts"),
+    source("app/ui/dom/batch-setup-home-renderer.ts")
+  ].join("\n");
+}
+
 test("homepage exposes exactly the requested four sample-list actions with one shared visual class", () => {
-  const home = source("app/ui/dom/batch-setup-renderer.ts");
+  const home = homeSource();
   assert.match(home, /photo\?\.remove\(\)/);
   assert.match(home, /batch\.dataset\.homeAction = "batch-recognition"/);
   assert.match(home, /manual\.dataset\.homeAction = "manual-entry"/);
@@ -22,7 +29,7 @@ test("homepage exposes exactly the requested four sample-list actions with one s
 });
 
 test("records sit below the dominant start action and expand unfinished/completed entries in place", () => {
-  const home = source("app/ui/dom/batch-setup-renderer.ts");
+  const home = homeSource();
   assert.doesNotMatch(home, /buildRecentSessions\(/);
   assert.match(home, /recordToggle\.setAttribute\("aria-expanded", "false"\)/);
   assert.match(home, /recordToggle\.addEventListener\("click"[\s\S]*this\.toggleRecordsMenu\(\)/);
@@ -35,7 +42,7 @@ test("records sit below the dominant start action and expand unfinished/complete
 });
 
 test("record submenu routes each entry to the corresponding records view scope", () => {
-  const home = source("app/ui/dom/batch-setup-renderer.ts");
+  const home = homeSource();
   assert.match(home, /await this\.options\.onOpenRecords\?\.\(\)/);
   assert.match(home, /data-record-scope-tab="\$\{scope\}"/);
   assert.match(home, /tab\.getAttribute\("aria-pressed"\) !== "true"/);
