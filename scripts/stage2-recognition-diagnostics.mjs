@@ -48,7 +48,10 @@ async function startStaticServer() {
       if (file !== site && !file.startsWith(`${site}${sep}`)) return response.writeHead(403).end("forbidden");
       const info = await stat(file);
       if (!info.isFile()) throw new Error("not-file");
-      response.writeHead(200, { "content-type": MIME.get(extname(file).toLowerCase()) || "application/octet-stream", "cache-control": "no-store" });
+      response.writeHead(200, {
+        "content-type": MIME.get(extname(file).toLowerCase()) || "application/octet-stream",
+        "cache-control": "no-store"
+      });
       response.end(await readFile(file));
     } catch {
       response.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("not found");
@@ -118,21 +121,13 @@ async function buildBenchmarkBundle() {
   });
 }
 
-const RUNTIME_PROBE = `(() => {
-  const started = performance.now();
-  const events = [];
-  globalThis.__Stage2RuntimeProbe = { navigationStartMs: started, events };
-  const capture = (source) => (event) => {
-    const detail = event && event.detail || {};
-    events.push({ source, status:String(detail.status || ''), progress:Number(detail.progress || 0), atMs:performance.now() - started });
-  };
-  globalThis.addEventListener('luckybean:ocr-progress', capture('luckybean'));
-  globalThis.addEventListener('coffee-foundation:ocr-progress', capture('coffee-foundation'));
-})();`;
-
-function isKnownWarning(message) {
+function isKnownOnnxWarning(message) {
   const text = String(message || "");
   return /\[W:onnxruntime[:,]/i.test(text) && /CleanUnusedInitializersAndNodeArgs|Removing initializer/i.test(text);
+}
+
+function validTiming(value) {
+  return Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
 async function run() {
@@ -149,14 +144,13 @@ async function run() {
   let cdp;
   try {
     await waitUntil(async () => { try { return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok; } catch { return false; } }, "Chrome debugging startup", 30_000);
-    const targetResponse = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" });
+    const targetResponse = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
     requireCondition(targetResponse.ok, `Chrome target HTTP ${targetResponse.status}`);
     const target = await targetResponse.json();
     cdp = new Cdp(target.webSocketDebuggerUrl);
     await cdp.open();
-    await Promise.all([cdp.send("Page.enable"), cdp.send("Runtime.enable"), cdp.send("Log.enable")]);
-    await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: RUNTIME_PROBE });
-    await cdp.send("Page.navigate", { url });
+    await cdp.send("Runtime.enable");
+    await cdp.send("Log.enable");
 
     await waitUntil(async () => Boolean(await cdp.evaluate("Boolean(globalThis.LuckyBeanRecognitionCore?.recognizeCoffeeBag)")), "LuckyBean recognition bootstrap", 45_000);
     await cdp.evaluate(`new Promise((resolve, reject) => {
@@ -170,23 +164,33 @@ async function run() {
     const result = await cdp.evaluate("globalThis.Stage2AromaSenseBenchmark.run()");
 
     requireCondition(result?.fixtureKind === "deterministic-camera-like-jpeg", "Unexpected Stage 2 fixture kind");
-    requireCondition(result?.single?.samples >= 1, "Stage 2 single fixture produced no sample");
-    requireCondition(result?.multiEntry?.samples >= 2, `Stage 2 multi-entry fixture produced ${result?.multiEntry?.samples ?? 0} sample(s)`);
-    for (const item of [result.single, result.multiEntry]) {
+    requireCondition(result?.runtime?.browserSafe === true, "Stage 2 requires LuckyBean browserSafe=true");
+    requireCondition(result?.runtime?.workerOnly === false, "Stage 2 current provider must not advertise legacy workerOnly=true");
+    requireCondition(["module-worker", "webkit-direct-wasm-no-simd"].includes(result?.runtime?.primaryIsolation), `Unsupported Stage 2 primaryIsolation: ${result?.runtime?.primaryIsolation}`);
+    requireCondition(result?.runtime?.autoPreload === false, "Stage 2 current provider must keep autoPreload=false");
+    requireCondition(result?.semanticCanonicalSplitAvailable === true, "Stage 2 semantic/canonical timing split is unavailable");
+    requireCondition(result?.singleCold?.samples >= 1, "Stage 2 single cold fixture produced no sample");
+    requireCondition(result?.multiEntryWarm?.samples >= 2, `Stage 2 multi-entry fixture produced ${result?.multiEntryWarm?.samples ?? 0} sample(s)`);
+
+    for (const item of [result.singleCold, result.multiEntryWarm]) {
       for (const key of [
-        "imagePreparationMs", "ocrMs", "layoutDocumentMs", "primarySegmentationMs",
-        "recordGroupingRefinementMs", "recognitionDocumentMs", "semanticCanonicalMs", "aiMs", "totalRecognitionMs"
-      ]) requireCondition(Number.isFinite(Number(item?.[key])) && Number(item[key]) >= 0, `Invalid Stage 2 ${key}`);
-      requireCondition(Number(item.ocrMs) > 0, "Stage 2 OCR phase did not record positive elapsed time");
+        "imagePreparationMs", "ocrMs", "ocrRuntimeInitMs", "ocrPredictMs",
+        "layoutDocumentMs", "primarySegmentationMs", "recordGroupingRefinementMs",
+        "recognitionDocumentMs", "semanticMs", "canonicalMs", "aiMs",
+        "analysisEnvelopeMs", "totalRecognitionMs"
+      ]) requireCondition(validTiming(item?.[key]), `Invalid Stage 2 ${key}`);
+      requireCondition(Number(item.ocrPredictMs) > 0, "Stage 2 OCR predict timing was not captured by LuckyBean diagnostic sink");
+      requireCondition(Number(item.semanticMs) > 0, "Stage 2 semantic timing was not captured by LuckyBean diagnostic sink");
     }
-    requireCondition(Number(result.persistenceMs) > 0, "Stage 2 DB persistence did not record positive elapsed time");
-    requireCondition(Number(result.uiRenderMs) > 0, "Stage 2 UI render did not record positive elapsed time");
-    requireCondition(result.semanticCanonicalSplitAvailable === false, "Pinned runtime unexpectedly advertises semantic/canonical split instrumentation");
+    requireCondition(Number(result.singleCold.ocrRuntimeInitMs) > 0, "Stage 2 cold case did not capture runtime initialization");
+    requireCondition(Number(result.multiEntryWarm.ocrRuntimeInitMs) === 0, "Stage 2 warm case unexpectedly reinitialized OCR runtime");
+    requireCondition(validTiming(result.persistenceMs) && Number(result.persistenceMs) > 0, "Stage 2 DB persistence timing invalid");
+    requireCondition(validTiming(result.uiRenderMs) && Number(result.uiRenderMs) > 0, "Stage 2 UI timing invalid");
 
     console.log(`STAGE2_AROMASENSE_RECOGNITION_DIAGNOSTICS ${JSON.stringify(result)}`);
     const relevantErrors = cdp.errors
       .filter((message) => /recognition|paddle|onnx|sqlite|stage 2|diagnostic/i.test(String(message)))
-      .filter((message) => !isKnownWarning(message));
+      .filter((message) => !isKnownOnnxWarning(message));
     requireCondition(relevantErrors.length === 0, `Browser errors during Stage 2 diagnostics: ${relevantErrors.join(" | ")}`);
   } finally {
     cdp?.close();
