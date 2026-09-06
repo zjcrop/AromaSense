@@ -1,15 +1,16 @@
 import {
   cuppingModeFromMetadata,
   cuppingModeLabel,
-  type CuppingMode,
+  normalizeCuppingMode,
+  type CanonicalCuppingMode,
   type CuppingSessionMetadata
 } from "./session-metadata";
 
-export type CuppingTargetChoice = CuppingMode;
+export type CuppingTargetChoice = CanonicalCuppingMode;
 
 export interface ResolvedCuppingTarget {
   choice: CuppingTargetChoice;
-  cuppingMode: CuppingMode;
+  cuppingMode: CanonicalCuppingMode;
   label: string;
 }
 
@@ -30,7 +31,8 @@ function modeFromLegacyTarget(target: string | undefined): CuppingTargetChoice |
 }
 
 export function cuppingTargetChoiceFromMetadata(metadata: Partial<CuppingSessionMetadata>): CuppingTargetChoice {
-  return metadata.cuppingMode ?? modeFromLegacyTarget(metadata.target) ?? cuppingModeFromMetadata(metadata);
+  if (metadata.cuppingMode !== undefined) return normalizeCuppingMode(metadata.cuppingMode, metadata.blindMode);
+  return modeFromLegacyTarget(metadata.target) ?? cuppingModeFromMetadata(metadata);
 }
 
 export interface EmptySampleDraft {
