@@ -12,7 +12,7 @@ function line(text: string, left: number, top: number, right: number, bottom: nu
   };
 }
 
-test("Stage 2 diagnostic: aligned side-by-side coffee cards collapse before column grouping", () => {
+test("Stage 2: aligned side-by-side coffee cards remain two isolated records", () => {
   const document = buildOCRLayoutDocument({
     imageId: "stage2-side-by-side-cards",
     sourceWidth: 1200,
@@ -23,7 +23,7 @@ test("Stage 2 diagnostic: aligned side-by-side coffee cards collapse before colu
       line("Gesha", 60, 185, 330, 230),
       line("Pink Bourbon", 680, 185, 1080, 230),
       line("Washed", 60, 280, 330, 325),
-      line("Honey", 680, 280, 960, 325),
+      line("Honey Process", 680, 280, 1000, 325),
       line("Jasmine Citrus", 60, 375, 470, 420),
       line("Peach Cacao", 680, 375, 1050, 420)
     ]
@@ -42,16 +42,58 @@ test("Stage 2 diagnostic: aligned side-by-side coffee cards collapse before colu
     refined: {
       layoutType: refined.layoutType,
       segments: refined.segments.length,
+      profiles: refined.segments.map((segment) => segment.hints?.profile ?? ""),
       texts: refined.segments.map((segment) => segment.text)
     },
-    suspectedBoundary: "row-construction-before-column-clustering"
+    repairedBoundary: "pre-row side-by-side column refinement"
   };
   console.log(`STAGE2_MULTI_RECORD_DIAGNOSTIC ${JSON.stringify(diagnostic)}`);
 
-  // Stage 2 deliberately records the current unsafe behavior rather than silently
-  // changing Recognition semantics. The acceptance report decides the repair stage.
-  assert.equal(primary.segments.length, 1, "primary segmenter no longer reproduces the Stage 2 collapse; update the diagnostic");
-  assert.equal(refined.segments.length, 1, "refinement no longer reproduces the Stage 2 collapse; update the diagnostic");
+  // The primary geometry path still demonstrates why Stage 2 needed the repair:
+  // aligned Y rows collapse the two cards before its later column clustering.
+  assert.equal(primary.segments.length, 1);
   assert.match(primary.segments[0]?.text ?? "", /Ethiopia Guji[\s\S]*Colombia Huila/u);
-  assert.match(primary.segments[0]?.text ?? "", /Washed[\s\S]*Honey/u);
+
+  // The conservative refinement must restore record identity before semantic
+  // parsing, and no field text may cross from one coffee into the other.
+  assert.equal(refined.layoutType, "grid");
+  assert.equal(refined.segments.length, 2);
+  assert.equal(refined.requiresReview, true);
+  assert.equal(refined.segments[0]?.hints?.profile, "side-by-side-columns-v1");
+  assert.equal(refined.segments[1]?.hints?.profile, "side-by-side-columns-v1");
+
+  const left = refined.segments[0]?.text ?? "";
+  const right = refined.segments[1]?.text ?? "";
+  assert.match(left, /Ethiopia Guji/u);
+  assert.match(left, /Gesha/u);
+  assert.match(left, /Washed/u);
+  assert.doesNotMatch(left, /Colombia|Pink Bourbon|Honey Process|Peach Cacao/u);
+  assert.match(right, /Colombia Huila/u);
+  assert.match(right, /Pink Bourbon/u);
+  assert.match(right, /Honey Process/u);
+  assert.doesNotMatch(right, /Ethiopia|Gesha|Washed|Jasmine Citrus/u);
+});
+
+test("Stage 2: two visual columns without two independent coffee identities do not split", () => {
+  const document = buildOCRLayoutDocument({
+    imageId: "stage2-single-bag-two-column-design",
+    sourceWidth: 1200,
+    sourceHeight: 800,
+    lines: [
+      line("Ethiopia Guji", 70, 100, 470, 145),
+      line("Tasting Notes", 710, 100, 1060, 145),
+      line("Gesha", 70, 195, 300, 240),
+      line("Jasmine", 710, 195, 980, 240),
+      line("Washed", 70, 290, 320, 335),
+      line("Peach", 710, 290, 930, 335),
+      line("1950M", 70, 385, 300, 430),
+      line("Citrus", 710, 385, 950, 430)
+    ]
+  });
+
+  const primary = segmentSamples(document);
+  const refined = refineAmbiguousSingleSampleLayout(document, primary);
+  assert.equal(primary.segments.length, 1);
+  assert.equal(refined.segments.length, 1);
+  assert.notEqual(refined.segments[0]?.hints?.profile, "side-by-side-columns-v1");
 });
