@@ -112,12 +112,12 @@ export function sharedRecordCandidateLayout(document: OCRLayoutDocument): Sample
     return undefined;
   }
 
-  const lineById = new Map(document.lines.map((line) => [line.id, line]));
+  const lineById = new Map<string, OCRLayoutLine>(document.lines.map((line) => [line.id, line]));
   const claimed = new Set<string>();
   const segments: SampleLayoutSegment[] = [];
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index]!;
-    const blockIds = [...new Set((candidate.blockIds ?? []).map(String).filter(Boolean))];
+    const blockIds: string[] = Array.from(new Set<string>((candidate.blockIds ?? []).map((id) => String(id)).filter((id) => id.length > 0)));
     if (!blockIds.length || blockIds.some((id) => claimed.has(id))) return undefined;
     const lines = blockIds.map((id) => lineById.get(id)).filter((line): line is OCRLayoutLine => Boolean(line));
     if (lines.length !== blockIds.length) return undefined;
