@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   RECOGNITION_PIPELINE_VERSION,
   analyzeRecognitionDocument,
@@ -15,7 +15,6 @@ const outputs = [
   resolve(root, "mobile/android/app/src/main/assets/www/index.html")
 ];
 const tables = ["countries", "regions", "entities", "varieties", "processes", "flavors"];
-const requiredPipelineVersion = "1.24P-recognition-pipeline.3";
 const minimumKnowledgeOnlyVarietyCount = 16;
 const expectedBlockedEntityCodes = [
   "ST-CN-ZHU@深度研究",
@@ -158,10 +157,17 @@ function assertKnowledgeOnlySubset(book, label) {
   }
 }
 
-function assertKnowledgeOnlyRuntime(book, label) {
-  if (RECOGNITION_PIPELINE_VERSION !== requiredPipelineVersion) {
-    throw new Error(`${label}: installed LuckyBean pipeline is ${RECOGNITION_PIPELINE_VERSION}, expected ${requiredPipelineVersion}`);
+async function assertPipelineArtifact(output, label) {
+  if (!/^1\.24P-recognition-pipeline\.\d+$/u.test(RECOGNITION_PIPELINE_VERSION)) {
+    throw new Error(`${label}: installed LuckyBean pipeline version is malformed: ${RECOGNITION_PIPELINE_VERSION}`);
   }
+  const coreSource = await readFile(resolve(dirname(output), "luckybean-recognition-core.js"), "utf8");
+  if (!coreSource.includes(RECOGNITION_PIPELINE_VERSION)) {
+    throw new Error(`${label}: bundled Recognition pipeline differs from installed pinned dependency: ${RECOGNITION_PIPELINE_VERSION}`);
+  }
+}
+
+function assertKnowledgeOnlyRuntime(book, label) {
   const document = recognitionDocumentFromText("VARIETY: Anacafe 14");
   const analysis = analyzeRecognitionDocument(document, book);
   const candidate = analysis?.parsed?.parseMetadata?.knowledgeOnlyVariety;
@@ -191,6 +197,7 @@ for (const output of outputs) {
   const html = await readFile(output, "utf8");
   const label = output.replace(`${root}/`, "");
   assertLazyBootstrap(html, label);
+  await assertPipelineArtifact(output, label);
   const book = embeddedBook(html);
   if (book?.coffeeKnowledgeMeta?.qrIndexesChanged !== false) {
     throw new Error(`${label}: Coffee Knowledge compatibility marker missing`);
