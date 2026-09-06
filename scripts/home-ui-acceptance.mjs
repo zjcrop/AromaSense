@@ -246,7 +246,13 @@ async function runAcceptance(appUrl) {
     })()`);
     requireCondition(yingxiangLogin?.hasPanel === true, `Yingxiang independent host login did not open: ${JSON.stringify(yingxiangLogin)}`);
     requireCondition(yingxiangLogin?.accountValue === "", `Yingxiang account must be entered on every entry: ${JSON.stringify(yingxiangLogin)}`);
-    requireCondition(yingxiangLogin?.labels?.includes("登录迎香") && yingxiangLogin?.labels?.includes("首次创建账号"), `Yingxiang login actions missing: ${JSON.stringify(yingxiangLogin)}`);
+    requireCondition(
+      yingxiangLogin?.labels?.includes("登录迎香") &&
+      yingxiangLogin?.labels?.includes("首次创建账号") &&
+      yingxiangLogin?.labels?.includes("换设备恢复") &&
+      yingxiangLogin?.labels?.includes("查看本机恢复码"),
+      `Yingxiang login/recovery actions missing: ${JSON.stringify(yingxiangLogin)}`
+    );
     requireCondition(yingxiangLogin?.hasConsole === false && yingxiangLogin?.hasPersonalAccount === false, `Yingxiang must not reuse AromaSense account/console before host login: ${JSON.stringify(yingxiangLogin)}`);
     const closeYingxiang = await cdp.evaluate(`(() => { const n=[...document.querySelectorAll('.yx-host-login button')].find((b)=>b.textContent?.trim()==='返回香迹'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
     requireCondition(closeYingxiang === true, "Unable to close Yingxiang host login");
