@@ -1,10 +1,12 @@
 import { YingxiangClient } from "../core/yingxiang-client";
+import { YingxiangHostAuthClient, type YingxiangHostSession } from "../core/yingxiang-host-auth";
 import { YingxiangParticipationService } from "../core/yingxiang-participation-service";
 import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { YingxiangConsoleRenderer } from "../ui/dom/yingxiang-console-renderer";
 import type { YingxiangDeliveryService } from "../core/yingxiang-delivery-service";
+import { YingxiangHostLoginRenderer } from "../ui/dom/yingxiang-host-login-renderer";
 import { YingxiangJoinRenderer } from "../ui/dom/yingxiang-join-renderer";
 
 function installOverlayStyles(): void {
@@ -34,7 +36,10 @@ export interface YingxiangBrowserBootstrapOptions {
 export class YingxiangBrowserBootstrap {
   private readonly authStore: LocalAuthSessionStore;
   private readonly client?: YingxiangClient;
+  private readonly hostAuth?: YingxiangHostAuthClient;
   private readonly participation?: YingxiangParticipationService;
+  private hostSession?: YingxiangHostSession;
+  private hostClient?: YingxiangClient;
   private readonly volatileJoinIds = new Map<string, string>();
   private observer?: MutationObserver;
   private overlay?: HTMLElement;
@@ -51,6 +56,7 @@ export class YingxiangBrowserBootstrap {
     this.authStore = new LocalAuthSessionStore(preferences, options.now);
     if (options.cloudBaseUrl) {
       this.client = new YingxiangClient(options.cloudBaseUrl, async () => (await this.authStore.get())?.token);
+      this.hostAuth = new YingxiangHostAuthClient(options.cloudBaseUrl);
       this.participation = new YingxiangParticipationService(db, this.client, {
         now: options.now,
         createSessionId: options.createSessionId,
@@ -92,7 +98,7 @@ export class YingxiangBrowserBootstrap {
     button.dataset.homeAction = "yingxiang";
     button.textContent = "迎香";
     button.setAttribute("aria-label", "进入迎香活动");
-    button.addEventListener("click", () => this.openHost());
+    button.addEventListener("click", () => this.openHostLogin());
     actions.prepend(button);
   }
 
@@ -125,12 +131,38 @@ export class YingxiangBrowserBootstrap {
       const entry = document.createElement("button");entry.type="button";entry.dataset.yingxiangParticipation="true";
       entry.textContent = `迎香 · ${p.display_name}${p.status === "released" ? " · 身份已释放" : " · 本次活动身份"}`;
       entry.style.cssText="display:block;max-width:100%;padding:8px;margin-bottom:8px;border:1px solid #84704b;border-radius:6px;background:#211e17;color:#ead8b3;font-size:14px;white-space:normal";
-      entry.onclick=()=>this.openHost(true);header.prepend(entry);
+      entry.onclick=()=>this.openParticipationConsole();header.prepend(entry);
     } finally { this.installingParticipation=false; }
   }
 
-  private openHost(participation = false): void {
-    const { panel } = this.createOverlay("迎香测试版");
+  private openHostLogin(): void {
+    const { panel } = this.createOverlay("迎香主办方登录");
+    if (!this.hostAuth || !this.options.cloudBaseUrl) {
+      panel.textContent = "迎香云端服务尚未配置，无法登录主办方账号。";
+      return;
+    }
+    new YingxiangHostLoginRenderer(panel, this.hostAuth, {
+      onClose: () => this.closeOverlay(),
+      onAuthenticated: async (session) => {
+        this.hostSession = session;
+        this.hostClient = new YingxiangClient(this.options.cloudBaseUrl!, async () => this.hostSession?.token);
+        this.openHostConsole(panel, this.hostClient);
+      }
+    }).render();
+  }
+
+  private openHostConsole(panel: HTMLElement, client: YingxiangClient): void {
+    this.console?.dispose();
+    this.console = new YingxiangConsoleRenderer(panel, client, this.db, this.options.delivery, {
+      onOpenSession: async (id) => { this.closeOverlay(); await this.options.onOpenSession(id); },
+      onClose: () => this.closeOverlay(),
+      onRequireAccount: () => this.openHostLogin()
+    });
+    void this.console.render();
+  }
+
+  private openParticipationConsole(): void {
+    const { panel } = this.createOverlay("迎香参与记录");
     this.console = new YingxiangConsoleRenderer(panel, this.client, this.db, this.options.delivery, {
       onOpenSession: async (id) => { this.closeOverlay(); await this.options.onOpenSession(id); },
       onClose: () => this.closeOverlay(),
@@ -142,7 +174,7 @@ export class YingxiangBrowserBootstrap {
         account?.click();
       }
     });
-    void (participation ? this.console.showParticipations() : this.console.render());
+    void this.console.showParticipations();
   }
 
   private async openJoin(token: string): Promise<void> {
@@ -205,5 +237,9 @@ export class YingxiangBrowserBootstrap {
     this.console = undefined;
     this.overlay?.remove();
     this.overlay = undefined;
+    const session = this.hostSession;
+    this.hostSession = undefined;
+    this.hostClient = undefined;
+    if (session && this.hostAuth) void this.hostAuth.logout(session.token);
   }
 }
