@@ -36,7 +36,7 @@ export interface YingxiangBrowserBootstrapOptions {
 export class YingxiangBrowserBootstrap {
   private readonly authStore: LocalAuthSessionStore;
   private readonly client?: YingxiangClient;
-  private readonly hostAuth?: YingxiangHostAuthClient;
+  private readonly hostAuth: YingxiangHostAuthClient;
   private readonly participation?: YingxiangParticipationService;
   private hostSession?: YingxiangHostSession;
   private hostClient?: YingxiangClient;
@@ -54,9 +54,13 @@ export class YingxiangBrowserBootstrap {
   ) {
     const preferences = new UserPreferencesRepository(db);
     this.authStore = new LocalAuthSessionStore(preferences, options.now);
+    // The host login surface is always available. When a static/local build has no
+    // configured cloud URL it targets same-origin only after the user explicitly
+    // submits; this preserves the required login-first UX without pretending that
+    // an unconfigured backend is usable.
+    this.hostAuth = new YingxiangHostAuthClient(options.cloudBaseUrl || window.location.origin);
     if (options.cloudBaseUrl) {
       this.client = new YingxiangClient(options.cloudBaseUrl, async () => (await this.authStore.get())?.token);
-      this.hostAuth = new YingxiangHostAuthClient(options.cloudBaseUrl);
       this.participation = new YingxiangParticipationService(db, this.client, {
         now: options.now,
         createSessionId: options.createSessionId,
@@ -137,15 +141,12 @@ export class YingxiangBrowserBootstrap {
 
   private openHostLogin(): void {
     const { panel } = this.createOverlay("迎香主办方登录");
-    if (!this.hostAuth || !this.options.cloudBaseUrl) {
-      panel.textContent = "迎香云端服务尚未配置，无法登录主办方账号。";
-      return;
-    }
     new YingxiangHostLoginRenderer(panel, this.hostAuth, {
       onClose: () => this.closeOverlay(),
       onAuthenticated: async (session) => {
         this.hostSession = session;
-        this.hostClient = new YingxiangClient(this.options.cloudBaseUrl!, async () => this.hostSession?.token);
+        const baseUrl = this.options.cloudBaseUrl || window.location.origin;
+        this.hostClient = new YingxiangClient(baseUrl, async () => this.hostSession?.token);
         this.openHostConsole(panel, this.hostClient);
       }
     }).render();
@@ -240,6 +241,6 @@ export class YingxiangBrowserBootstrap {
     const session = this.hostSession;
     this.hostSession = undefined;
     this.hostClient = undefined;
-    if (session && this.hostAuth) void this.hostAuth.logout(session.token);
+    if (session) void this.hostAuth.logout(session.token);
   }
 }
