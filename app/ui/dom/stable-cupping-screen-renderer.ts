@@ -18,7 +18,7 @@ const EDITABLE_SAMPLE_FIELDS: readonly [string, string, string][] = [
   ["variety", "品种", "品种"],
   ["process", "处理法", "处理法"],
   ["roast", "烘焙度", "烘焙度"],
-  ["roastDate", "烘焙日期", "YYYY-MM-DD"],
+  ["roastDate", "烘焙日期", "YYYY-MM-DD / 七月十五日 / 15 Jul 2026"],
   ["altitude", "海拔", "海拔"],
   ["flavorNotes", "风味信息", "已知风味信息"]
 ];
@@ -264,7 +264,7 @@ export class CuppingScreenRenderer {
         const caption = document.createElement("span");
         caption.textContent = label;
         const input = document.createElement("input");
-        input.type = key === "roastDate" ? "date" : "text";
+        input.type = "text";
         input.value = textValue(sample.metadata[key]);
         input.placeholder = placeholder;
         input.disabled = locked;
