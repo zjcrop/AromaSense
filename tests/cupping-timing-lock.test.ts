@@ -77,8 +77,8 @@ test("elapsed timing is derived consistently from the persisted session start", 
 
 test("score confirmation UI and left-rail timer contracts remain present", () => {
   const scoreSource = readFileSync("app/ui/dom/final-assessment-renderer.ts", "utf8");
-  assert.match(scoreSource, /确认得分/u);
-  assert.match(scoreSource, /确认得分后，本样品杯测记录将被锁定，无法修改/u);
+  assert.match(scoreSource, /确认 SCA 得分/u);
+  assert.match(scoreSource, /确认后锁定本样品/u);
   assert.match(scoreSource, /font-size:18px!important/u);
   assert.match(scoreSource, /font-weight:800!important/u);
   assert.match(scoreSource, /text-align:center/u);
