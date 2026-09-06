@@ -179,6 +179,11 @@ export class CuppingSessionController {
     return this.active;
   }
 
+  async close(): Promise<void> {
+    await this.flush();
+    this.active = undefined;
+  }
+
   async flush(): Promise<void> { await this.writeTail; }
 
   private enqueueWrite(work: () => Promise<void>): Promise<void> {

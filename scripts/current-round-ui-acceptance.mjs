@@ -176,7 +176,8 @@ async function runAcceptance(appUrl) {
 
     await setValue(cdp, '[data-session-field="组织方"] input', "AromaSense UI Acceptance");
     await setValue(cdp, '[data-session-field="杯测会名称"] input', "Current Round Visible UI");
-    await click(cdp, 'button[data-cupping-target="blind"]');
+    await setValue(cdp, '[data-cupping-type="true"]', "blind");
+    await waitExpression(cdp, `document.querySelector('[data-cupping-type="true"]')?.value==='blind'`, "blind cupping type selection");
     await click(cdp, ".batch-setup__start");
     await waitExpression(cdp, `Boolean(document.querySelector('.cupping-count-dialog__input'))`, "blind sample dialog");
     await setValue(cdp, ".cupping-count-dialog__input", "1");

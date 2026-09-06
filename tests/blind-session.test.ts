@@ -68,13 +68,13 @@ test("semi blind masks direct identity and exposes only the default low-identifi
   });
 });
 
-test("open mode and legacy blindMode metadata migrate into canonical cuppingMode", () => {
+test("legacy open and legacy blindMode metadata migrate into canonical cuppingMode", () => {
   const open = metadata("open");
   assert.equal(visibleSampleLabel("Known sample", 2, open, "active"), "Known sample");
   assert.deepEqual(visibleSampleMetadata(sampleMetadata, open, "active"), sampleMetadata);
 
   const legacyOpen = normalizeSessionMetadata({ date: "2026-08-26", time: "20:50", organizer: "Legacy" });
-  assert.equal(cuppingModeFromMetadata(legacyOpen), "open");
+  assert.equal(cuppingModeFromMetadata(legacyOpen), "timed");
   const legacyBlind = normalizeSessionMetadata({ date: "2026-08-26", time: "20:50", organizer: "Legacy", blindMode: "full_blind" });
   assert.equal(legacyBlind.cuppingMode, "blind");
   assert.equal(legacyBlind.blindMode, undefined);

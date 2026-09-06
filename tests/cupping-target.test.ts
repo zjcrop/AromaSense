@@ -6,14 +6,23 @@ import {
   resolveCuppingTarget
 } from "../app/core/cupping-target";
 
-test("cupping target exposes exactly open, blind and semi-blind choices", () => {
-  assert.deepEqual(resolveCuppingTarget("open"), { choice: "open", cuppingMode: "open", label: "公开杯测" });
+test("cupping target exposes free, timed, blind and semi-blind choices", () => {
+  assert.deepEqual(resolveCuppingTarget("free"), { choice: "free", cuppingMode: "free", label: "自由杯测" });
+  assert.deepEqual(resolveCuppingTarget("timed"), { choice: "timed", cuppingMode: "timed", label: "计时杯测" });
   assert.deepEqual(resolveCuppingTarget("blind"), { choice: "blind", cuppingMode: "blind", label: "盲测" });
   assert.deepEqual(resolveCuppingTarget("semi_blind"), { choice: "semi_blind", cuppingMode: "semi_blind", label: "半盲测" });
 });
 
-test("target choice restores from canonical and legacy session metadata", () => {
-  assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "open" }), "open");
+test("legacy open target keeps historical timed behavior", () => {
+  assert.deepEqual(resolveCuppingTarget("open"), { choice: "open", cuppingMode: "timed", label: "计时杯测" });
+  assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "open" }), "timed");
+  assert.equal(cuppingTargetChoiceFromMetadata({ target: "公开杯测" }), "timed");
+  assert.equal(cuppingTargetChoiceFromMetadata({ blindMode: "open" }), "timed");
+});
+
+test("target choice restores all canonical modes from session metadata", () => {
+  assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "free" }), "free");
+  assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "timed" }), "timed");
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "blind" }), "blind");
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "semi_blind" }), "semi_blind");
   assert.equal(cuppingTargetChoiceFromMetadata({ blindMode: "full_blind" }), "blind");

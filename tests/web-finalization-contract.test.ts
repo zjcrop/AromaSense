@@ -4,11 +4,17 @@ import test from "node:test";
 
 const startup = readFileSync("app/ui/dom/startup-renderer.ts", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
-const home = readFileSync("app/ui/dom/batch-setup-renderer.ts", "utf8");
+const home = [
+  readFileSync("app/ui/dom/batch-setup-renderer.ts", "utf8"),
+  readFileSync("app/ui/dom/batch-setup-home-renderer.ts", "utf8")
+].join("\n");
 const app = readFileSync("app/runtime/dom-app.ts", "utf8");
 const records = readFileSync("app/ui/dom/session-records-renderer.ts", "utf8");
 const cupping = readFileSync("app/ui/dom/cupping-screen-renderer.ts", "utf8");
-const stableCupping = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");
+const stableCupping = [
+  readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8"),
+  readFileSync("app/ui/dom/stable-cupping-screen-renderer-base.ts", "utf8")
+].join("\n");
 const cuppingCss = readFileSync("app/ui/dom/aromasense-cupping.css", "utf8");
 const productShell = readFileSync("app/ui/dom/product-shell.css", "utf8");
 const rail = readFileSync("app/ui/dom/sample-rail-renderer.ts", "utf8");

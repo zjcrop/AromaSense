@@ -259,8 +259,8 @@ async function runAcceptance(appUrl) {
     await waitForExpression(cdp, `document.querySelector('#app')?.dataset.screen === 'setup'`, "initial setup screen");
     await setValue(cdp, '[data-session-field="组织方"] input', "AromaSense Refresh Acceptance");
     await setValue(cdp, '[data-session-field="杯测会名称"] input', "Browser Refresh Recovery");
-    await click(cdp, 'button[data-cupping-target="blind"]');
-    await waitForExpression(cdp, `document.querySelector('button[data-cupping-target="blind"]')?.getAttribute('aria-pressed') === 'true'`, "blind mode selection");
+    await setValue(cdp, '[data-cupping-type="true"]', "blind");
+    await waitForExpression(cdp, `document.querySelector('[data-cupping-type="true"]')?.value === 'blind'`, "blind mode selection");
     await click(cdp, ".batch-setup__start");
     await waitForExpression(cdp, `Boolean(document.querySelector('.cupping-count-dialog__input'))`, "blind sample count dialog");
     await setValue(cdp, ".cupping-count-dialog__input", "1");

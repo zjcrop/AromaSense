@@ -1,9 +1,19 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import { CuppingSessionController, type ActiveEditingState } from "../core/cupping-session-controller";
 import type { RevisionCheckpointService } from "../core/revision-checkpoint-service";
-import { reorderSamples, type SampleRecord } from "../core/sample-batch-service";
+import {
+  buildSampleBatch,
+  reorderSamples,
+  sampleIndexFromMetadata,
+  type SampleDraftInput,
+  type SampleRecord
+} from "../core/sample-batch-service";
 import { activateSession, completeSession, type SessionStatus } from "../core/session-lifecycle";
-import type { CuppingSessionMetadata } from "../core/session-metadata";
+import {
+  cuppingModeFromMetadata,
+  cuppingModePolicy,
+  type CuppingSessionMetadata
+} from "../core/session-metadata";
 import type { LocalCuppingRepository } from "../storage/local-cupping-repository";
 import type { SampleStageProgress, StageProgressReader } from "../storage/stage-progress-reader";
 import { buildSampleRailViewState, nextStage, previousStage, type SampleRailItemViewState } from "./cupping-view-model";
@@ -95,6 +105,9 @@ export class CuppingScreenController {
   ): Promise<CuppingScreenState> {
     const state = this.requireState();
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
+    if (!cuppingModePolicy(cuppingModeFromMetadata(state.sessionMetadata)).runtimeIdentityEditable) {
+      throw new Error("TIMED_CUPPING_SAMPLE_IDENTITY_LOCKED");
+    }
     if (state.lockedSampleIds.includes(sampleId)) throw new Error("SAMPLE_SCORE_LOCKED");
     const sample = state.samples.find((item) => item.sampleId === sampleId);
     if (!sample) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
@@ -117,22 +130,56 @@ export class CuppingScreenController {
     const samples = state.samples.map((item) => item.sampleId === sampleId ? saved : item);
     let active = this.editor.current();
     if (active?.context.sampleId === sampleId) active = await this.editor.refresh();
-    const [progress, observations] = await Promise.all([
-      this.progressReader.listForSession(state.sessionId),
-      this.repository.listObservationsForSession(state.sessionId)
-    ]);
+    return this.reloadRosterState(samples, active);
+  }
+
+  async pauseEditing(): Promise<CuppingScreenState> {
+    const state = this.requireState();
+    this.assertRosterMutable(state);
+    await this.editor.close();
+    const progress = await this.progressReader.listForSession(state.sessionId);
     this.state = {
       ...state,
-      samples,
       progress,
-      lockedSampleIds: sampleLockIds(observations),
-      rail: buildSampleRailViewState(samples, progress, active?.context.sampleId, {
+      rail: buildSampleRailViewState(state.samples, progress, undefined, {
         metadata: state.sessionMetadata,
         status: state.sessionStatus
       }),
-      active
+      active: undefined
     };
     return this.state;
+  }
+
+  async addSample(sampleId: string, draft: SampleDraftInput, now: string): Promise<CuppingScreenState> {
+    const state = this.requireState();
+    this.assertRosterMutable(state);
+    await this.editor.flush();
+    if (state.samples.some((sample) => sample.sampleId === sampleId)) throw new Error(`DUPLICATE_SAMPLE_ID:${sampleId}`);
+
+    const nextSampleIndex = state.samples.reduce((max, sample) => {
+      const value = sampleIndexFromMetadata(sample.metadata);
+      return value === undefined ? max : Math.max(max, value + 1);
+    }, state.samples.length);
+    const built = buildSampleBatch(
+      state.sessionId,
+      [{ ...draft, metadata: { ...(draft.metadata ?? {}), sampleIndex: nextSampleIndex } }],
+      now,
+      () => sampleId
+    )[0]!;
+    const nextPosition = state.samples.length + 1;
+    const sample: SampleRecord = { ...built, displayNumber: nextPosition, sortOrder: nextPosition };
+    const samples = await this.repository.addSample(sample);
+    return this.reloadRosterState(samples, this.editor.current());
+  }
+
+  async deleteSample(sampleId: string, now: string): Promise<CuppingScreenState> {
+    const state = this.requireState();
+    this.assertRosterMutable(state);
+    if (state.lockedSampleIds.includes(sampleId)) throw new Error("SAMPLE_SCORE_LOCKED");
+    if (!state.samples.some((sample) => sample.sampleId === sampleId)) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
+    await this.editor.close();
+    const samples = await this.repository.deleteSample(state.sessionId, sampleId, now);
+    return this.reloadRosterState(samples, undefined);
   }
 
   async completeStage(now: string): Promise<CuppingScreenState> {
@@ -144,6 +191,7 @@ export class CuppingScreenController {
   async reorderSampleIds(orderedSampleIds: readonly string[], now: string): Promise<CuppingScreenState> {
     const state = this.requireState();
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
+    this.assertRosterMutable(state);
     await this.editor.flush();
     const reordered = reorderSamples(state.samples, orderedSampleIds, now);
     await this.repository.replaceSampleOrder(state.sessionId, reordered);
@@ -219,6 +267,13 @@ export class CuppingScreenController {
     return this.state;
   }
 
+  private assertRosterMutable(state: CuppingScreenState): void {
+    if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
+    if (!cuppingModePolicy(cuppingModeFromMetadata(state.sessionMetadata)).runtimeRosterMutable) {
+      throw new Error("CUPPING_ROSTER_LOCKED");
+    }
+  }
+
   private requireState(): CuppingScreenState {
     if (!this.state) throw new Error("CUPPING_SCREEN_NOT_INITIALIZED");
     return this.state;
@@ -228,6 +283,34 @@ export class CuppingScreenController {
     const active = this.editor.current();
     if (!active) throw new Error("NO_ACTIVE_EDITING_CONTEXT");
     return active;
+  }
+
+  private async reloadRosterState(
+    samples: readonly SampleRecord[],
+    active: ActiveEditingState | undefined
+  ): Promise<CuppingScreenState> {
+    const state = this.requireState();
+    const [session, progress, observations] = await Promise.all([
+      this.repository.getSession(state.sessionId),
+      this.progressReader.listForSession(state.sessionId),
+      this.repository.listObservationsForSession(state.sessionId)
+    ]);
+    this.state = {
+      ...state,
+      sessionStatus: session.status,
+      sessionMetadata: session.metadata,
+      sessionStartedAt: session.startedAt,
+      sessionCompletedAt: session.completedAt,
+      samples,
+      progress,
+      lockedSampleIds: sampleLockIds(observations),
+      rail: buildSampleRailViewState(samples, progress, active?.context.sampleId, {
+        metadata: session.metadata,
+        status: session.status
+      }),
+      active
+    };
+    return this.state;
   }
 
   private async refreshState(active: ActiveEditingState): Promise<CuppingScreenState> {
