@@ -1,6 +1,5 @@
 import { YingxiangClient, type YingxiangDashboard, type YingxiangRemoteEvent } from "../../core/yingxiang-client";
 import { YingxiangDeliveryService } from "../../core/yingxiang-delivery-service";
-import type { YingxiangCoffeeDetail } from "../../core/yingxiang-event";
 import type { SQLiteDriver } from "../../storage/local-cupping-repository";
 import { YingxiangHostRenderer } from "./yingxiang-host-renderer";
 import { renderYingxiangInviteShare } from "./yingxiang-invite-share";
@@ -71,30 +70,19 @@ function table(headers: string[], rows: (string | number | HTMLElement)[][]): HT
   table.append(head, body); wrap.append(table); return wrap;
 }
 
-function coffeeSummary(coffee?: YingxiangCoffeeDetail): { title: string; detail: string } {
-  if (!coffee) return { title: "尚未对应真实咖啡", detail: "" };
-  const clean = (value: unknown) => String(value ?? "").normalize("NFKC").trim();
-  const title = clean(coffee.productName) || "未命名咖啡";
-  const area = clean(coffee.region) || clean(coffee.farm) || clean(coffee.station);
-  const detail = [clean(coffee.country), area, clean(coffee.variety), clean(coffee.roast)].filter(Boolean);
-  if (clean(coffee.notes)) detail.push("……");
-  return { title, detail: detail.join("/") };
-}
-
 function sampleList(event: YingxiangRemoteEvent, onEdit?: () => void): HTMLElement {
   const section = el("section");
   section.className = "yx-samples";
-  section.append(el("h3", "样品组"));
+  const head = el("div"); head.className = "yx-nav";
+  head.append(el("h3", "样品顺序"));
+  if (onEdit) head.append(button("编辑 / 排序", onEdit));
+  section.append(head);
   const list = el("div"); list.className = "yx-samples__list";
   for (const sample of [...event.manifest.samples].sort((a, b) => a.order - b.order)) {
-    const row = el("button"); row.type = "button"; row.className = "yx-sample-row";
+    const row = el("div"); row.className = "yx-sample-row";
+    const ordinal = el("span", String(sample.order).padStart(2, "0")); ordinal.className = "yx-sample-row__order";
     const code = el("span", sample.sampleCode); code.className = "yx-sample-row__code";
-    const info = el("span"); info.className = "yx-sample-row__info";
-    const summary = coffeeSummary(sample.coffee);
-    const title = el("span", summary.title); title.className = "yx-sample-row__title";
-    const detail = el("span", summary.detail || "点击编辑真实咖啡信息"); detail.className = "yx-sample-row__detail";
-    info.append(title, detail); row.append(code, info);
-    if (onEdit) row.onclick = onEdit; else row.disabled = true;
+    row.append(ordinal, code);
     list.append(row);
   }
   section.append(list);
@@ -108,14 +96,13 @@ function styles(): void {
     .yx-console{padding:20px;display:grid;gap:16px;background:#151515;color:#eee;font:16px/1.55 system-ui,sans-serif}
     .yx-console [hidden]{display:none!important}.yx-console h2,.yx-console h3,.yx-console p{margin:0}.yx-console h2{color:#d6ad63}.yx-console h3{font-size:17px}
     .yx-console button{min-height:44px;padding:8px 13px;border:1px solid #7c6844;background:#242119;color:#ead8b3;border-radius:7px;font:inherit;cursor:pointer}.yx-console button:disabled{opacity:.5;cursor:default}
-    .yx-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.yx-nav h2{flex:1}.yx-console section{display:grid;gap:12px;padding:14px;border:1px solid #39352d;border-radius:9px;min-width:0}
+    .yx-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.yx-nav h2,.yx-nav h3{flex:1}.yx-console section{display:grid;gap:12px;padding:14px;border:1px solid #39352d;border-radius:9px;min-width:0}
     .yx-console label{display:grid;gap:5px;font-size:14px}.yx-console input,.yx-console select{min-height:44px;min-width:0;box-sizing:border-box;width:100%;background:#101010;color:#eee;border:1px solid #706045;border-radius:6px;padding:8px;font:inherit}
     .yx-console .yx-check{display:flex;gap:8px;align-items:center}.yx-check input{width:20px;min-height:20px;margin:0}.yx-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.yx-muted{font-size:13px;color:#9f988d}.yx-status{font-size:14px;color:#d6ad63;white-space:pre-wrap;overflow-wrap:anywhere}
     .yx-table{overflow:auto}.yx-table table{border-collapse:collapse;white-space:nowrap;font-size:14px;width:100%}.yx-table th,.yx-table td{padding:8px;text-align:left;border-bottom:1px solid #35332e}.yx-table th{color:#cabc9d}.yx-console a{color:#e9cf9b;overflow-wrap:anywhere}
-    .yx-samples__list{display:grid;gap:7px}.yx-console .yx-sample-row{display:grid;grid-template-columns:46px minmax(0,1fr);gap:9px;align-items:center;width:100%;min-height:58px;padding:6px;border:1px solid #383329;background:#111;color:inherit;text-align:left}
-    .yx-console .yx-sample-row:disabled{opacity:1;cursor:default}.yx-sample-row__code{display:grid;place-items:center;width:46px;height:46px;box-sizing:border-box;border:1px solid #806b46;border-radius:7px;background:#1d1a14;color:#e1ca9a;font:700 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .yx-sample-row__info{display:grid;gap:2px;min-width:0}.yx-sample-row__title,.yx-sample-row__detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.yx-sample-row__title{font-size:12.5px;font-weight:700}.yx-sample-row__detail{font-size:10.5px;color:#938c82}
-    @media(max-width:620px){.yx-console{padding:14px}.yx-grid{grid-template-columns:1fr}.yx-console section{padding:11px}.yx-nav button{font-size:14px}.yx-console .yx-sample-row{grid-template-columns:42px minmax(0,1fr)}.yx-sample-row__code{width:42px;height:42px}}
+    .yx-samples__list{display:grid;gap:7px}.yx-sample-row{display:grid;grid-template-columns:38px minmax(0,1fr);gap:9px;align-items:center;min-height:48px;padding:6px 8px;border:1px solid #383329;border-radius:7px;background:#111;color:inherit}
+    .yx-sample-row__order{display:grid;place-items:center;width:34px;height:34px;border-radius:6px;background:#1d1a14;color:#887754;font:700 10px/1 ui-monospace,SFMono-Regular,Consolas,monospace}.yx-sample-row__code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e1ca9a;font:700 13px/1.25 ui-monospace,SFMono-Regular,Consolas,monospace}
+    @media(max-width:620px){.yx-console{padding:14px}.yx-grid{grid-template-columns:1fr}.yx-console section{padding:11px}.yx-nav button{font-size:14px}}
   `;
   document.head.append(style);
 }
@@ -288,7 +275,7 @@ export class YingxiangConsoleRenderer {
 
       if (data.event.policy.calibrationRepeatEnabled) {
         const calibration = el("section"); calibration.append(el("h3", "同豆重复映射"));
-        const coffee = input("真实咖啡名称（仅主办方可见）"); calibration.append(coffee.label);
+        const coffee = input("校准豆名称（仅主办方可见）"); calibration.append(coffee.label);
         const checks = data.event.manifest.samples.map((sample) => {
           const label = el("label", sample.sampleCode); label.className = "yx-check";
           const control = el("input"); control.type = "checkbox"; label.prepend(control); calibration.append(label);
@@ -296,7 +283,7 @@ export class YingxiangConsoleRenderer {
         });
         calibration.append(button("保存重复样品组", () => this.run(status, async () => {
           const ids = checks.filter((candidate) => candidate.control.checked).map((candidate) => candidate.id);
-          if (!coffee.input.value.trim() || ids.length < 2) throw new Error("填写咖啡名称，并选择至少两个活动样品编号。");
+          if (!coffee.input.value.trim() || ids.length < 2) throw new Error("填写校准豆名称，并选择至少两个活动样品编号。");
           await this.client!.createCalibrationGroup(eventId, { canonicalSampleId: coffee.input.value.trim(), eventSampleIds: ids, revealPolicy: "organizer_only" });
           await this.showDashboard(eventId);
         })));
