@@ -20,6 +20,10 @@ function metadataCode(metadata: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+function normalizedLines(value: string): string[] {
+  return value.split(/\r?\n/u).map((line) => line.normalize("NFKC").trim()).filter(Boolean);
+}
+
 export function yingxiangSampleCodesFromDrafts(samples: readonly Pick<ImportSampleDraft, "label" | "metadata">[]): string[] {
   return samples.flatMap((sample) => {
     const explicit = metadataCode(sample.metadata ?? {});
@@ -30,12 +34,38 @@ export function yingxiangSampleCodesFromDrafts(samples: readonly Pick<ImportSamp
   });
 }
 
-function codesFromRecognized(samples: readonly RecognizedSample[]): string[] {
-  return yingxiangSampleCodesFromDrafts(samples.map((sample) => ({ label: sample.label, metadata: sample.metadata ?? {} })));
+function strictOcrCodeLines(text: string): string[] {
+  const lines = normalizedLines(text);
+  if (!lines.length || lines.some((line) => !/^[\p{L}\p{N}][\p{L}\p{N}._#-]{0,31}$/u.test(line))) return [];
+  return lines;
 }
 
-function normalizedLines(value: string): string[] {
-  return value.split(/\r?\n/u).map((line) => line.normalize("NFKC").trim()).filter(Boolean);
+function codesFromRecognized(samples: readonly RecognizedSample[]): string[] {
+  return samples.flatMap((sample) => {
+    const extracted = yingxiangSampleCodesFromDrafts([{ label: sample.label, metadata: sample.metadata ?? {} }]);
+    if (extracted.length) return extracted;
+    return strictOcrCodeLines(sample.rawText);
+  });
+}
+
+function looksLikeStructuredPaste(text: string): boolean {
+  const lines = normalizedLines(text);
+  return lines.some((line) => /[\t,，;；|]/u.test(line))
+    || lines.some((line) => /^(?:编号|样品(?:编号)?|sample(?:\s+code)?|code)\s*[:：]/iu.test(line));
+}
+
+/**
+ * The host sample-code box is not a coffee-description field. The common case
+ * is literally one code per line, so preserve those lines verbatim instead of
+ * forcing them through the coffee semantic recognizer (which intentionally
+ * treats a single token as an unlabeled coffee sample).
+ */
+export function yingxiangSampleCodesFromPastedText(text: string): string[] {
+  const lines = normalizedLines(text);
+  if (!lines.length) return [];
+  if (!looksLikeStructuredPaste(text)) return lines;
+  const bundle = recognizeManualText(text);
+  return yingxiangSampleCodesFromDrafts(bundle.sessions.flatMap((session) => session.samples));
 }
 
 function installStyles(): void {
@@ -89,8 +119,7 @@ export class YingxiangSampleCodeImporter {
     apply.onclick = () => {
       const text = textarea.value.trim(); if (!text) return;
       try {
-        const bundle = recognizeManualText(text);
-        const codes = yingxiangSampleCodesFromDrafts(bundle.sessions.flatMap((session) => session.samples));
+        const codes = yingxiangSampleCodesFromPastedText(text);
         if (!codes.length) { this.status.textContent = "粘贴内容没有形成可用的样品编号。"; return; }
         this.accept(codes, "粘贴内容"); pasteBox.hidden = true;
       } catch (error) { this.status.textContent = error instanceof Error ? error.message : String(error); }
