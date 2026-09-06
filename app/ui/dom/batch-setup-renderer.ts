@@ -51,6 +51,7 @@ function installModeSelectStyles(): void {
  */
 export class BatchSetupRenderer {
   private readonly home: HomeBatchSetupRenderer;
+  private modeObserver?: MutationObserver;
 
   constructor(
     private readonly root: HTMLElement,
@@ -63,6 +64,8 @@ export class BatchSetupRenderer {
   }
 
   async render(): Promise<void> {
+    this.modeObserver?.disconnect();
+    this.modeObserver = undefined;
     await this.home.render();
     this.installCuppingTypeSelect();
   }
@@ -80,13 +83,11 @@ export class BatchSetupRenderer {
     targetField.dataset.sessionField = "杯测类型";
     shell.querySelector(".batch-setup__cupping-type")?.remove();
     shell.querySelector<HTMLElement>(".batch-setup__target-help")?.remove();
-    const legacyDirect = shell.querySelector<HTMLElement>(".batch-setup__target-direct");
-    if (legacyDirect) legacyDirect.hidden = true;
+    shell.querySelector<HTMLElement>(".batch-setup__target-direct")?.remove();
 
     const host = this.modeHost();
-    // A fresh pre-upgrade renderer initializes `open`; new sessions now start as free.
+    // The preserved legacy renderer initializes a fresh form as `open`; the new product default is free.
     if (host.cuppingMode === "open") host.setCuppingMode("free", false);
-    const current = normalizeCuppingMode(host.cuppingMode);
 
     const wrapper = document.createElement("label");
     wrapper.className = "batch-setup__cupping-type";
@@ -97,12 +98,15 @@ export class BatchSetupRenderer {
     select.className = "batch-setup__cupping-type-select";
     select.dataset.cuppingType = "true";
     select.setAttribute("aria-label", "杯测类型");
-    for (const mode of CUPPING_MODES) {
-      const option = new Option(cuppingModeLabel(mode), mode);
-      option.selected = mode === current;
-      select.append(option);
-    }
-    select.value = current;
+    for (const mode of CUPPING_MODES) select.append(new Option(cuppingModeLabel(mode), mode));
+
+    const syncFromHost = (): void => {
+      // If legacy import/reset code later writes `open`, it represents historical timed behavior.
+      if (host.cuppingMode === "open") host.setCuppingMode("timed", false);
+      const mode = normalizeCuppingMode(host.cuppingMode);
+      if (select.value !== mode) select.value = mode;
+    };
+    syncFromHost();
     select.addEventListener("change", () => {
       const mode = normalizeCuppingMode(select.value);
       host.setCuppingMode(mode, true);
@@ -110,5 +114,8 @@ export class BatchSetupRenderer {
     });
     wrapper.append(caption, select);
     shell.prepend(wrapper);
+
+    this.modeObserver = new MutationObserver(() => syncFromHost());
+    this.modeObserver.observe(shell, { childList: true, subtree: true, characterData: true, attributes: true });
   }
 }
