@@ -107,7 +107,7 @@ export function sharedRecordCandidateLayout(document: OCRLayoutDocument): Sample
     sourceWidth: document.sourceWidth,
     sourceHeight: document.sourceHeight
   });
-  const candidates = Array.isArray(grouped?.candidates) ? grouped.candidates : [];
+  const candidates: readonly SharedRecordCandidate[] = grouped?.candidates ?? [];
   if (grouped?.grouped !== true || candidates.length < 2 || grouped.schemaVersion !== core.RECOGNITION_RECORD_CANDIDATE_SCHEMA) {
     return undefined;
   }
@@ -117,7 +117,7 @@ export function sharedRecordCandidateLayout(document: OCRLayoutDocument): Sample
   const segments: SampleLayoutSegment[] = [];
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index]!;
-    const blockIds: string[] = Array.from(new Set<string>((candidate.blockIds ?? []).map((id) => String(id)).filter((id) => id.length > 0)));
+    const blockIds: string[] = Array.from(new Set<string>((candidate.blockIds ?? []).map((id: string) => String(id)).filter((id: string) => id.length > 0)));
     if (!blockIds.length || blockIds.some((id) => claimed.has(id))) return undefined;
     const lines = blockIds.map((id) => lineById.get(id)).filter((line): line is OCRLayoutLine => Boolean(line));
     if (lines.length !== blockIds.length) return undefined;
