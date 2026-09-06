@@ -99,7 +99,8 @@ function rowFromLine(line: OCRLayoutLine): OCRRow {
 
 /** Compatibility fallback retained during Stage 3 migration. Shared LuckyBean
  * RecordCandidates run first; this path only covers layouts not yet represented
- * by the shared contract and remains review-required. */
+ * by the shared contract and remains review-required. Existing profile names are
+ * retained because they are already diagnostic metadata contracts. */
 function sideBySideColumnsFallback(document: OCRLayoutDocument): SampleLayoutResult | undefined {
   const lines = document.lines
     .filter((line) => line.text.replace(/\s+/g, "").length >= 2)
@@ -145,7 +146,7 @@ function sideBySideColumnsFallback(document: OCRLayoutDocument): SampleLayoutRes
     [orderedLeft.map(rowFromLine), orderedRight.map(rowFromLine)],
     "grid",
     0.82,
-    "compat:side-by-side-columns-v1"
+    "side-by-side-columns-v1"
   );
 }
 
@@ -154,7 +155,7 @@ function processRowsFallback(document: OCRLayoutDocument, source: readonly OCRRo
   const records = meaningful.filter((row) => hasCoffeeEvidence(row.text));
   if (records.length < 2) return undefined;
   if (records.length / meaningful.length < 0.72) return undefined;
-  return result(document, records.map((row) => [row]), "row-list", 0.8, "compat:semantic-process-row-v1");
+  return result(document, records.map((row) => [row]), "row-list", 0.8, "semantic-process-row-v1");
 }
 
 function strongGapFallback(document: OCRLayoutDocument, source: readonly OCRRow[]): SampleLayoutResult | undefined {
@@ -176,7 +177,7 @@ function strongGapFallback(document: OCRLayoutDocument, source: readonly OCRRow[
   if (meaningful.length < 2) return undefined;
   const covered = meaningful.reduce((sum, group) => sum + group.length, 0) / source.length;
   if (covered < 0.7) return undefined;
-  return result(document, meaningful, "vertical-block-list", 0.78, "compat:semantic-strong-gap-v1");
+  return result(document, meaningful, "vertical-block-list", 0.78, "semantic-strong-gap-v1");
 }
 
 function processCycleFallback(document: OCRLayoutDocument, source: readonly OCRRow[]): SampleLayoutResult | undefined {
@@ -190,7 +191,7 @@ function processCycleFallback(document: OCRLayoutDocument, source: readonly OCRR
   const groups = starts.map((start, index) => source.slice(start, starts[index + 1] ?? source.length));
   if (groups.length < 2 || groups.some((group) => !group.length)) return undefined;
   if (groups.some((group) => !hasCoffeeEvidence(group.map((row) => row.text).join(" ")))) return undefined;
-  return result(document, groups, "vertical-block-list", 0.74, "compat:semantic-process-cycle-v1");
+  return result(document, groups, "vertical-block-list", 0.74, "semantic-process-cycle-v1");
 }
 
 /**
