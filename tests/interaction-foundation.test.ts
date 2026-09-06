@@ -178,6 +178,10 @@ test("Stage 1 source contracts keep one scrim, semantic navigation and native/re
 
   assert.match(app, /InteractionFoundation/);
   assert.match(app, /registerChildBack/);
+  assert.match(app, /flowNavigation\.register/);
+  assert.match(app, /cupping-flow:\$\{sessionId\}/);
+  assert.match(app, /stageId === "preparation"\) return false/);
+  assert.match(app, /\.cupping-nav--previous:not\(\[disabled\]\)/);
   assert.match(app, /overlayManager\.register/);
   assert.doesNotMatch(app, /history\.pushState|history\.back\(|popstate/);
   assert.match(entry, /window\.AromaSenseNavigation = app\.navigationApi\(\)/);
