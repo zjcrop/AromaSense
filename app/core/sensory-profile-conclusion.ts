@@ -9,6 +9,7 @@ export interface SensoryRadarAxis {
   label: string;
   value: number;
   max: number;
+  recorded: boolean;
 }
 
 export interface TemperatureFlavorPoint {
@@ -75,9 +76,12 @@ function stageNumber(observations: readonly SensoryObservation[], stageId: Stage
   return finite(latestObservation(observations, stageId, fieldKey)?.value);
 }
 
-function mean(values: readonly (number | undefined)[]): number {
+function meanState(values: readonly (number | undefined)[]): { value: number; recorded: boolean } {
   const present = values.filter((value): value is number => value !== undefined);
-  return present.length ? present.reduce((sum, value) => sum + value, 0) / present.length : 0;
+  return {
+    value: present.length ? present.reduce((sum, value) => sum + value, 0) / present.length : 0,
+    recorded: present.length > 0
+  };
 }
 
 function tagsForStage(observations: readonly SensoryObservation[], stageId: StageId): string[] {
@@ -108,22 +112,28 @@ export function deriveSensoryProfileConclusion(observations: readonly SensoryObs
   const bitterness = TEMP_STAGES.map(([stage]) => stageNumber(observations, stage, "bitterness_intensity"));
   const mouthfeel = TEMP_STAGES.map(([stage]) => stageNumber(observations, stage, "mouthfeel_intensity"));
   const finish = [stageNumber(observations, "mid_temp", "finish_intensity"), stageNumber(observations, "low_temp", "finish_intensity")];
-  const aroma = mean([
+  const aroma = meanState([
     stageNumber(observations, "preparation", "dry_fragrance_intensity"),
     stageNumber(observations, "aroma", "dry_fragrance_intensity"),
     stageNumber(observations, "aroma", "wet_aroma_intensity")
   ]);
-  const clean = finite(latestAnyStage(observations, "quality_clean")?.value) ?? 0;
+  const acidityState = meanState(acidity);
+  const sweetnessState = meanState(sweetness);
+  const bitternessState = meanState(bitterness);
+  const mouthfeelState = meanState(mouthfeel);
+  const finishState = meanState(finish);
+  const cleanValue = finite(latestAnyStage(observations, "quality_clean")?.value);
+  const clean = { value: cleanValue ?? 0, recorded: cleanValue !== undefined };
 
   return {
     radar: [
-      { key: "aroma", label: "香气", value: aroma, max: 15 },
-      { key: "acidity", label: "酸质", value: mean(acidity), max: 15 },
-      { key: "sweetness", label: "甜感", value: mean(sweetness), max: 15 },
-      { key: "bitterness", label: "苦味", value: mean(bitterness), max: 15 },
-      { key: "mouthfeel", label: "口感", value: mean(mouthfeel), max: 15 },
-      { key: "finish", label: "余韵", value: mean(finish), max: 15 },
-      { key: "cleanliness", label: "洁净度", value: clean, max: 10 }
+      { key: "aroma", label: "香气", ...aroma, max: 15 },
+      { key: "acidity", label: "酸质", ...acidityState, max: 15 },
+      { key: "sweetness", label: "甜感", ...sweetnessState, max: 15 },
+      { key: "bitterness", label: "苦味", ...bitternessState, max: 15 },
+      { key: "mouthfeel", label: "口感", ...mouthfeelState, max: 15 },
+      { key: "finish", label: "余韵", ...finishState, max: 15 },
+      { key: "cleanliness", label: "洁净度", ...clean, max: 10 }
     ],
     temperature: TEMP_STAGES.map(([stageId, label], index) => {
       const tags = tagsForStage(observations, stageId);
