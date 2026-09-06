@@ -15,21 +15,25 @@ const template = readFileSync("web/index.template.html", "utf8");
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
-test("AromaSense pins an immutable LuckyBean Worker-only OCR safety release", () => {
+test("AromaSense pins an immutable LuckyBean browser-safe OCR release", () => {
   assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
-  assert.match(packageJson, /ff2db954a27aba1adc882e0f0c5392af0cd082f3/);
+  assert.match(packageJson, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
   assert.match(commonEntry, /recognizeImageRegion/);
   assert.match(commonEntry, /normalizeRecognitionRegion/);
-  assert.match(buildScript, /1\.24P-recognition-pipeline\.3/);
   assert.match(buildScript, /candidateCoreCode/);
   assert.match(buildScript, /manualConfirmationRequired/);
   assert.match(buildScript, /historicalCoreCompatibility/);
   assert.match(buildScript, /knowledgeOnlyVariety/);
   assert.match(buildScript, /qrCoreCode/);
   assert.match(buildScript, /productionCoreApproved/);
+  assert.match(runtimeHardener, /browserSafe/);
+  assert.match(runtimeHardener, /primaryIsolation/);
+  assert.match(runtimeHardener, /module-worker/);
+  assert.match(runtimeHardener, /webkit-direct-wasm-no-simd/);
+  assert.match(runtimeHardener, /autoPreload/);
   assert.match(runtimeHardener, /CoffeeFoundationOcrAssetBase/);
   assert.match(runtimeHardener, /vendor\/paddleocr/);
   assert.match(runtimeHardener, /roi-worker\.js/);
@@ -42,7 +46,7 @@ test("recognition path never decodes or re-encodes full images on the UI thread"
   assert.match(commonEntry, /__LUCKYBEAN_ANDROID__/);
   assert.match(commonEntry, /nativeSource:\s*android/);
   assert.match(commonEntry, /native-direct/);
-  assert.match(commonEntry, /worker-direct/);
+  assert.match(commonEntry, /runtime-direct/);
   assert.doesNotMatch(commonEntry, executableImageWork);
   assert.doesNotMatch(recognitionService, executableTesseractFallback);
   assert.doesNotMatch(recognitionService, executableImageWork);

@@ -49,7 +49,19 @@ jobs:
         with:
           name: aromasense-stage0-recognition-${{ github.sha }}
           path: /tmp/aromasense-stage0-recognition.log
-          if-no-files-found: error
+          if-no-files-found: warn
+      - name: Record Stage 2 recognition diagnostics
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/stage2-recognition-diagnostics.mjs 2>&1 | tee /tmp/aromasense-stage2-recognition.log
+      - name: Upload Stage 2 recognition diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aromasense-stage2-recognition-${{ github.sha }}
+          path: /tmp/aromasense-stage2-recognition.log
+          if-no-files-found: warn
       - name: Run homepage and records UI acceptance
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'

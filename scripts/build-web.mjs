@@ -22,7 +22,6 @@ const recognitionLexiconUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/
 const coffeeKnowledgeManifestUrl = "https://raw.githubusercontent.com/zjcrop/BrewIon/main/coffee-knowledge/releases/latest.json";
 const entityResolutionModelKey = "catalog/entity_resolution_issues_v1.json";
 const requiredEntityResolutionIssueCount = 5;
-const requiredPipelineVersion = "1.24P-recognition-pipeline.3";
 const requiredEntitySafetyMarkers = [
   "candidateCoreCode",
   "manualConfirmationRequired",
@@ -42,9 +41,26 @@ const requiredBrowserOcrMarkers = [
   "ENGINE_INIT_TIMEOUT_MS",
   "PREDICT_TIMEOUT_MS",
   "luckybean-ppocr-v5",
+  "browserSafe",
   "workerOnly",
-  "worker-direct"
+  "primaryIsolation",
+  "module-worker",
+  "webkit-direct-wasm-no-simd",
+  "autoPreload",
+  "roiWorkerOnly"
 ];
+
+async function pinnedRecognitionPipelineVersion() {
+  const source = await readFile(
+    resolve(root, "node_modules/luckybean-static-app/src/domain/recognition/recognition-pipeline.js"),
+    "utf8"
+  );
+  const match = source.match(/RECOGNITION_PIPELINE_VERSION\s*=\s*['"]([^'"]+)['"]/u);
+  if (!match?.[1]) throw new Error("Pinned LuckyBean dependency does not export RECOGNITION_PIPELINE_VERSION");
+  return match[1];
+}
+
+const requiredPipelineVersion = await pinnedRecognitionPipelineVersion();
 
 function escapeAttribute(value) {
   return value
@@ -292,7 +308,7 @@ async function validateRecognitionArtifacts(out, { android = false } = {}) {
   }
   for (const marker of requiredBrowserOcrMarkers) {
     if (!coreSource.includes(marker)) {
-      throw new Error(`LuckyBean production Worker-only OCR implementation missing from artifact: ${marker}`);
+      throw new Error(`LuckyBean production browser-safe OCR implementation missing from artifact: ${marker}`);
     }
   }
   if (

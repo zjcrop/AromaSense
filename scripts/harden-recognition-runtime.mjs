@@ -96,6 +96,7 @@ function createRuntimeContext() {
       baseURI: "https://example.test/AromaSense/",
       hidden: false,
       addEventListener() {},
+      querySelector() { return null; },
       documentElement: { dataset: {} }
     },
     CustomEvent: class CustomEvent {
@@ -152,14 +153,18 @@ async function executeRecognitionCoreSmoke() {
   }
 
   const paddle = context.LuckyBeanPaddleOCR;
+  const safePrimaryIsolation = paddle?.primaryIsolation === "module-worker" || paddle?.primaryIsolation === "webkit-direct-wasm-no-simd";
   if (
-    paddle?.workerOnly !== true ||
+    paddle?.browserSafe !== true ||
+    paddle?.workerOnly !== false ||
+    !safePrimaryIsolation ||
+    paddle?.autoPreload !== false ||
     paddle?.roiWorkerOnly !== true ||
     paddle?.regionRecognition !== "recognition-roi/1.0" ||
     typeof paddle?.recognizeRegion !== "function" ||
     typeof paddle?.runtimeBase !== "function"
   ) {
-    throw new Error("Foundation PP-OCR Worker/ROI provider failed runtime smoke");
+    throw new Error("Foundation PP-OCR browser-safe provider/ROI contract failed runtime smoke");
   }
   const actualBase = paddle.runtimeBase();
   const expectedBase = "https://example.test/AromaSense/vendor/paddleocr/";
@@ -171,4 +176,4 @@ async function executeRecognitionCoreSmoke() {
 await installPagesRuntime();
 await configurePagesRuntime();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + same-origin PP-OCR + ROI Worker assets verified");
+console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + same-origin ROI Worker assets verified");

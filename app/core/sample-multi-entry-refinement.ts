@@ -54,7 +54,7 @@ function rows(document: OCRLayoutDocument): OCRRow[] {
 }
 
 function median(values: readonly number[], fallback: number): number {
-  const sorted = values.filter((value) => value > 0).sort((a, b) => a - b);
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
   if (!sorted.length) return fallback;
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
@@ -73,13 +73,87 @@ function segment(document: OCRLayoutDocument, index: number, group: readonly OCR
   };
 }
 
-function result(document: OCRLayoutDocument, groups: readonly OCRRow[][], layoutType: "row-list" | "vertical-block-list", confidence: number, profile: string): SampleLayoutResult {
+function result(
+  document: OCRLayoutDocument,
+  groups: readonly OCRRow[][],
+  layoutType: "row-list" | "vertical-block-list" | "grid",
+  confidence: number,
+  profile: string
+): SampleLayoutResult {
   const segments = groups.map((group, index) => segment(document, index, group, confidence, profile));
   return { layoutType, confidence, requiresReview: true, segments };
 }
 
 function hasCoffeeEvidence(text: string): boolean {
   return PROCESS_SIGNAL.test(text) && (COFFEE_IDENTITY_SIGNAL.test(text) || text.replace(/\s+/g, "").length >= 8);
+}
+
+function hasStrongIndependentCoffeeEvidence(text: string): boolean {
+  return PROCESS_SIGNAL.test(text) && COFFEE_IDENTITY_SIGNAL.test(text);
+}
+
+function rowFromLine(line: OCRLayoutLine): OCRRow {
+  return { lines: [line], box: line.normalizedBox, text: line.text.trim() };
+}
+
+/**
+ * Detect two independent coffee cards placed side-by-side before the generic row
+ * builder can merge their horizontally separated text into shared Y rows.
+ *
+ * This runs only after the primary segmenter has returned a single sample. It is
+ * intentionally conservative: both columns must contain at least three OCR lines,
+ * overlap strongly in vertical extent, be separated by a material X-center gap,
+ * and independently contain coffee identity + process evidence. Any meaningful
+ * line crossing the proposed split rejects the fallback. High-confidence table
+ * and catalog results never reach this function.
+ */
+function sideBySideColumnsFallback(document: OCRLayoutDocument): SampleLayoutResult | undefined {
+  const lines = document.lines
+    .filter((line) => line.text.replace(/\s+/g, "").length >= 2)
+    .sort((a, b) => a.normalizedBox.centerX - b.normalizedBox.centerX);
+  if (lines.length < 6) return undefined;
+
+  let splitIndex = -1;
+  let largestCenterGap = 0;
+  for (let index = 1; index < lines.length; index += 1) {
+    const gap = lines[index]!.normalizedBox.centerX - lines[index - 1]!.normalizedBox.centerX;
+    if (gap > largestCenterGap) {
+      largestCenterGap = gap;
+      splitIndex = index;
+    }
+  }
+  if (splitIndex < 3 || lines.length - splitIndex < 3 || largestCenterGap < 0.22) return undefined;
+
+  const leftLines = lines.slice(0, splitIndex);
+  const rightLines = lines.slice(splitIndex);
+  const leftCenter = median(leftLines.map((line) => line.normalizedBox.centerX), 0);
+  const rightCenter = median(rightLines.map((line) => line.normalizedBox.centerX), 1);
+  if (rightCenter - leftCenter < 0.3) return undefined;
+
+  const splitX = (lines[splitIndex - 1]!.normalizedBox.centerX + lines[splitIndex]!.normalizedBox.centerX) / 2;
+  const crossesSplit = lines.some((line) =>
+    line.normalizedBox.left < splitX - 0.025 && line.normalizedBox.right > splitX + 0.025
+  );
+  if (crossesSplit) return undefined;
+
+  const leftBox = unionBox(leftLines);
+  const rightBox = unionBox(rightLines);
+  if (verticalOverlap(leftBox, rightBox) < 0.6) return undefined;
+  if (leftBox.height < 0.18 || rightBox.height < 0.18) return undefined;
+
+  const orderedLeft = [...leftLines].sort((a, b) => a.normalizedBox.top - b.normalizedBox.top || a.normalizedBox.left - b.normalizedBox.left);
+  const orderedRight = [...rightLines].sort((a, b) => a.normalizedBox.top - b.normalizedBox.top || a.normalizedBox.left - b.normalizedBox.left);
+  const leftText = orderedLeft.map((line) => line.text).join(" ");
+  const rightText = orderedRight.map((line) => line.text).join(" ");
+  if (!hasStrongIndependentCoffeeEvidence(leftText) || !hasStrongIndependentCoffeeEvidence(rightText)) return undefined;
+
+  return result(
+    document,
+    [orderedLeft.map(rowFromLine), orderedRight.map(rowFromLine)],
+    "grid",
+    0.82,
+    "side-by-side-columns-v1"
+  );
 }
 
 function processRowsFallback(document: OCRLayoutDocument, source: readonly OCRRow[]): SampleLayoutResult | undefined {
@@ -141,6 +215,10 @@ export function refineAmbiguousSingleSampleLayout(
   primary: SampleLayoutResult
 ): SampleLayoutResult {
   if (primary.segments.length !== 1 || document.lines.length < 2) return primary;
+
+  const sideBySide = sideBySideColumnsFallback(document);
+  if (sideBySide) return sideBySide;
+
   const source = rows(document).filter((row) => row.text.trim());
   if (source.length < 2) return primary;
 
