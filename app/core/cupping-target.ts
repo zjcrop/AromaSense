@@ -3,10 +3,12 @@ import {
   cuppingModeLabel,
   normalizeCuppingMode,
   type CanonicalCuppingMode,
+  type CuppingMode,
   type CuppingSessionMetadata
 } from "./session-metadata";
 
-export type CuppingTargetChoice = CanonicalCuppingMode;
+/** Includes legacy `open` only so pre-upgrade setup code continues to compile/read drafts. */
+export type CuppingTargetChoice = CuppingMode;
 
 export interface ResolvedCuppingTarget {
   choice: CuppingTargetChoice;
@@ -15,10 +17,11 @@ export interface ResolvedCuppingTarget {
 }
 
 export function resolveCuppingTarget(choice: CuppingTargetChoice): ResolvedCuppingTarget {
-  return { choice, cuppingMode: choice, label: cuppingModeLabel(choice) };
+  const cuppingMode = normalizeCuppingMode(choice);
+  return { choice, cuppingMode, label: cuppingModeLabel(cuppingMode) };
 }
 
-function modeFromLegacyTarget(target: string | undefined): CuppingTargetChoice | undefined {
+function modeFromLegacyTarget(target: string | undefined): CanonicalCuppingMode | undefined {
   const normalized = target?.normalize("NFKC").trim().toLocaleLowerCase("zh-CN");
   if (!normalized) return undefined;
   if (["自由杯测", "自由", "free", "free cupping"].includes(normalized)) return "free";
