@@ -26,18 +26,24 @@ Cross-device recovery uses a separate one-time recovery credential. It does **no
 
 Cloud migration `0010_yingxiang_host_accounts_and_sequence.sql` adds the host-account/token tables. Migration `0011_yingxiang_host_recovery.sql` adds recovery hashes without changing existing account ownership. A shadow `users` row preserves the existing `yingxiang_events.owner_user_id` foreign-key contract; it is an implementation identity only and is not an AromaSense personal account.
 
-## Sample code intake
+## Single sample-list intake and ordering
 
-The event sample-code list supports both direct editing and the same intake foundation used by AromaSense sample input:
+Yingxiang now has one authoritative event sample list. The previous organizer workflow that uploaded a second “real coffee list” and mapped it positionally against the public/sample-code list has been removed.
 
-- camera capture -> `SampleRecognitionService`;
-- image upload -> `SampleRecognitionService`;
-- spreadsheet -> `parseSpreadsheetFile`;
-- pasted text -> `recognizeManualText`.
+The single sample-code list supports:
 
-Imported codes replace the current textarea contents and dispatch the same input update used by direct editing, so the real-coffee mapping list refreshes immediately. Spreadsheet columns such as `编号`, `sample`, `sample name`, `name` and other existing sample-label aliases are accepted through the shared import schema. Explicit `sampleCode`/`code` metadata is preferred over a generic label when available.
+- direct one-code-per-line editing;
+- camera capture through `SampleRecognitionService`;
+- image upload through `SampleRecognitionService`;
+- spreadsheet import through `parseSpreadsheetFile`;
+- pasted text, with literal one-code-per-line input taking precedence over coffee semantic parsing;
+- drag ordering through the shared `attachDragReorder` interaction.
 
-Import does not silently remove duplicate codes. Duplicates are surfaced for correction and remain subject to `YINGXIANG_SAMPLE_CODE_DUPLICATE` when building the event manifest. Once participants exist, both direct editing and import controls are locked with the rest of the event structure.
+The textarea, imported result and drag-order UI all write the same `sampleCodes` sequence. There is no second list and therefore no positional cross-list mapping state to reconcile.
+
+Import does not silently remove duplicate codes. Duplicates remain visible and are rejected by `YINGXIANG_SAMPLE_CODE_DUPLICATE` when the event manifest is built. Once participants exist, sample editing and ordering are locked with the event structure.
+
+Legacy event manifests may still contain the historical optional `coffee` object. The current host UI does not create, upload, compare or edit it. Existing values may be preserved opaquely when an old event is republished so historical records are not destructively rewritten. Worker-side blindness filtering remains in place for backward compatibility.
 
 ## Participant naming
 
@@ -63,47 +69,23 @@ The UI renders:
 
 The QR is generated locally with the existing `qrcode` runtime dependency. No paid API or external QR service is introduced.
 
-## Real coffee mapping
+## Repeated-sample calibration
 
-The event manifest may store optional host coffee identity per event sample slot:
+Repeated-sample calibration remains separate from sample-list intake. The organizer may group two or more event sample slots under one calibration identifier so repeated measurements of the same physical coffee can be compared statistically.
 
-```text
-coffee = {
-  productName?, country?, region?, farm?, station?, variety?, roast?,
-  process?, roaster?, altitude?, roastDate?, notes?
-}
-```
+This feature does **not** upload a second coffee list and does not change the participant sample order. It stores only the event sample IDs participating in the calibration group plus the organizer-only calibration label.
 
-Input uses the same AromaSense recognition foundation:
+## Recognition review contract
 
-- camera/photo upload -> `SampleRecognitionService`;
-- spreadsheet -> `parseSpreadsheetFile`;
-- pasted text -> `recognizeManualText`.
+For multi-entry photo recognition, automatic OCR evidence and manual segmentation geometry are separate layers:
 
-The review list maps imported coffee rows to the sample codes by current order. It reuses the shared `attachDragReorder` implementation, including the virtual source placeholder, FLIP placeholder movement and final drop placement.
+1. OCR creates positioned text evidence.
+2. automatic segmentation proposes regions.
+3. if the organizer adjusts a region, the **current geometry** becomes authoritative.
+4. applying the review recalculates which OCR lines belong to each current region before semantic parsing runs again.
+5. when the OCR characters themselves are wrong, explicit ROI re-recognition reruns OCR for that selected region.
 
-Compact host display is:
-
-```text
-产品名
-国家/产区（否则庄园/处理站）/豆种/烘焙度/……
-```
-
-`……` indicates that additional notes/award information exists. Clicking a coffee row opens the detailed editor. Sample-code blocks use fixed equal width and height.
-
-Spreadsheet headers such as `备注`, `其他信息`, `奖项`, `荣誉`, `remark`, `award` and `winner` are preserved as `coffee.notes`. OCR text that contains obvious award markers such as `TOH` or `冠军` is retained as a reviewable note when no structured note field exists.
-
-## Blindness boundary
-
-Real coffee identity is host data. The Worker must not leak it to participants in `blind` or `semi_blind` events before the configured reveal boundary.
-
-`publicEvent(..., owner=false)` therefore reduces non-open sample slots to only:
-
-- `eventSampleId`
-- `sampleCode`
-- `order`
-
-Coffee identity becomes participant-visible only for an open event, or after completion when `revealSampleIdentity = on_event_complete`.
+A deterministic whole-image rerun of the same source is not treated as a correction mechanism because it normally reproduces the same OCR and segmentation output while consuming the same image-processing cost.
 
 ## Compatibility and invariants
 
@@ -111,4 +93,5 @@ Coffee identity becomes participant-visible only for an open event, or after com
 - Old fixed-name invitations remain readable.
 - Existing Firebase host ownership remains a migration compatibility path.
 - Applied D1 migrations are never edited; recovery is introduced as numbered migration `0011` after host/sequence migration `0010`.
-- Event structure remains locked once participants exist, including sample codes and real-coffee mapping, to prevent a sample identity from changing under already collected observations.
+- Event structure remains locked once participants exist, including sample codes and order.
+- Legacy `coffee` fields remain readable and are still filtered by the Worker for blind/semi-blind participant payloads, but they are no longer part of the active organizer editing workflow.
