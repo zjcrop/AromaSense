@@ -161,7 +161,10 @@ test("Stage 1 source contracts keep one scrim, semantic navigation and native/re
   const foundation = source("app/ui/interaction-foundation.ts");
   const app = source("app/runtime/dom-app.ts");
   const entry = source("app/runtime/web-entry.ts");
-  const blind = source("app/ui/dom/stable-cupping-screen-renderer.ts");
+  const blind = [
+    source("app/ui/dom/stable-cupping-screen-renderer.ts"),
+    source("app/ui/dom/stable-cupping-screen-renderer-base.ts")
+  ].join("\n");
   const css = source("app/ui/dom/product-shell.css");
   const activity = source("mobile/android/app/src/main/java/com/zjcrop/aromasense/MainActivity.kt");
   const manifest = source("mobile/android/app/src/main/AndroidManifest.xml");
