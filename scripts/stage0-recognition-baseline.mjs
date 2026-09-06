@@ -121,6 +121,12 @@ async function buildBenchmarkBundle() {
   });
 }
 
+function isKnownOnnxRuntimeWarning(message) {
+  const text = String(message || "");
+  return /\[W:onnxruntime[:,]/i.test(text)
+    && /CleanUnusedInitializersAndNodeArgs|Removing initializer/i.test(text);
+}
+
 async function run() {
   await buildBenchmarkBundle();
   const { server, url } = await startStaticServer();
@@ -169,9 +175,11 @@ async function run() {
     requireCondition(Number(result.uiRenderMs) > 0, "Review UI render benchmark did not record positive elapsed time");
     requireCondition((result.uiFieldCount ?? 0) >= 1, "Review UI benchmark rendered no recognized fields");
 
-    const relevantErrors = cdp.errors.filter((message) => /recognition|paddle|onnx|sqlite|benchmark/i.test(String(message)));
-    requireCondition(relevantErrors.length === 0, `Browser errors during benchmark: ${relevantErrors.join(" | ")}`);
     console.log(`STAGE0_AROMASENSE_RECOGNITION_BASELINE ${JSON.stringify(result)}`);
+    const relevantErrors = cdp.errors
+      .filter((message) => /recognition|paddle|onnx|sqlite|benchmark/i.test(String(message)))
+      .filter((message) => !isKnownOnnxRuntimeWarning(message));
+    requireCondition(relevantErrors.length === 0, `Browser errors during benchmark: ${relevantErrors.join(" | ")}`);
   } finally {
     cdp?.close();
     chrome.kill("SIGKILL");
