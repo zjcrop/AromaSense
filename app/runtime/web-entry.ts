@@ -69,6 +69,7 @@ async function main(): Promise<void> {
     firebaseApiKey: document.documentElement.dataset.firebaseApiKey || undefined,
     firebaseProjectId: document.documentElement.dataset.firebaseProjectId || undefined
   });
+  window.AromaSenseNavigation = app.navigationApi();
 
   yingxiang = new YingxiangBrowserBootstrap(root, db, {
     now,
