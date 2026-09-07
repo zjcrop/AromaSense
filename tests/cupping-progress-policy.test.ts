@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveStageStatus } from "../app/core/cupping-progress-policy";
+import { deriveFinalPhaseStatus, deriveStageStatus } from "../app/core/cupping-progress-policy";
+import {
+  SCA_CVA_AFFECTIVE_FIELDS,
+  SCA_DEFECTIVE_CUPS_FIELD,
+  SCA_NON_UNIFORM_CUPS_FIELD
+} from "../app/core/sca-cva-score-engine";
 import type { SensoryObservation, StageId } from "../shared/protocol/aromasense-v1";
 
 function observations(stageId: StageId, values: Record<string, unknown>): SensoryObservation[] {
@@ -14,6 +19,17 @@ function observations(stageId: StageId, values: Record<string, unknown>): Sensor
     dictionaryVersion: "test",
     updatedAt: "2026-09-07T06:40:00Z"
   }));
+}
+
+function scaOverall(overrides: Record<string, unknown> = {}): SensoryObservation[] {
+  const values: Record<string, unknown> = Object.fromEntries(SCA_CVA_AFFECTIVE_FIELDS.map((field) => [field.key, 7]));
+  Object.assign(values, {
+    [SCA_NON_UNIFORM_CUPS_FIELD]: 0,
+    [SCA_DEFECTIVE_CUPS_FIELD]: 0,
+    quality_clean: 8,
+    ...overrides
+  });
+  return observations("final", values);
 }
 
 test("browsing an empty stage never changes it from not_started", () => {
@@ -52,4 +68,25 @@ test("zero is meaningful sensory data rather than missing data", () => {
     })),
     "completed"
   );
+});
+
+test("overall phase completes only when the SCA record is internally valid", () => {
+  assert.equal(deriveFinalPhaseStatus("overall", scaOverall()), "completed");
+
+  assert.equal(deriveFinalPhaseStatus("overall", scaOverall({
+    [SCA_NON_UNIFORM_CUPS_FIELD]: 1,
+    [SCA_DEFECTIVE_CUPS_FIELD]: 1
+  })), "active", "defective cups require a named SCA defect type");
+
+  assert.equal(deriveFinalPhaseStatus("overall", scaOverall({
+    [SCA_NON_UNIFORM_CUPS_FIELD]: 1,
+    [SCA_DEFECTIVE_CUPS_FIELD]: 1,
+    defect_ids: ["defect-potato"]
+  })), "completed");
+
+  assert.equal(deriveFinalPhaseStatus("overall", scaOverall({
+    [SCA_NON_UNIFORM_CUPS_FIELD]: 1,
+    [SCA_DEFECTIVE_CUPS_FIELD]: 2,
+    defect_ids: ["defect-mold"]
+  })), "active", "non-five-cup defects must also be marked non-uniform");
 });
