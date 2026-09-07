@@ -1,0 +1,51 @@
+name: P3 refresh official producer lock
+
+on:
+  push:
+    branches: [integration/p3-all-streams-20260907]
+    paths:
+      - '.github/workflows/p3-refresh-lock.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: integration/p3-all-streams-20260907
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Regenerate exact npm lock from package.json
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify official LuckyBean producer is locked
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          const expected = 'f425ec658a44e021c5010db2996cc80808f137fa';
+          const top = lock.packages?.['']?.dependencies?.['luckybean-static-app'] || '';
+          const pkg = lock.packages?.['node_modules/luckybean-static-app'] || {};
+          if (top !== `github:zjcrop/luckybean#${expected}`) throw new Error(`top-level lock mismatch: ${top}`);
+          if (!String(pkg.resolved || '').includes(expected)) throw new Error(`resolved lock mismatch: ${pkg.resolved}`);
+          if (!String(pkg.integrity || '').startsWith('sha512-')) throw new Error('missing npm integrity for LuckyBean producer');
+          console.log({ top, resolved: pkg.resolved, integrity: pkg.integrity });
+          NODE
+      - name: Commit regenerated lock only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            echo 'package-lock.json already exact; nothing to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'P3: lock AromaSense to official LuckyBean producer'
+          git push origin HEAD:integration/p3-all-streams-20260907
