@@ -8,8 +8,12 @@ import {
   type LuckyBeanPreparedImage,
   type LuckyBeanRecognitionAnalysis
 } from "./luckybean-upstream-adapter";
+import type { CoffeePageStructureGateway } from "./page-structure-contract";
+import { harvestRecognitionEvidence } from "./recognition-evidence-harvester";
+import { canonicalizeSampleInput, type CoffeeFoundationGateway } from "./sample-input-pipeline";
 import { segmentSamples, type SampleLayoutType, type SampleLayoutSegment } from "./sample-layout-segmenter";
 import { refineAmbiguousSingleSampleLayout } from "./sample-multi-entry-refinement";
+import { mapStructuredPageRecognition } from "./structured-page-recognition";
 
 export interface SampleRecognitionProgress {
   index: number;
@@ -82,6 +86,11 @@ function blockToLine(block: LuckyBeanCoreBlock, index: number): NativeOCRLine {
 function averageConfidence(lines: readonly NativeOCRLine[]): number | undefined {
   const values = lines.map((line) => Number(line.confidence)).filter(Number.isFinite);
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
+}
+
+function mean(values: readonly number[], fallback = 0): number {
+  const valid = values.filter(Number.isFinite);
+  return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : fallback;
 }
 
 async function recognizeWithLuckyBean(file: File, id: string): Promise<NativeRecognitionResult | undefined> {
@@ -266,6 +275,8 @@ function analyzeWithLuckyBean(
 }
 
 export class SampleRecognitionService {
+  constructor(private readonly foundation?: CoffeeFoundationGateway & CoffeePageStructureGateway) {}
+
   async warmup(): Promise<{ engine: string; ready: boolean; message: string }> {
     try {
       const core = requireLuckyBeanRecognitionCore();
@@ -312,6 +323,69 @@ export class SampleRecognitionService {
     const primaryLayout = segmentSamples(document);
     const layout = refineAmbiguousSingleSampleLayout(document, primaryLayout);
     const engine = result.engine ?? "OCR";
+    const harvest = harvestRecognitionEvidence(document, {
+      dictionaryHints: this.foundation?.dictionaryHints
+        ? (text, evidenceRef) => this.foundation!.dictionaryHints!(text, evidenceRef)
+        : undefined,
+      layoutHints: {
+        layoutType: layout.layoutType,
+        segmentCount: layout.segments.length
+      }
+    });
+
+    let structureFallbackReason: string | undefined;
+    if (harvest.shouldUseStructureAi && this.foundation?.structurePage) {
+      const structured = await this.foundation.structurePage({
+        fullText: harvest.fullText,
+        blocks: harvest.blocks,
+        layoutHints: harvest.layoutHints
+      });
+      if (structured.ok && structured.result?.samples.length && structured.result.samples.length >= 2) {
+        const mapped = mapStructuredPageRecognition({
+          result: structured.result,
+          document,
+          fileName: file.name,
+          mimeType: file.type,
+          engine,
+          imageQuality: result.imageQuality,
+          pageLayout: layout.layoutType,
+          layoutConfidence: layout.confidence,
+          multiRecordProbability: harvest.multiRecordProbability,
+          ignoredEvidenceRefs: harvest.auditOnly.map((item) => item.id)
+        });
+        const samples = mapped.map((sample, sampleIndex) => {
+          if (!this.foundation) return sample satisfies RecognizedSample;
+          const canonical = canonicalizeSampleInput({
+            label: sample.label,
+            metadata: sample.metadata,
+            rawText: sample.rawText,
+            requiresReview: sample.requiresReview
+          }, this.foundation, `sample:${sampleIndex + 1}`);
+          return {
+            ...sample,
+            label: canonical.label,
+            metadata: canonical.metadata,
+            requiresReview: sample.requiresReview || canonical.requiresReview
+          } satisfies RecognizedSample;
+        });
+        const groupingConfidence = mean(structured.result.samples.map((sample) => sample.confidence), 0.55);
+        return {
+          fileName: file.name,
+          engine,
+          layoutType: layout.layoutType,
+          // Legacy field kept for UI compatibility; actual grouping confidence is preserved per sample.
+          segmentationConfidence: layout.confidence,
+          requiresSegmentationReview: groupingConfidence < 0.75 || samples.some((sample) => sample.requiresReview),
+          samples
+        };
+      }
+      structureFallbackReason = structured.ok
+        ? "structure-ai-returned-single-record"
+        : structured.reason ?? "structure-ai-unavailable";
+    } else if (harvest.shouldUseStructureAi) {
+      structureFallbackReason = "structure-ai-gateway-unavailable";
+    }
+
     const samples = layout.segments.map((segment, sampleIndex) => {
       const analysis = analyzeWithLuckyBean(segment, id, engine);
       const fields = mergeLayoutFields(analysisFields(analysis), segment);
@@ -338,7 +412,7 @@ export class SampleRecognitionService {
           ...(sourceCode ? { sourceCode } : {}),
           ...(Object.keys(sourceFields).length ? { sourceFields } : {}),
           recognition: {
-            schemaVersion: "aromasense-recognition/3.4",
+            schemaVersion: "aromasense-recognition/3.5",
             source: "photo",
             fileName: file.name,
             mimeType: file.type,
@@ -355,6 +429,14 @@ export class SampleRecognitionService {
               ...(sourceName ? { name: sourceName } : {}),
               ...(sourceCode ? { code: sourceCode } : {}),
               ...(Object.keys(sourceFields).length ? { fields: sourceFields } : {})
+            },
+            pageStructure: {
+              strategy: harvest.shouldUseStructureAi ? "layout-fallback-after-ai" : "layout-local",
+              multiRecordProbability: harvest.multiRecordProbability,
+              aiAttempted: harvest.shouldUseStructureAi && Boolean(this.foundation?.structurePage),
+              ...(structureFallbackReason ? { fallbackReason: structureFallbackReason } : {}),
+              metrics: harvest.metrics,
+              ignoredEvidenceRefs: harvest.auditOnly.map((item) => item.id)
             },
             review,
             luckyBeanUpstream: {
@@ -411,7 +493,7 @@ export class SampleRecognitionService {
           fileName: file.name,
           status: "completed",
           message: recognized.samples.length > 1
-            ? `识别到 ${recognized.samples.length} 个样品区块 · Foundation 正式全链完成`
+            ? `识别到 ${recognized.samples.length} 个样品 · Foundation 正式全链完成`
             : "Foundation 正式全链完成"
         });
       } catch (error) {

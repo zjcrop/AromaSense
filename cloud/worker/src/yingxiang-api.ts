@@ -177,9 +177,29 @@ export function eventContracts(row: EventRow): { policy: EventPolicy; manifest: 
   const policy = parsePolicy(parseStoredJson(row.policy_json)); const manifest = parseManifest(parseStoredJson(row.manifest_json), row.status !== "draft");
   return policy && manifest ? { policy, manifest } : undefined;
 }
+
+const SEMI_BLIND_VISIBLE_COFFEE_FIELDS = ["country", "region", "process", "roast"] as const;
+function semiBlindCoffee(detail?: EventCoffeeDetail): EventCoffeeDetail | undefined {
+  if (!detail) return undefined;
+  const safe: EventCoffeeDetail = {};
+  for (const key of SEMI_BLIND_VISIBLE_COFFEE_FIELDS) {
+    const value = detail[key];
+    if (value) safe[key] = value;
+  }
+  return Object.keys(safe).length ? safe : undefined;
+}
+
 export function publicEvent(row: EventRow, policy: EventPolicy, manifest: EventManifest, owner = false): Record<string, unknown> {
-  if (!owner && manifest.cuppingMode !== "open" && !(row.status === "completed" && policy.revealSampleIdentity === "on_event_complete")) {
-    manifest = { ...manifest, samples: manifest.samples.map(({ eventSampleId, sampleCode, order }) => ({ eventSampleId, sampleCode, order })) };
+  const revealed = row.status === "completed" && policy.revealSampleIdentity === "on_event_complete";
+  if (!owner && !revealed) {
+    if (manifest.cuppingMode === "blind") {
+      manifest = { ...manifest, samples: manifest.samples.map(({ eventSampleId, sampleCode, order }) => ({ eventSampleId, sampleCode, order })) };
+    } else if (manifest.cuppingMode === "semi_blind") {
+      manifest = { ...manifest, samples: manifest.samples.map(({ eventSampleId, sampleCode, order, coffee }) => {
+        const safeCoffee = semiBlindCoffee(coffee);
+        return { eventSampleId, sampleCode, order, ...(safeCoffee ? { coffee: safeCoffee } : {}) };
+      }) };
+    }
   }
   return { schemaVersion: "yingxiang-event/0.1", eventId: row.event_id, eventRevision: row.event_revision, title: row.title, status: row.status, policy, manifest, createdAt: row.created_at, updatedAt: row.updated_at };
 }
