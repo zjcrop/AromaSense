@@ -87,9 +87,10 @@ jobs:
              and .apk == ("AromaSense-" + $version + "-release.apk")
              and (.apk_sha256 | type == "string" and length == 64)' \
             dist/SIGNER_PROVENANCE.json >/dev/null
-          (cd dist && sha256sum -c SHA256SUMS.txt)
           expected_sha=$(jq -r '.apk_sha256' dist/SIGNER_PROVENANCE.json)
+          declared_sha=$(awk 'NF >= 2 { print $1; exit }' dist/SHA256SUMS.txt)
           actual_sha=$(sha256sum "dist/AromaSense-${RELEASE_VERSION}-release.apk" | awk '{print $1}')
+          test "$declared_sha" = "$expected_sha"
           test "$actual_sha" = "$expected_sha"
           echo "APK_SHA256=$actual_sha" >> "$GITHUB_ENV"
 
