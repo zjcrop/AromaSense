@@ -1,5 +1,9 @@
 import type { CoffeeFoundationGateway, FoundationBatchAiResult, FoundationFieldDecision } from "./sample-input-pipeline";
-import type { CoffeePageStructureGateway, PageStructureResult } from "./page-structure-contract";
+import {
+  validatePageStructureEvidence,
+  type CoffeePageStructureGateway,
+  type PageStructureResult
+} from "./page-structure-contract";
 import type { RecognitionDictionaryHint } from "./recognition-evidence-harvester";
 
 interface FoundationRuntime {
@@ -155,9 +159,14 @@ export function createCoffeeFoundationGateway(
           return { ok: false, reason: payload.reason ?? "invalid-response" };
         }
         const validation = validationCore.validateAiPageStructureResult(payload.result);
-        return validation.ok && validation.value
+        if (!validation.ok || !validation.value) return { ok: false, reason: "schema-invalid" };
+        const evidenceValidation = validatePageStructureEvidence(
+          validation.value,
+          input.blocks.map((block) => block.id)
+        );
+        return evidenceValidation.ok
           ? { ok: true, result: validation.value }
-          : { ok: false, reason: "schema-invalid" };
+          : { ok: false, reason: `evidence-invalid:${evidenceValidation.reason}` };
       } catch { return { ok: false, reason: "network-error" }; }
     }
   };
