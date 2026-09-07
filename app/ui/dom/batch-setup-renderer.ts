@@ -11,6 +11,7 @@ import {
   type BatchSetupRendererOptions,
   type RecentSessionItem
 } from "./batch-setup-home-renderer";
+import { ensureLongOperationProgress } from "./long-operation-progress";
 
 export type { BatchSetupRendererOptions, RecentSessionItem };
 
@@ -60,6 +61,7 @@ export class BatchSetupRenderer {
     options: BatchSetupRendererOptions
   ) {
     installModeSelectStyles();
+    ensureLongOperationProgress(root);
     this.home = new HomeBatchSetupRenderer(root, service, recognizer, options);
   }
 
