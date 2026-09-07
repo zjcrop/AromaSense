@@ -173,3 +173,5 @@ jobs:
           test "$tag_sha" = "$RELEASE_SHA"
           assets=$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name]')
           printf '%s' "$assets" | jq -e --arg apk "$apk_name" 'index($apk) != null and index("BUILD_PROVENANCE.json") != null and index("SHA256SUMS.txt") != null' >/dev/null
+
+# P3 release trigger: validated product main 144ee52d44bf553b9dfe2520fa1db64074e5d9af
