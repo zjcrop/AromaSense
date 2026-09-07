@@ -1,7 +1,7 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
 import type { StageStatus } from "./cupping-state-machine";
 import { completionForStage } from "./completion-engine";
-import { SCA_CVA_REQUIRED_FIELD_KEYS } from "./sca-cva-score-engine";
+import { calculateSCACVAScore } from "./sca-cva-score-engine";
 
 export const FINAL_ASSESSMENT_PHASES = ["flavor", "overall", "score"] as const;
 export type FinalAssessmentPhase = (typeof FINAL_ASSESSMENT_PHASES)[number];
@@ -19,20 +19,15 @@ export const STAGE_COMPLETION_HINTS: Readonly<Record<Exclude<StageId, "final">, 
   mid_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
   low_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
   flavor: "选择至少一个最终风味描述",
-  overall: "完成SCA 8项Affective评分、非一致/缺陷杯数与香迹洁净度",
+  overall: "完成SCA 8项Affective评分、杯数/缺陷类型一致性与香迹洁净度",
   scoring: "查看SCA得分与风味侧写后主动确认"
 };
-
-const FINAL_OVERALL_REQUIRED_FIELDS = [
-  ...SCA_CVA_REQUIRED_FIELD_KEYS,
-  "quality_clean"
-] as const;
 
 const CONTROL_FIELDS = new Set(["final_phase"]);
 
 export const FINAL_PHASE_COMPLETION_HINTS: Readonly<Record<FinalAssessmentPhase, string>> = {
   flavor: "选择至少一个最终风味描述",
-  overall: "完成SCA 8项Affective评分、非一致/缺陷杯数与香迹洁净度",
+  overall: "完成SCA 8项Affective评分、杯数/缺陷类型一致性与香迹洁净度",
   score: "查看SCA得分、结构雷达与温度—风味演化后主动确认"
 };
 
@@ -48,10 +43,6 @@ export function hasMeaningfulValue(value: unknown): boolean {
 
 function observationMap(observations: readonly SensoryObservation[]): Map<string, unknown> {
   return new Map(observations.map((observation) => [observation.fieldKey, observation.value] as const));
-}
-
-function allPresent(map: ReadonlyMap<string, unknown>, fieldKeys: readonly string[]): boolean {
-  return fieldKeys.every((fieldKey) => hasMeaningfulValue(map.get(fieldKey)));
 }
 
 function anyObservation(
@@ -76,7 +67,8 @@ export function deriveFinalPhaseStatus(
   }
 
   if (phase === "overall") {
-    if (allPresent(map, FINAL_OVERALL_REQUIRED_FIELDS)) return "completed";
+    const sca = calculateSCACVAScore(observations);
+    if (sca.complete && hasMeaningfulValue(map.get("quality_clean"))) return "completed";
     const started = anyObservation(observations, (fieldKey) =>
       fieldKey.startsWith("final_sca_")
       || fieldKey.startsWith("profile_")
