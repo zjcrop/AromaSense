@@ -4,6 +4,7 @@ import type { YingxiangEventPrincipal, YingxiangEventSampleSlot } from "./yingxi
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { LocalCuppingRepository } from "../storage/local-cupping-repository";
 import { YingxiangEventStore, type YingxiangEventContext } from "../storage/yingxiang-event-store";
+import { YingxiangParticipantEventRefresher } from "../storage/yingxiang-participant-event-refresh";
 
 export interface YingxiangParticipationOptions {
   now(): string;
@@ -89,6 +90,7 @@ function participantSafeLabel(
 
 export class YingxiangParticipationService {
   private readonly events: YingxiangEventStore;
+  private readonly participantEvents: YingxiangParticipantEventRefresher;
   private readonly setup: CuppingSetupService;
 
   constructor(
@@ -97,6 +99,7 @@ export class YingxiangParticipationService {
     private readonly options: YingxiangParticipationOptions
   ) {
     this.events = new YingxiangEventStore(db);
+    this.participantEvents = new YingxiangParticipantEventRefresher(db);
     this.setup = new CuppingSetupService(new LocalCuppingRepository(db));
   }
 
@@ -117,8 +120,10 @@ export class YingxiangParticipationService {
       displayName: input.displayName,
       nameSource: input.nameSource
     });
+    const now = this.options.now();
     const existing = await this.events.getSessionBinding(joined.event.eventId, joined.principal.participantId);
     if (existing) {
+      await this.participantEvents.refresh(eventContext(joined.event), now);
       await this.saveDelivery(existing.sessionId, joined.principal.participantId, joined.accessToken);
       return {
         eventId: joined.event.eventId,
@@ -129,7 +134,6 @@ export class YingxiangParticipationService {
       };
     }
 
-    const now = this.options.now();
     const dateTime = localDateTime(now);
     const sessionId = this.options.createSessionId();
     const mode = joined.event.manifest.cuppingMode;
@@ -146,7 +150,7 @@ export class YingxiangParticipationService {
       }));
 
     await this.db.transaction(async () => {
-      await this.events.putEventContext(eventContext(joined.event), now);
+      await this.participantEvents.refresh(eventContext(joined.event), now);
       await this.events.putPrincipal(localPrincipal(joined.principal));
       await this.setup.create({
         sessionId,
