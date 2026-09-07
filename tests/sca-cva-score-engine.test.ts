@@ -5,8 +5,11 @@ import {
   calculateSCACVAScore,
   SCA_CVA_AFFECTIVE_FIELDS,
   SCA_DEFECTIVE_CUPS_FIELD,
+  SCA_DEFECT_TYPES_VALIDATION_KEY,
+  SCA_DEFECT_UNIFORMITY_VALIDATION_KEY,
   SCA_NON_UNIFORM_CUPS_FIELD
 } from "../app/core/sca-cva-score-engine";
+import { DEFECT_ITEMS, defectPenalty } from "../app/core/defect-dictionary";
 
 function obs(fieldKey: string, value: unknown): SensoryObservation {
   return {
@@ -21,11 +24,12 @@ function obs(fieldKey: string, value: unknown): SensoryObservation {
   };
 }
 
-function complete(score: number, nonUniform = 0, defective = 0): SensoryObservation[] {
+function complete(score: number, nonUniform = 0, defective = 0, defectIds?: string[]): SensoryObservation[] {
   return [
     ...SCA_CVA_AFFECTIVE_FIELDS.map((field) => obs(field.key, score)),
     obs(SCA_NON_UNIFORM_CUPS_FIELD, nonUniform),
-    obs(SCA_DEFECTIVE_CUPS_FIELD, defective)
+    obs(SCA_DEFECTIVE_CUPS_FIELD, defective),
+    ...(defective > 0 ? [obs("defect_ids", defectIds ?? ["defect-mold"])] : [])
   ];
 }
 
@@ -49,4 +53,32 @@ test("missing fields never become zero and AromaSense descriptors cannot alter S
     obs("flavor_tags", ["jasmine"])
   ];
   assert.equal(calculateSCACVAScore(withProfile).score, calculateSCACVAScore(base).score);
+});
+
+test("defective cups require an SCA-104 defect type rather than an arbitrary AromaSense defect tag", () => {
+  const noType = calculateSCACVAScore(complete(8, 1, 1, []));
+  assert.equal(noType.complete, false);
+  assert.ok(noType.invalid.includes(SCA_DEFECT_TYPES_VALIDATION_KEY));
+
+  const customOnly = calculateSCACVAScore(complete(8, 1, 1, ["defect-earthy"]));
+  assert.equal(customOnly.complete, false);
+  assert.ok(customOnly.invalid.includes(SCA_DEFECT_TYPES_VALIDATION_KEY));
+
+  const potato = calculateSCACVAScore(complete(8, 1, 1, ["defect-potato"]));
+  assert.equal(potato.complete, true);
+  assert.deepEqual(potato.defectTypes, ["defect-potato"]);
+});
+
+test("defective cups must also be non-uniform unless all five cups share the defect", () => {
+  const inconsistent = calculateSCACVAScore(complete(8, 1, 2, ["defect-phenolic"]));
+  assert.equal(inconsistent.complete, false);
+  assert.ok(inconsistent.invalid.includes(SCA_DEFECT_UNIFORMITY_VALIDATION_KEY));
+
+  const allFive = calculateSCACVAScore(complete(8, 0, 5, ["defect-mold"]));
+  assert.equal(allFive.complete, true, "SCA-104 permits the evenly defective five-cup exception");
+});
+
+test("P1 adds Potato to the scoring form without mutating the legacy AromaSense penalty model", () => {
+  assert.equal(DEFECT_ITEMS.some((item) => item.id === "defect-potato"), true);
+  assert.equal(defectPenalty(["defect-potato"]), 0);
 });
