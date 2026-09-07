@@ -1,0 +1,157 @@
+name: Publish verified AromaSense B0.2.a signed release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-b02a-signed-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aromasense-b02a-official-release
+  cancel-in-progress: false
+
+env:
+  PRODUCT_SHA: 144ee52d44bf553b9dfe2520fa1db64074e5d9af
+  RELEASE_VERSION: B0.2.a
+  RELEASE_TAG: vB0.2.a
+  VERSION_CODE: '10201'
+  SIGNER_REPOSITORY: zjcrop/luckybean
+  SIGNER_TAG: aromasense-signer-vB0.2.a-144ee52d44bf
+  RECOGNITION_PIPELINE: 1.24P-recognition-pipeline.5
+  CLOUD_URL: https://aromasense-api.zj-crop.workers.dev
+  EXPECTED_CERT: B66B3E33F4DB34A4A9A14FCA4A571A426B8DEE31C720AF86983A7B5402D05AFB
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 20
+
+      - name: Bind release wrapper to validated product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$PRODUCT_SHA^{commit}"
+          git merge-base --is-ancestor "$PRODUCT_SHA" HEAD
+          unexpected=$(git diff --name-only "$PRODUCT_SHA" HEAD -- . \
+            ':(exclude).github/workflows/release-main.yml' \
+            ':(exclude).github/workflows/publish-b02a-signed-handoff.yml')
+          test -z "$unexpected"
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Official tag $RELEASE_TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+      - name: Download immutable signer handoff assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$SIGNER_TAG" --repo "$SIGNER_REPOSITORY" --dir dist \
+            --pattern "AromaSense-${RELEASE_VERSION}-release.apk" \
+            --pattern 'SIGNER_PROVENANCE.json' \
+            --pattern 'SHA256SUMS.txt'
+          test -f "dist/AromaSense-${RELEASE_VERSION}-release.apk"
+          test -f dist/SIGNER_PROVENANCE.json
+          test -f dist/SHA256SUMS.txt
+
+      - name: Verify signer provenance and SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg source "$PRODUCT_SHA" \
+            --arg version "$RELEASE_VERSION" \
+            --argjson version_code "$VERSION_CODE" \
+            --arg pipeline "$RECOGNITION_PIPELINE" \
+            --arg cert "$EXPECTED_CERT" \
+            '.handoff_format == "aromasense-official-signer/2"
+             and .source_repository == "zjcrop/AromaSense"
+             and .validated_product_sha == $source
+             and .version == $version
+             and .version_code == $version_code
+             and .recognition_pipeline == $pipeline
+             and .certificate_sha256 == $cert
+             and .certificate_verified == true
+             and .signer_repository == "zjcrop/luckybean"
+             and .private_key_exported == false
+             and .apk == ("AromaSense-" + $version + "-release.apk")
+             and (.apk_sha256 | type == "string" and length == 64)' \
+            dist/SIGNER_PROVENANCE.json >/dev/null
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          expected_sha=$(jq -r '.apk_sha256' dist/SIGNER_PROVENANCE.json)
+          actual_sha=$(sha256sum "dist/AromaSense-${RELEASE_VERSION}-release.apk" | awk '{print $1}')
+          test "$actual_sha" = "$expected_sha"
+          echo "APK_SHA256=$actual_sha" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4.0.1
+      - name: Install Android verification tools
+        run: sdkmanager 'build-tools;36.0.0'
+
+      - name: Independently verify package, embedded production identity and signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="dist/AromaSense-${RELEASE_VERSION}-release.apk"
+          badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk")
+          printf '%s\n' "$badging" | grep -q "package: name='com.zjcrop.aromasense' versionCode='${VERSION_CODE}' versionName='${RELEASE_VERSION}'"
+          unzip -p "$apk" assets/www/index.html > /tmp/aromasense-index.html
+          unzip -p "$apk" assets/www/luckybean-recognition-core.js > /tmp/aromasense-recognition.js
+          grep -Fq "data-cloud-base-url=\"${CLOUD_URL}\"" /tmp/aromasense-index.html
+          grep -Fq "name=\"build-revision\" content=\"${PRODUCT_SHA:0:16}\"" /tmp/aromasense-index.html
+          grep -Fq 'name="application-version" content="B0.2.a"' /tmp/aromasense-index.html
+          grep -Fq "$RECOGNITION_PIPELINE" /tmp/aromasense-recognition.js
+          grep -Fq 'knowledgeOnlyVariety' /tmp/aromasense-recognition.js
+          pinned_cert=$(tr -d '[:space:]:' < mobile/android/signing/CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')
+          actual_cert=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+          test "$pinned_cert" = "$EXPECTED_CERT"
+          test "$actual_cert" = "$EXPECTED_CERT"
+
+      - name: Create official release provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq \
+            --arg release_repository "$GITHUB_REPOSITORY" \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg signer_tag "$SIGNER_TAG" \
+            --arg apk_sha "$APK_SHA256" \
+            '. + {
+              release_receipt_format:"aromasense-release/1",
+              official_release_repository:$release_repository,
+              official_release_tag:$release_tag,
+              signer_handoff_tag:$signer_tag,
+              apk_sha256:$apk_sha,
+              official_release_verified:true
+            }' dist/SIGNER_PROVENANCE.json > dist/BUILD_PROVENANCE.json
+
+      - name: Publish immutable AromaSense GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="dist/AromaSense-${RELEASE_VERSION}-release.apk"
+          notes="AromaSense ${RELEASE_VERSION} final production release. Validated product source ${PRODUCT_SHA}; Connected Web/Worker production, recognition pipeline ${RECOGNITION_PIPELINE}, package identity, SHA-256 and the pinned official Android certificate were independently verified. Signing was performed by the controlled LuckyBean signer handoff without exporting the private key."
+          gh release create "$RELEASE_TAG" \
+            "$apk" dist/BUILD_PROVENANCE.json dist/SHA256SUMS.txt \
+            --target "$PRODUCT_SHA" \
+            --title "AromaSense ${RELEASE_VERSION}" \
+            --notes "$notes"
+          tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG" | awk '{print $1}')
+          test "$tag_sha" = "$PRODUCT_SHA"
+          assets=$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name]')
+          printf '%s' "$assets" | jq -e --arg apk_name "AromaSense-${RELEASE_VERSION}-release.apk" 'index($apk_name) != null and index("BUILD_PROVENANCE.json") != null and index("SHA256SUMS.txt") != null' >/dev/null
