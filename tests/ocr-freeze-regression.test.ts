@@ -14,13 +14,13 @@ const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
-const P3_PROVISIONAL_PRODUCER_SHA = "5d511b846f560438d988b5dab021417569e74845";
+const P3_OFFICIAL_PRODUCER_SHA = "f425ec658a44e021c5010db2996cc80808f137fa";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
-test("AromaSense pins the exact immutable P3 LuckyBean Recognition producer", () => {
+test("AromaSense pins the exact immutable official LuckyBean Recognition producer", () => {
   assert.match(luckyBeanDependency, /^github:zjcrop\/luckybean#[0-9a-f]{40}$/u);
-  assert.equal(luckyBeanDependency, `github:zjcrop/luckybean#${P3_PROVISIONAL_PRODUCER_SHA}`);
+  assert.equal(luckyBeanDependency, `github:zjcrop/luckybean#${P3_OFFICIAL_PRODUCER_SHA}`);
   assert.doesNotMatch(luckyBeanDependency, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/u);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
