@@ -9,6 +9,8 @@ import { YingxiangParticipantEventRefresher } from "../storage/yingxiang-partici
 
 export interface DeliveryRow { session_id: string; participant_id: string; access_token: string; progress_sequence: number; ack_revision: number | null; ack_hash: string | null; last_error: string | null; updated_at: string; }
 
+type FinalAck = { revision: number; contentHash: string };
+
 const COFFEE_METADATA_FIELDS = [
   "productName", "country", "region", "farm", "station", "variety", "roast", "process", "roaster", "altitude", "roastDate", "notes"
 ] as const;
@@ -56,6 +58,26 @@ export class YingxiangDeliveryService {
     if (this.running) return this.running;
     this.running = this.syncAll().finally(() => { this.running = undefined; });
     return this.running;
+  }
+
+  private async reconcileFinalAck(row: DeliveryRow, status: YingxiangParticipantStatus): Promise<FinalAck | undefined> {
+    if (status.ack) {
+      const local = await this.db.get<{ content_hash: string }>(
+        "SELECT content_hash FROM submission_revisions WHERE session_id=? AND revision=?",
+        [row.session_id, status.ack.revision]
+      );
+      if (!local || local.content_hash !== status.ack.contentHash) throw new Error("YINGXIANG_ACK_LOCAL_MISMATCH");
+      if (row.ack_revision !== status.ack.revision || row.ack_hash !== status.ack.contentHash) {
+        await this.db.run(
+          "UPDATE yingxiang_delivery SET ack_revision=?,ack_hash=?,last_error=NULL,updated_at=? WHERE session_id=?",
+          [status.ack.revision,status.ack.contentHash,this.now(),row.session_id]
+        );
+      }
+      return { revision: status.ack.revision, contentHash: status.ack.contentHash };
+    }
+    if (row.ack_revision !== null && row.ack_hash) return { revision: row.ack_revision, contentHash: row.ack_hash };
+    if (row.ack_revision !== null || row.ack_hash !== null) throw new Error("YINGXIANG_ACK_LOCAL_MISMATCH");
+    return undefined;
   }
 
   private async syncRemoteLifecycle(
@@ -110,11 +132,12 @@ export class YingxiangDeliveryService {
       try {
         const session = await repository.getSession(row.session_id);
         const status = await this.client.participantStatus(row.participant_id,row.access_token);
+        const finalAck = await this.reconcileFinalAck(row, status);
         await this.syncRemoteLifecycle(repository, row, status);
         const remoteClosed = status.participant.status === "released" || status.event.status === "completed" || status.event.status === "cancelled";
         if (session.status === "completed" || session.status === "archived") {
           if (remoteClosed) {
-            if (row.ack_revision !== null && row.ack_hash) {
+            if (finalAck) {
               await this.db.run("UPDATE yingxiang_delivery SET last_error=NULL,updated_at=? WHERE session_id=?",[this.now(),row.session_id]);
             } else {
               await this.db.run("UPDATE yingxiang_delivery SET last_error=?,updated_at=? WHERE session_id=?",["YINGXIANG_EVENT_CLOSED_BEFORE_SUBMISSION",this.now(),row.session_id]);
@@ -122,7 +145,7 @@ export class YingxiangDeliveryService {
             continue;
           }
           const bundle = await this.submissions.create(await new SessionRecordService(repository,this.now).snapshot(row.session_id));
-          if (row.ack_revision === bundle.revision && row.ack_hash === bundle.contentHash) continue;
+          if (finalAck?.revision === bundle.revision && finalAck.contentHash === bundle.contentHash) continue;
           const ack = await this.client.submit(row.participant_id,row.access_token,bundle);
           await this.db.run("UPDATE yingxiang_delivery SET ack_revision=?,ack_hash=?,last_error=NULL,updated_at=? WHERE session_id=?",[ack.revision,ack.contentHash,this.now(),row.session_id]);
         } else if (status.participant.status === "active" && (status.event.status === "published" || status.event.status === "active")) {
