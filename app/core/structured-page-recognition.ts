@@ -64,6 +64,7 @@ export function mapStructuredPageRecognition(input: {
   multiRecordProbability: number;
   ignoredEvidenceRefs: readonly string[];
 }): StructuredRecognitionSample[] {
+  const hasUnassignedEvidence = input.result.unassignedEvidence.length > 0;
   return input.result.samples.map((sample, index) => {
     const fields = fieldsFromSample(sample);
     const lines = evidenceLines(input.document, sample.evidenceRefs);
@@ -72,7 +73,7 @@ export function mapStructuredPageRecognition(input: {
     const confidence = Math.min(sample.confidence, semanticConfidence, ocrConfidence);
     const label = labelFor(sample, fields, index);
     const lowField = sample.fields.some((field) => field.confidence < 0.65);
-    const requiresReview = sample.confidence < 0.75 || lowField || /^待确认样品/u.test(label);
+    const requiresReview = hasUnassignedEvidence || sample.confidence < 0.75 || lowField || /^待确认样品/u.test(label);
     const rawText = lines.map((line) => line.text).join("\n");
     return {
       label,
