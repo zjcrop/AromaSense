@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const packageJson = readFileSync("package.json", "utf8");
+const parsedPackage = JSON.parse(packageJson) as { dependencies?: Record<string, string> };
+const luckyBeanDependency = parsedPackage.dependencies?.["luckybean-static-app"] ?? "";
 const commonEntry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
 const recognitionService = readFileSync("app/core/sample-recognition-service.ts", "utf8");
 const buildScript = readFileSync("scripts/build-web.mjs", "utf8");
@@ -12,17 +14,23 @@ const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
+const P3_PROVISIONAL_PRODUCER_SHA = "835bf3b3daed3a6594aae0c1866f253a18b7c1c4";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
-test("AromaSense pins an immutable LuckyBean browser-safe OCR release", () => {
-  assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
-  assert.match(packageJson, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/);
+test("AromaSense pins the exact immutable P3 LuckyBean Recognition producer", () => {
+  assert.match(luckyBeanDependency, /^github:zjcrop\/luckybean#[0-9a-f]{40}$/u);
+  assert.equal(luckyBeanDependency, `github:zjcrop/luckybean#${P3_PROVISIONAL_PRODUCER_SHA}`);
+  assert.doesNotMatch(luckyBeanDependency, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/u);
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
   assert.match(commonEntry, /recognizeImageRegion/);
   assert.match(commonEntry, /normalizeRecognitionRegion/);
+  assert.match(commonEntry, /RECOGNITION_RECORD_HYPOTHESIS_SCHEMA/);
+  assert.match(commonEntry, /RECOGNITION_STRUCTURE_RECOVERY_SCHEMA/);
+  assert.match(commonEntry, /AI_STRUCTURE_RESULT_SCHEMA/);
+  assert.match(commonEntry, /recoverRecognitionStructure/);
   assert.match(buildScript, /candidateCoreCode/);
   assert.match(buildScript, /manualConfirmationRequired/);
   assert.match(buildScript, /historicalCoreCompatibility/);
