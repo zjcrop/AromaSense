@@ -1,6 +1,6 @@
 import { CuppingSetupService } from "./cupping-setup-service";
 import type { YingxiangClient, YingxiangInvitePreview, YingxiangRemoteEvent } from "./yingxiang-client";
-import type { YingxiangEventPrincipal } from "./yingxiang-event";
+import type { YingxiangEventPrincipal, YingxiangEventSampleSlot } from "./yingxiang-event";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { LocalCuppingRepository } from "../storage/local-cupping-repository";
 import { YingxiangEventStore, type YingxiangEventContext } from "../storage/yingxiang-event-store";
@@ -25,6 +25,8 @@ export interface JoinedYingxiangSession {
   sessionId: string;
   resumed: boolean;
 }
+
+const SEMI_BLIND_VISIBLE_COFFEE_FIELDS = ["country", "region", "process", "roast"] as const;
 
 function eventContext(event: YingxiangRemoteEvent): YingxiangEventContext {
   return {
@@ -59,6 +61,30 @@ function localDateTime(now: string): { date: string; time: string } {
   if (!Number.isFinite(date.getTime())) throw new Error("YINGXIANG_NOW_INVALID");
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString();
   return { date: local.slice(0, 10), time: local.slice(11, 16) };
+}
+
+function participantSafeCoffeeMetadata(
+  sample: YingxiangEventSampleSlot,
+  mode: YingxiangRemoteEvent["manifest"]["cuppingMode"]
+): Record<string, string> {
+  if (!sample.coffee || mode === "blind") return {};
+  if (mode === "open") return Object.fromEntries(
+    Object.entries(sample.coffee).filter((entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1].trim()))
+  );
+  const result: Record<string, string> = {};
+  for (const key of SEMI_BLIND_VISIBLE_COFFEE_FIELDS) {
+    const value = sample.coffee[key]?.trim();
+    if (value) result[key] = value;
+  }
+  return result;
+}
+
+function participantSafeLabel(
+  sample: YingxiangEventSampleSlot,
+  mode: YingxiangRemoteEvent["manifest"]["cuppingMode"]
+): string {
+  if (mode !== "open") return sample.sampleCode;
+  return sample.label?.trim() || sample.coffee?.productName?.trim() || sample.sampleCode;
 }
 
 export class YingxiangParticipationService {
@@ -106,14 +132,16 @@ export class YingxiangParticipationService {
     const now = this.options.now();
     const dateTime = localDateTime(now);
     const sessionId = this.options.createSessionId();
+    const mode = joined.event.manifest.cuppingMode;
     const samples = [...joined.event.manifest.samples]
       .sort((a, b) => a.order - b.order)
       .map((sample) => ({
-        label: sample.label || sample.sampleCode,
+        label: participantSafeLabel(sample, mode),
         metadata: {
           eventSampleId: sample.eventSampleId,
           sampleCode: sample.sampleCode,
-          eventRevision: joined.event.eventRevision
+          eventRevision: joined.event.eventRevision,
+          ...participantSafeCoffeeMetadata(sample, mode)
         }
       }));
 
