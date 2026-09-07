@@ -1,5 +1,6 @@
 import type { OCRBox, OCRLayoutDocument, OCRLayoutLine } from "./ocr-layout-model";
 import type { SampleLayoutResult, SampleLayoutSegment } from "./sample-layout-segmenter";
+import { sharedRecordCandidateLayout } from "./shared-record-candidate-layout";
 
 interface OCRRow {
   lines: OCRLayoutLine[];
@@ -96,17 +97,10 @@ function rowFromLine(line: OCRLayoutLine): OCRRow {
   return { lines: [line], box: line.normalizedBox, text: line.text.trim() };
 }
 
-/**
- * Detect two independent coffee cards placed side-by-side before the generic row
- * builder can merge their horizontally separated text into shared Y rows.
- *
- * This runs only after the primary segmenter has returned a single sample. It is
- * intentionally conservative: both columns must contain at least three OCR lines,
- * overlap strongly in vertical extent, be separated by a material X-center gap,
- * and independently contain coffee identity + process evidence. Any meaningful
- * line crossing the proposed split rejects the fallback. High-confidence table
- * and catalog results never reach this function.
- */
+/** Compatibility fallback retained during Stage 3 migration. Shared LuckyBean
+ * RecordCandidates run first; this path only covers layouts not yet represented
+ * by the shared contract and remains review-required. Existing profile names are
+ * retained because they are already diagnostic metadata contracts. */
 function sideBySideColumnsFallback(document: OCRLayoutDocument): SampleLayoutResult | undefined {
   const lines = document.lines
     .filter((line) => line.text.replace(/\s+/g, "").length >= 2)
@@ -201,20 +195,19 @@ function processCycleFallback(document: OCRLayoutDocument, source: readonly OCRR
 }
 
 /**
- * Secondary, deliberately conservative refinement for OCR pages that the primary
- * geometry segmenter called a single sample. It exists to prevent a dangerous
- * failure mode: several clearly separate coffee records being silently collapsed
- * into one setup row merely because the label did not contain explicit field
- * names such as “产地/品种/处理法”.
- *
- * Every fallback remains review-required. The primary high-confidence table,
- * catalog and explicit-field segmenters always win.
+ * Product-specific table/catalog segmentation happens before this function.
+ * For ambiguous single-sample pages, the shared LuckyBean RecordCandidate contract
+ * is now authoritative for generic geometry. Local semantic fallbacks are retained
+ * only as a compatibility safety net for patterns not yet covered by that contract.
  */
 export function refineAmbiguousSingleSampleLayout(
   document: OCRLayoutDocument,
   primary: SampleLayoutResult
 ): SampleLayoutResult {
   if (primary.segments.length !== 1 || document.lines.length < 2) return primary;
+
+  const shared = sharedRecordCandidateLayout(document);
+  if (shared) return shared;
 
   const sideBySide = sideBySideColumnsFallback(document);
   if (sideBySide) return sideBySide;

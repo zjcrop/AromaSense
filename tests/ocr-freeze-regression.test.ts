@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const packageJson = readFileSync("package.json", "utf8");
+const packageData = JSON.parse(packageJson) as { dependencies?: Record<string, string> };
+const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8")) as {
+  packages?: Record<string, { dependencies?: Record<string, string>; resolved?: string }>;
+};
 const commonEntry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
 const recognitionService = readFileSync("app/core/sample-recognition-service.ts", "utf8");
 const buildScript = readFileSync("scripts/build-web.mjs", "utf8");
@@ -16,13 +20,19 @@ const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]can
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
 test("AromaSense pins an immutable LuckyBean browser-safe OCR release", () => {
-  assert.match(packageJson, /github:zjcrop\/luckybean#[0-9a-f]{40}/);
-  assert.match(packageJson, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/);
+  const manifestPin = packageData.dependencies?.["luckybean-static-app"] ?? "";
+  const match = /^github:zjcrop\/luckybean#([0-9a-f]{40})$/u.exec(manifestPin);
+  assert.ok(match, `LuckyBean dependency must use one immutable 40-char commit SHA: ${manifestPin}`);
+  const pinnedSha = match[1];
+  assert.equal(packageLock.packages?.[""]?.dependencies?.["luckybean-static-app"], manifestPin);
+  assert.match(packageLock.packages?.["node_modules/luckybean-static-app"]?.resolved ?? "", new RegExp(`${pinnedSha}$`, "u"));
   assert.doesNotMatch(commonEntry, /recognition-web-ocr\.js/);
   assert.doesNotMatch(commonEntry, /recognition-quality-controller\.js/);
   assert.match(commonEntry, /recognition-paddle-ocr\.js/);
   assert.match(commonEntry, /recognizeImageRegion/);
   assert.match(commonEntry, /normalizeRecognitionRegion/);
+  assert.match(commonEntry, /groupRecognitionRecordCandidates/);
+  assert.match(commonEntry, /RECOGNITION_RECORD_CANDIDATE_SCHEMA/);
   assert.match(buildScript, /candidateCoreCode/);
   assert.match(buildScript, /manualConfirmationRequired/);
   assert.match(buildScript, /historicalCoreCompatibility/);
@@ -40,6 +50,7 @@ test("AromaSense pins an immutable LuckyBean browser-safe OCR release", () => {
   assert.match(runtimeHardener, /recognition-roi\/1\.0/);
   assert.match(runtimeHardener, /vm\.runInNewContext/);
   assert.match(runtimeHardener, /Formal LuckyBean recognition core failed runtime smoke/);
+  assert.match(runtimeHardener, /Foundation RecordCandidate schema mismatch/);
 });
 
 test("recognition path never decodes or re-encodes full images on the UI thread", () => {
