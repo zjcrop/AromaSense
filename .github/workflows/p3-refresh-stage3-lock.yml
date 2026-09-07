@@ -1,16 +1,16 @@
 name: P3 refresh Stage 3 lock
 
 on:
-  push:
+  pull_request:
     branches:
-      - stage3-p3-consumer-reconcile-20260907
+      - main
 
 permissions:
   contents: write
 
 jobs:
   refresh:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.ref == 'stage3-p3-consumer-reconcile-20260907' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
