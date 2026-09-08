@@ -1,83 +1,105 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  recognizeReviewedRegionsFromOriginal,
-  type RegionBatchProgress
-} from "../app/core/sample-region-batch-recognition";
+import type { OCRBox } from "../app/core/ocr-layout-model";
+import { recognizeReviewedRegionsFromOriginal } from "../app/core/sample-region-batch-recognition";
 import { buildSegmentationReviewModel, type SegmentationReviewModel } from "../app/core/sample-segmentation-review";
-import type { RecognizedPage } from "../app/core/sample-recognition-service";
+import type { RecognizedPage, RecognizedSample } from "../app/core/sample-recognition-service";
+import type { LuckyBeanRecognitionCore } from "../app/core/luckybean-upstream-adapter";
+
+function box(left: number, top: number, right: number, bottom: number): OCRBox {
+  return {
+    left, top, right, bottom,
+    width: right - left,
+    height: bottom - top,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2
+  };
+}
+
+function staleSample(label: string, id: string, text: string, region: OCRBox): RecognizedSample {
+  return {
+    label,
+    rawText: text,
+    engine: "stale-first-pass",
+    confidence: 0.4,
+    requiresReview: true,
+    metadata: {
+      recognition: {
+        segmentId: id,
+        segmentBox: region,
+        evidenceLines: [{
+          id: `${id}-stale`,
+          blockId: `${id}-stale-block`,
+          text,
+          confidence: 0.4,
+          box: region
+        }]
+      }
+    }
+  };
+}
 
 function stalePage(): RecognizedPage {
   return {
-    input: { kind: "image", name: "camera.jpg" },
-    rawText: "STALE KENYA\nSTALE ETHIOPIA",
+    fileName: "original-camera.jpg",
+    engine: "stale-first-pass",
+    layoutType: "mixed",
+    segmentationConfidence: 0.42,
+    requiresSegmentationReview: true,
     samples: [
-      { rawText: "STALE KENYA", metadata: { country: "Old Kenya" }, recognition: { fields: [], conflicts: [] } },
-      { rawText: "STALE ETHIOPIA", metadata: { country: "Old Ethiopia" }, recognition: { fields: [], conflicts: [] } }
-    ],
-    recognition: {
-      source: "ocr",
-      requiresReview: true,
-      fields: [],
-      conflicts: [],
-      layout: {
-        type: "multi-record",
-        reviewRequired: true,
-        records: [
-          { id: "region-1", text: "STALE KENYA", box: { left: 0, top: 0, right: 1, bottom: 0.45 }, confidence: 0.7 },
-          { id: "region-2", text: "STALE ETHIOPIA", box: { left: 0, top: 0.55, right: 1, bottom: 1 }, confidence: 0.7 }
-        ]
-      }
-    }
-  } as RecognizedPage;
+      staleSample("wrong-one", "seg-1", "STALE COLOMBIA", box(0.06, 0.08, 0.44, 0.38)),
+      staleSample("wrong-two", "seg-2", "STALE BRAZIL", box(0.56, 0.08, 0.94, 0.38))
+    ]
+  };
 }
 
-function installFoundationFixture(options: { failSecond?: boolean } = {}) {
+function installFoundationFixture(options: { failSecond?: boolean } = {}): { restore(): void; calls: { prepare: Blob[]; regions: unknown[] } } {
   const runtime = globalThis as typeof globalThis & {
-    LuckyBeanRecognitionCore?: Record<string, unknown>;
-    __AROMASENSE_RECOGNITION_BOOK__?: Record<string, unknown>;
+    LuckyBeanRecognitionCore?: LuckyBeanRecognitionCore;
+    __AROMASENSE_RECOGNITION_BOOK__?: unknown;
   };
   const previousCore = runtime.LuckyBeanRecognitionCore;
   const previousBook = runtime.__AROMASENSE_RECOGNITION_BOOK__;
-  const calls = {
-    prepare: [] as Blob[],
-    regions: [] as Array<Record<string, unknown>>
-  };
+  const calls = { prepare: [] as Blob[], regions: [] as unknown[] };
   let regionCall = 0;
 
+  runtime.__AROMASENSE_RECOGNITION_BOOK__ = {
+    countries: [{}], regions: [{}], entities: [{}], varieties: [{}], processes: [{}], flavors: [{}]
+  };
   runtime.LuckyBeanRecognitionCore = {
+    RECOGNITION_PIPELINE_VERSION: "fixture-pipeline/1",
     async preparePackageImage(blob: Blob) {
       calls.prepare.push(blob);
-      return { id: "prepared-source", blob, source: "original-file" };
+      return { blob };
     },
-    normalizeRecognitionRegion(region: Record<string, unknown>) {
-      return region;
-    },
-    async recognizeImageRegion(_prepared: unknown, region: Record<string, unknown>) {
-      calls.regions.push(region);
+    async recognizeCoffeeBag() { return { blocks: [], fullText: "" }; },
+    getRecognitionCapabilities() { return { webPaddleRegion: true }; },
+    async recognizeImageRegion(_image, region) {
       regionCall += 1;
+      calls.regions.push(region);
       if (options.failSecond && regionCall === 2) throw new Error("fixture second region failed");
       const text = regionCall === 1 ? "FRESH KENYA WASHED" : "FRESH ETHIOPIA NATURAL";
       return {
+        regionProtocol: "recognition-roi/1.0",
+        engine: "fixture-roi",
+        sourceWidth: 4032,
+        sourceHeight: 3024,
+        cropWidth: 1500,
+        cropHeight: 1000,
+        outputWidth: 1200,
+        outputHeight: 800,
         fullText: text,
-        blocks: [
-          {
-            text,
-            confidence: 0.98,
-            box: { left: 0.1, top: 0.1, right: 0.9, bottom: 0.9 },
-            polygon: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
-          }
-        ],
-        protocol: "recognition-roi/1.0"
+        blocks: [{
+          text,
+          confidence: 0.98,
+          polygon: [[0.05, 0.10], [0.95, 0.10], [0.95, 0.35], [0.05, 0.35]]
+        }]
       };
-    }
-  };
-
-  runtime.__AROMASENSE_RECOGNITION_BOOK__ = {
-    createRecognitionDocument(input: Record<string, unknown>) {
+    },
+    createRecognitionDocument(input) {
       return { schemaVersion: "fixture-doc/1", parserVersion: "fixture-parser/1", ...input };
     },
-    analyzeRecognitionDocument(document: Record<string, unknown>) {
+    analyzeRecognitionDocument(document) {
       const text = String(document.fullText ?? "");
       const fields = [] as Array<Record<string, unknown>>;
       if (/KENYA/iu.test(text)) fields.push({ field: "countryCode", standardValue: "Kenya", confidence: 0.98, status: "resolved" });
@@ -116,12 +138,12 @@ test("reviewed regions are all re-recognized from the original File and stale te
       file: original,
       page,
       model,
-      onProgress: (state: RegionBatchProgress) => progress.push(state.fraction)
+      onProgress: (state) => progress.push(state.fraction)
     });
 
-    assert.equal(fixture.calls.prepare.length, 1, "the immutable source image must be prepared once for the whole region batch");
+    assert.equal(fixture.calls.prepare.length, 1, "the immutable original must be prepared once per region batch");
     assert.equal(fixture.calls.prepare[0], original);
-    assert.equal(fixture.calls.regions.length, 2, "both reviewed regions must still receive an independent PP-OCR pass");
+    assert.equal(fixture.calls.regions.length, 2);
     assert.equal(result.page.samples.length, 2);
     assert.match(result.page.samples[0].rawText, /FRESH KENYA WASHED/u);
     assert.match(result.page.samples[1].rawText, /FRESH ETHIOPIA NATURAL/u);
@@ -144,8 +166,8 @@ test("batch stops instead of silently finalizing stale evidence when any origina
       recognizeReviewedRegionsFromOriginal({ file: original, page, model }),
       /fixture second region failed/u
     );
-    assert.equal(fixture.calls.prepare.length, 1, "failed batches must not repeat source preparation");
-    assert.equal(fixture.calls.regions.length, 2, "the second independent region pass must be the operation that fails");
+    assert.equal(fixture.calls.prepare.length, 1, "failed region batches must not repeat source preparation");
+    assert.equal(fixture.calls.regions.length, 2);
   } finally {
     fixture.restore();
   }
