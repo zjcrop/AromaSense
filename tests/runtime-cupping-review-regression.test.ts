@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+// Final deployment gate: static contracts here are paired with the real 30-sample Chrome rail acceptance.
 test("cupping rail hides its scrollbar and renders a separate floating current-item layer below active text", () => {
   const source = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");
   assert.match(source, /scrollbar-width:none!important/);
