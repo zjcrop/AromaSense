@@ -13,7 +13,7 @@ const USER_REPORTED_OCR = [
   "薇拉省"
 ].join("\n");
 
-test("user-reported high-quality OCR is structurally recovered instead of staying an anonymous sample", async () => {
+test("user-reported high-quality OCR is structurally recovered without forcing field review", async () => {
   const core = await dynamicImport("luckybean-static-app/src/recognition-core.js");
   const book = JSON.parse(readFileSync("node_modules/luckybean-static-app/public/fallback-codebook.json", "utf8"));
   const document = core.createRecognitionDocument({
@@ -37,6 +37,7 @@ test("user-reported high-quality OCR is structurally recovered instead of stayin
   assert.equal(analysis.parsed.roastCode, "RL-L3");
   assert.equal(analysis.parsed.entityCustomName, "展望庄园");
   assert.equal(analysis.parsed.regionCustomName, "薇拉省");
+  assert.equal(analysis.reviewCount, 0, "typed custom values must not turn a strong OCR sample into pending review");
 
   const fieldValues = Object.fromEntries(
     (analysis.fields ?? []).map((field: Record<string, unknown>) => [String(field.field), String(field.standardValue ?? field.rawValue ?? "")])
@@ -46,4 +47,14 @@ test("user-reported high-quality OCR is structurally recovered instead of stayin
   assert.equal(fieldValues.regionCode, "薇拉省");
   assert.equal(fieldValues.processCode, "水洗");
   assert.equal(fieldValues.roastCode, "中烘");
+
+  const reviewFields = (analysis.fields ?? []).filter((field: Record<string, unknown>) => field.status === "review");
+  assert.deepEqual(reviewFields, []);
+});
+
+test("manual multi-region layout marker does not itself force a sample review", () => {
+  const source = readFileSync("app/core/sample-segmentation-review.ts", "utf8");
+  assert.match(source, /layoutType:\s*samples\.length\s*>\s*1\s*\?\s*"mixed"\s*:\s*"single"/u);
+  assert.match(source, /requiresSegmentationReview:\s*false/u);
+  assert.match(source, /requiresReview:\s*Number\(analysis\.reviewCount\s*\?\?\s*0\)\s*>\s*0\s*\|\|\s*!Object\.keys\(fields\)\.length/u);
 });
