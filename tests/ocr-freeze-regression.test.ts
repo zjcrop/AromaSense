@@ -6,6 +6,7 @@ const packageJson = readFileSync("package.json", "utf8");
 const parsedPackage = JSON.parse(packageJson) as { dependencies?: Record<string, string> };
 const luckyBeanDependency = parsedPackage.dependencies?.["luckybean-static-app"] ?? "";
 const commonEntry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
+const fastPaddleOcrSource = readFileSync("app/vendor/recognition-paddle-ocr-fast.js", "utf8");
 const recognitionService = readFileSync("app/core/sample-recognition-service.ts", "utf8");
 const buildScript = readFileSync("scripts/build-web.mjs", "utf8");
 const runtimeHardener = readFileSync("scripts/harden-recognition-runtime.mjs", "utf8");
@@ -17,14 +18,17 @@ const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
 const P3_OFFICIAL_PRODUCER_SHA = "fc12bcf01a8366734a681d7e33694920b52e99bd";
+const FASTPATH_AUDITED_PRODUCER_SHA = "8d088f4c30772ec4d5c1316abd5c84985dba55cb";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
-test("AromaSense pins the exact immutable official LuckyBean Recognition producer", () => {
+test("AromaSense keeps the exact immutable Recognition core/runtime producer and overlays one audited Foundation fast provider", () => {
   assert.match(luckyBeanDependency, /^github:zjcrop\/luckybean#[0-9a-f]{40}$/u);
   assert.equal(luckyBeanDependency, `github:zjcrop/luckybean#${P3_OFFICIAL_PRODUCER_SHA}`);
   assert.doesNotMatch(luckyBeanDependency, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/u);
-  assert.match(commonEntry, /recognition-paddle-ocr\.js/);
+  assert.match(commonEntry, /recognition-paddle-ocr-fast\.js/);
+  assert.match(fastPaddleOcrSource, new RegExp(FASTPATH_AUDITED_PRODUCER_SHA));
+  assert.match(fastPaddleOcrSource, /const VERSION = '0\.5\.1-fastpath'/u);
   assert.match(commonEntry, /recognizeImageRegion/);
   assert.match(commonEntry, /normalizeRecognitionRegion/);
   assert.match(commonEntry, /RECOGNITION_RECORD_HYPOTHESIS_SCHEMA/);
@@ -42,6 +46,7 @@ test("AromaSense pins the exact immutable official LuckyBean Recognition produce
   assert.match(runtimeHardener, /module-worker/);
   assert.match(runtimeHardener, /webkit-direct-wasm-no-simd/);
   assert.match(runtimeHardener, /autoPreload/);
+  assert.match(runtimeHardener, /capture-session/);
   assert.match(runtimeHardener, /CoffeeFoundationOcrAssetBase/);
   assert.match(runtimeHardener, /vendor\/paddleocr/);
   assert.match(runtimeHardener, /roi-worker\.js/);
@@ -50,7 +55,7 @@ test("AromaSense pins the exact immutable official LuckyBean Recognition produce
   assert.match(runtimeHardener, /Formal LuckyBean recognition core failed runtime smoke/);
 });
 
-test("pinned Foundation handles ONNX session initialization failure without switching OCR engines", () => {
+test("pinned Foundation runtime assets handle ONNX session initialization failure without switching OCR engines", () => {
   assert.match(paddleOcrSource, /const VERSION = '0\.4\.12'/u);
   assert.match(paddleOcrSource, /function isOnnxSessionCreationFailure\(error\)/u);
   assert.match(paddleOcrSource, /Failed to create ONNX session/u);
@@ -70,12 +75,14 @@ test("recognition path never decodes or re-encodes full images on the UI thread"
   assert.match(commonEntry, /__LUCKYBEAN_ANDROID__/);
   assert.match(commonEntry, /nativeSource:\s*android/);
   assert.match(commonEntry, /native-direct/);
-  assert.match(commonEntry, /worker-bounded-full-frame/);
+  assert.match(commonEntry, /worker-full-detector-budget/);
   assert.match(commonEntry, /FULL_FRAME_REGION/);
   assert.match(commonEntry, /recognizeImageRegion\(image, FULL_FRAME_REGION/);
-  assert.match(commonEntry, /WEB_OCR_MAX_EDGE\s*=\s*1280/);
-  assert.match(commonEntry, /WEB_OCR_LOW_MEMORY_MAX_EDGE\s*=\s*960/);
-  assert.match(commonEntry, /LuckyBeanPaddleOCR\?\.lowMemory/);
+  assert.match(commonEntry, /WEB_OCR_MAX_EDGE\s*=\s*2200/);
+  assert.doesNotMatch(commonEntry, /WEB_OCR_LOW_MEMORY_MAX_EDGE/);
+  assert.doesNotMatch(commonEntry, /LuckyBeanPaddleOCR\?\.lowMemory/);
+  assert.match(fastPaddleOcrSource, /const LIMIT_SIDE = LOW_MEMORY \? 736 : 960/);
+  assert.match(fastPaddleOcrSource, /const MAX_SIDE = 2200/);
   assert.doesNotMatch(commonEntry, executableImageWork);
   assert.doesNotMatch(recognitionService, executableTesseractFallback);
   assert.doesNotMatch(recognitionService, executableImageWork);
