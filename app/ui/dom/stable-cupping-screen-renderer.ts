@@ -236,7 +236,7 @@ export class CuppingScreenRenderer {
     const top = Math.round(activeRect.top - hostRect.top + activeRect.height / 2 - height / 2);
     marker.style.top = `${top}px`;
     marker.style.left = "3px";
-    marker.style.width = `${Math.max(54, Math.round(hostRect.width + 13))}px`;
+    marker.style.width = "calc(100% + 13px)";
     marker.style.height = `${height}px`;
     marker.style.opacity = visible ? "1" : "0";
   }
