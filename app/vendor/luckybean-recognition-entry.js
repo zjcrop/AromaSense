@@ -1,8 +1,8 @@
-// AromaSense consumes LuckyBean's audited browser-safe PP-OCR implementation.
-// Chromium/Android Web use the restored SIMD module-Worker fast path; WebKit keeps
-// the bounded direct-WASM/no-SIMD compatibility mode. ROI preprocessing remains
-// Worker-only. No Tesseract or unknown OCR fallback is permitted.
-import 'luckybean-static-app/src/recognition-paddle-ocr-fast.js';
+// AromaSense consumes the audited Foundation PP-OCR fast-path snapshot below.
+// The snapshot is pinned to the producer commit recorded in recognition-paddle-ocr-fast.js;
+// the existing LuckyBean package continues to provide recognition-core and runtime assets
+// until producer CI passes and the immutable package pin is advanced.
+import './recognition-paddle-ocr-fast.js';
 
 import {
   RECOGNITION_DOCUMENT_SCHEMA,
