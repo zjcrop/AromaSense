@@ -1,9 +1,8 @@
 // AromaSense consumes LuckyBean's audited browser-safe PP-OCR implementation.
-// Chromium/Android Web use a module Worker; WebKit intentionally uses the bounded
-// direct-WASM/no-SIMD compatibility mode. ROI preprocessing remains Worker-only.
-// No generic main-thread OCR fallback, Tesseract fallback, or Canvas image-quality
-// pass is loaded here.
-import 'luckybean-static-app/src/recognition-paddle-ocr.js';
+// Chromium/Android Web use the restored SIMD module-Worker fast path; WebKit keeps
+// the bounded direct-WASM/no-SIMD compatibility mode. ROI preprocessing remains
+// Worker-only. No Tesseract or unknown OCR fallback is permitted.
+import 'luckybean-static-app/src/recognition-paddle-ocr-fast.js';
 
 import {
   RECOGNITION_DOCUMENT_SCHEMA,
@@ -37,29 +36,20 @@ import {
 } from 'luckybean-static-app/src/recognition-core.js';
 
 const FULL_FRAME_REGION = Object.freeze({ left: 0, top: 0, right: 1, bottom: 1 });
-const WEB_OCR_MAX_EDGE = 1280;
-const WEB_OCR_LOW_MEMORY_MAX_EDGE = 960;
+const WEB_OCR_MAX_EDGE = 2200;
 
 function hasAndroidNativeOcr() {
   return globalThis.__LUCKYBEAN_ANDROID__ === true &&
     typeof globalThis.LuckyBeanRecognitionBridge?.recognizeCoffeeBag === 'function';
 }
 
-function boundedWebOcrEdge() {
-  return globalThis.LuckyBeanPaddleOCR?.lowMemory === true
-    ? WEB_OCR_LOW_MEMORY_MAX_EDGE
-    : WEB_OCR_MAX_EDGE;
-}
-
 async function recognizeCoffeeBag(images, options = {}) {
   if (hasAndroidNativeOcr()) return recognizeCoffeeBagUpstream(images, options);
 
-  // Never hand an original high-resolution camera Blob straight to PaddleOCR on Web.
-  // The Foundation ROI path decodes/resizes in a dedicated Worker and returns a bounded
-  // Blob first, so PaddleOCR's internal full-frame pixel copy can only allocate pixels
-  // for <= 1280 px (<= 960 px after a remembered low-memory failure) instead of the
-  // original 12/48 MP camera frame. This also keeps expensive decode/resize off the UI
-  // thread and avoids the short click-time freeze caused by a huge pixel buffer and GC.
+  // Keep high-resolution camera decoding off the UI thread, but do not repeat the
+  // former 1280/960px precision regression. The Foundation ROI worker decodes and
+  // orientation-normalizes the frame, then bounds it to the full 2200px detector
+  // budget before the restored PP-OCRv5 fast path runs once.
   const blocks = [];
   const textGroups = [];
   let engine = '';
@@ -73,11 +63,11 @@ async function recognizeCoffeeBag(images, options = {}) {
       index: resultIndex - 1,
       total: source.length,
       status: 'processing',
-      message: `正在 Worker 中压缩第 ${resultIndex}/${source.length} 张原图后识别`
+      message: `正在 Worker 中准备第 ${resultIndex}/${source.length} 张原图后识别`
     });
     const result = await recognizeImageRegion(image, FULL_FRAME_REGION, {
       locale: options.locale,
-      maxEdge: boundedWebOcrEdge()
+      maxEdge: WEB_OCR_MAX_EDGE
     });
     results.push(result);
     engine ||= String(result?.engine || '');
@@ -95,15 +85,15 @@ async function recognizeCoffeeBag(images, options = {}) {
   }
 
   return {
-    engine: engine || 'PP-OCRv5-bounded-full-frame',
+    engine: engine || 'PP-OCRv5-worker-full-detail',
     blocks,
     fullText: textGroups.join('\n\n'),
     results,
     serial: true,
     queueConcurrency: 1,
     batch: {
-      mode: 'worker-bounded-full-frame',
-      maxEdge: boundedWebOcrEdge(),
+      mode: 'worker-full-detector-budget',
+      maxEdge: WEB_OCR_MAX_EDGE,
       imageCount: source.length
     }
   };
@@ -113,12 +103,8 @@ async function preparePackageImage(file) {
   if (!(file instanceof Blob)) throw new TypeError('需要有效的图片文件');
   const android = hasAndroidNativeOcr();
 
-  // Critical anti-freeze path:
-  // - Android: nativeSource=true makes LuckyBean's native bridge send no Base64;
-  //   the Android bridge reads the already-retained content:// URI directly.
-  // - Web: keep the original Blob opaque on the UI thread. The bounded full-frame
-  //   recognition wrapper above moves decode + resize into the Foundation ROI Worker
-  //   immediately before OCR; no UI-thread pixel decode/copy work is permitted here.
+  // Android keeps the original content:// URI contract. Web keeps the File opaque
+  // on the UI thread; decode/orientation/resize happen in the Foundation Worker.
   return {
     blob: file,
     originalName: file?.name || 'coffee-bag-image',
@@ -129,10 +115,28 @@ async function preparePackageImage(file) {
     processedHeight: 0,
     metrics: null,
     score: 100,
-    status: android ? 'native-direct' : 'worker-bounded-full-frame',
+    status: android ? 'native-direct' : 'worker-full-detector-budget',
     nativeSource: android,
     warnings: []
   };
+}
+
+async function beginOcrSession(reason = 'aromasense-add-flow') {
+  if (hasAndroidNativeOcr()) return null;
+  const provider = globalThis.LuckyBeanPaddleOCR;
+  if (typeof provider?.beginSession === 'function') return provider.beginSession(reason);
+  return provider?.warmForRecognition?.() ?? provider?.preload?.() ?? null;
+}
+async function endOcrSession(reason = 'aromasense-add-flow') {
+  if (hasAndroidNativeOcr()) return;
+  const provider = globalThis.LuckyBeanPaddleOCR;
+  if (typeof provider?.endSession === 'function') { await provider.endSession(reason); return; }
+  await provider?.dispose?.();
+}
+async function warmOcr() {
+  if (hasAndroidNativeOcr()) return null;
+  const provider = globalThis.LuckyBeanPaddleOCR;
+  return provider?.warmForRecognition?.() ?? provider?.preload?.() ?? null;
 }
 
 globalThis.LuckyBeanRecognitionCore = Object.freeze({
@@ -148,6 +152,9 @@ globalThis.LuckyBeanRecognitionCore = Object.freeze({
   recognizeImageRegion,
   normalizeRecognitionRegion,
   getRecognitionCapabilities,
+  beginOcrSession,
+  endOcrSession,
+  warmOcr,
   createRecognitionDocument,
   recognitionDocumentFromText,
   groupRecognitionRecordCandidates,
