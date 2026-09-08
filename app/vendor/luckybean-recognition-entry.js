@@ -56,10 +56,10 @@ async function recognizeCoffeeBag(images, options = {}) {
 
   // Never hand an original high-resolution camera Blob straight to PaddleOCR on Web.
   // The Foundation ROI path decodes/resizes in a dedicated Worker and returns a bounded
-  // Blob first, so PaddleOCR's internal OffscreenCanvas.getImageData() can only allocate
-  // pixels for <= 1280 px (<= 960 px after a remembered low-memory failure) instead of
-  // the original 12/48 MP camera frame. This also keeps the expensive decode/resize off
-  // the UI thread and avoids the short click-time freeze caused by a huge ImageData/GC.
+  // Blob first, so PaddleOCR's internal full-frame pixel copy can only allocate pixels
+  // for <= 1280 px (<= 960 px after a remembered low-memory failure) instead of the
+  // original 12/48 MP camera frame. This also keeps expensive decode/resize off the UI
+  // thread and avoids the short click-time freeze caused by a huge pixel buffer and GC.
   const blocks = [];
   const textGroups = [];
   let engine = '';
@@ -118,7 +118,7 @@ async function preparePackageImage(file) {
   //   the Android bridge reads the already-retained content:// URI directly.
   // - Web: keep the original Blob opaque on the UI thread. The bounded full-frame
   //   recognition wrapper above moves decode + resize into the Foundation ROI Worker
-  //   immediately before OCR; no UI-thread canvas/getImageData work is permitted here.
+  //   immediately before OCR; no UI-thread pixel decode/copy work is permitted here.
   return {
     blob: file,
     originalName: file?.name || 'coffee-bag-image',
