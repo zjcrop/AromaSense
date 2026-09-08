@@ -217,7 +217,7 @@ function installButton(actions: HTMLElement): void {
   if (actions.querySelector("[data-manual-split-photo]")) return;
   const control = document.createElement("button");
   control.type = "button";
-  control.className = "batch-setup__capture";
+  control.className = "batch-setup__capture batch-setup__home-capture-action";
   control.dataset.manualSplitPhoto = "true";
   control.textContent = "手工切分拍照";
   control.addEventListener("click", () => void captureForManualSplit().catch((error) => {
