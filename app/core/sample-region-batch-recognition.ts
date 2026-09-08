@@ -3,6 +3,8 @@ import {
   refineSegmentationRegionEvidence,
   type ROIRefinementProvenance
 } from "./sample-roi-refinement";
+import { refineSegmentationRegionEvidenceFromCrop } from "./sample-roi-crop-refinement";
+import { createReviewedRegionCropBatch } from "./reviewed-region-crop-batch";
 import {
   resegmentRecognizedPage,
   type SegmentationReviewModel
@@ -83,6 +85,12 @@ function emit(
  * never used as a fallback for an accepted region: if a crop cannot be read, the
  * batch stops and the review dialog stays open so stale evidence cannot become a
  * final sample record.
+ *
+ * On capable browsers the original photo is decoded exactly once in a dedicated
+ * Worker and all reviewed crops are materialized from that single bitmap. Each
+ * bounded crop is then sent through the same PP-OCR runtime. If batch cropping is
+ * unavailable, the established Foundation ROI path remains the compatibility
+ * fallback, still using the original File as source of truth.
  */
 export async function recognizeReviewedRegionsFromOriginal(input: {
   file: File;
@@ -100,6 +108,13 @@ export async function recognizeReviewedRegionsFromOriginal(input: {
 
   emit(input.onProgress, startedAt, "preparing", 0, total, 0.02, `准备一次原图并识别 ${total} 个分区`);
   const preparedImage = await requireLuckyBeanRecognitionCore().preparePackageImage(input.file);
+  let batchCrops: Awaited<ReturnType<typeof createReviewedRegionCropBatch>>;
+  try {
+    batchCrops = await createReviewedRegionCropBatch(input.file, input.model.regions);
+  } catch {
+    batchCrops = undefined;
+  }
+  const batchCropReady = Array.isArray(batchCrops) && batchCrops.length === total;
 
   for (let index = 0; index < total; index += 1) {
     const region = working.regions[index];
@@ -114,16 +129,26 @@ export async function recognizeReviewedRegionsFromOriginal(input: {
       index + 1,
       total,
       0.04 + completedBefore * 0.88,
-      `正在从原图识别分区 ${index + 1} / ${total}`,
+      batchCropReady
+        ? `已一次解码原图，正在识别分区 ${index + 1} / ${total}`
+        : `正在从原图识别分区 ${index + 1} / ${total}`,
       estimatedRemaining
     );
 
-    const result = await refineSegmentationRegionEvidence({
-      file: input.file,
-      preparedImage,
-      model: working,
-      regionIndex: index
-    });
+    const crop = batchCropReady ? batchCrops?.[index] : undefined;
+    const result = crop
+      ? await refineSegmentationRegionEvidenceFromCrop({
+        fileName: input.file.name,
+        cropBlob: crop.blob,
+        model: working,
+        regionIndex: index
+      })
+      : await refineSegmentationRegionEvidence({
+        file: input.file,
+        preparedImage,
+        model: working,
+        regionIndex: index
+      });
     // This assignment is the evidence invalidation boundary. The returned model
     // contains fresh ROI lines for the current region and removes its old lines.
     working = result.model;
