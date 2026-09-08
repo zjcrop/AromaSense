@@ -21,7 +21,6 @@ export interface YingxiangInvitePreview {
   event: YingxiangRemoteEvent;
   invite: {
     inviteId: string;
-    /** Legacy per-invite name; new organizer-assigned invitations leave this empty. */
     assignedName?: string;
     automaticName?: boolean;
     namePrefix?: string;
@@ -75,6 +74,12 @@ export class YingxiangClient {
   }
   async completeEvent(eventId: string): Promise<Record<string, unknown>> {
     return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/complete`, { method: "POST", body: {}, auth: true });
+  }
+  async cancelEvent(eventId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/cancel`, { method: "POST", body: {}, auth: true });
+  }
+  async deleteEvent(eventId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/yingxiang/events/${encodeURIComponent(eventId)}/delete`, { method: "POST", body: {}, auth: true });
   }
 
   async listEvents(): Promise<YingxiangRemoteEvent[]> {
@@ -146,6 +151,8 @@ function messageForYingxiangError(code: string): string {
     YINGXIANG_EVENT_NOT_FOUND: "未找到该迎香活动，或当前迎香账号没有管理权限。",
     YINGXIANG_EVENT_NOT_SHAREABLE: "当前活动尚未发布或已经结束，不能生成邀请。",
     YINGXIANG_EVENT_CONTRACT_CORRUPT: "活动数据契约损坏，已停止继续操作。",
+    YINGXIANG_EVENT_ALREADY_COMPLETED: "活动已经结束，不能再取消；已完成结果会继续保留。",
+    YINGXIANG_EVENT_DELETE_REQUIRES_CANCEL: "进行中的活动需要先取消，确认释放参与者后才能删除。",
     YINGXIANG_INVITE_NOT_FOUND: "邀请无效或不存在。",
     YINGXIANG_INVITE_REVOKED: "该邀请已被撤销。",
     YINGXIANG_INVITE_EXPIRED: "该邀请已经过期。",
