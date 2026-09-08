@@ -14,7 +14,7 @@ const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
-const P3_OFFICIAL_PRODUCER_SHA = "f35518f40f388a355c7d2adb50e9c95a2ad0d05e";
+const P3_OFFICIAL_PRODUCER_SHA = "9c4cd82c1ba3db6432ec97c250042f92b821ea3d";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
