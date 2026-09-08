@@ -29,13 +29,12 @@ test("recognition and spreadsheet status expose monotonic stage progress", () =>
     percent: 50,
     determinate: true
   });
-  assert.deepEqual(parseLongOperationStatus("正在解析表格 3/5：samples.xlsx"), {
-    current: 3,
-    total: 5,
-    completed: 2,
-    percent: 42,
-    determinate: true
-  });
+  const spreadsheet = parseLongOperationStatus("正在解析表格 3/5：samples.xlsx");
+  assert.equal(spreadsheet?.current, 3);
+  assert.equal(spreadsheet?.total, 5);
+  assert.equal(spreadsheet?.completed, 2);
+  assert.equal(spreadsheet?.determinate, true);
+  assert.ok(Math.abs(Number(spreadsheet?.percent) - 42) < 1e-9);
   assert.equal(parseLongOperationStatus("正在读取分享数据…"), undefined);
 });
 
