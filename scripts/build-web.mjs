@@ -8,6 +8,7 @@ import {
   buildCoffeeKnowledgeConsumerSubset
 } from "./coffee-knowledge-consumer-subset.mjs";
 import { FOUNDATION_RELEASE_ID, materializeCoffeeFoundation } from "./sync-coffee-foundation.mjs";
+import { fetchBuildBytes } from "./fetch-build-resource.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const androidOut = resolve(root, "mobile/android/app/src/main/assets/www");
@@ -71,27 +72,11 @@ function escapeAttribute(value) {
 }
 
 async function fetchJson(url, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
-    if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
+  return JSON.parse((await fetchBuildBytes(url, timeoutMs)).toString('utf8'));
 }
 
 async function fetchBytes(url, timeoutMs = 15000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
-    if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
-    return new Uint8Array(await response.arrayBuffer());
-  } finally {
-    clearTimeout(timer);
-  }
+  return new Uint8Array(await fetchBuildBytes(url, timeoutMs));
 }
 
 function sha256Hex(bytes) {

@@ -59,6 +59,10 @@ async function assertAsset(relativePath, minimumBytes) {
 
 async function installPagesRuntime() {
   await ensureFoundationRuntimePrepared();
+  // The producer's validator checks decoded Worker SHA/length and complete models,
+  // WASM and module dependencies. Manifest existence alone is insufficient.
+  const verifier = resolve(foundationPackage, "scripts/verify-ocr-runtime.mjs");
+  await import(pathToFileURL(verifier).href);
   await cp(foundationOcrSource, pagesOcrOut, { recursive: true, force: true });
   await Promise.all(REQUIRED_ASSETS.map(([relativePath, minimumBytes]) => assertAsset(relativePath, minimumBytes)));
 }

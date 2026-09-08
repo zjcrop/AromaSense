@@ -165,6 +165,30 @@ try {
     throw error;
   }
   console.log("AromaSense live Pages smoke: PASS", JSON.stringify(state));
+  if (process.env.AROMASENSE_VERIFY_OCR === "1") {
+    const expectedBuild = (process.env.GITHUB_SHA || "").slice(0, 16);
+    const actualBuild = await cdp.evaluate(`document.querySelector('meta[name="build-revision"]')?.content || ''`);
+    requireCondition(!expectedBuild || actualBuild === expectedBuild, `Live build mismatch: ${actualBuild} != ${expectedBuild}`);
+    const ocr = await cdp.evaluate(`(async () => {
+      const api = globalThis.LuckyBeanPaddleOCR;
+      if (api?.version !== '0.4.9') throw new Error('Expected repaired PP-OCR 0.4.9 provider');
+      const canvas = document.createElement('canvas');
+      canvas.width = 960; canvas.height = 640;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 640);
+      ctx.fillStyle = '#111'; ctx.font = 'bold 52px Arial';
+      ctx.fillText('ETHIOPIA GUJI', 70, 180);
+      ctx.fillText('WASHED 1950M', 70, 300);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      try {
+        const result = await api.recognizeCoffeeBag([{ id: 'live-ocr-check', blob }]);
+        return { text: result.fullText, blocks: result.blocks.length, version: api.version, workerBootstrap: api.workerBootstrap };
+      } finally { await api.dispose(); }
+    })()`);
+    requireCondition(/ETHIOPIA/i.test(ocr?.text) && /WASHED/i.test(ocr?.text), `Live OCR text mismatch: ${JSON.stringify(ocr)}`);
+    requireCondition(ocr.workerBootstrap === 'preloaded-blob-module', 'Live OCR must use the verified Worker');
+    console.log("AromaSense live OCR recognition: PASS", JSON.stringify({ build: actualBuild, ...ocr }));
+  }
   console.log(diagnostics(cdp).join("\n"));
 } finally {
   cdp?.close();

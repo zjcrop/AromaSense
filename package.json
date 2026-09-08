@@ -7,10 +7,10 @@
     "build": "tsc",
     "bundle:web": "node scripts/build-web.mjs && node scripts/harden-recognition-runtime.mjs && node scripts/harden-recognition-bootstrap.mjs && node scripts/verify-coffee-knowledge-output.mjs",
     "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test && node --test tests/fetch-build-resource.test.mjs"
   },
   "dependencies": {
-    "luckybean-static-app": "github:zjcrop/luckybean#4a5ff8b82ee40d76b7884a446c3a28be8b0f6980",
+    "luckybean-static-app": "github:zjcrop/luckybean#cdb23b36d796476e2477562a386eaac6987ff42f",
     "qrcode": "^1.5.4",
     "sql.js": "1.14.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

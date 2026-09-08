@@ -210,6 +210,9 @@ jobs:
       - name: Install web dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Validate product before packaging
+        run: npm run check
+
       - name: Build connected browser version
         run: npm run bundle:web
 
@@ -285,3 +288,32 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  verify-live-ocr:
+    name: Verify deployed OCR with a real JPEG
+    runs-on: ubuntu-24.04
+    needs: deploy-pages
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Wait for the exact deployed build
+        run: |
+          node --input-type=module <<'NODE'
+          const expected=process.env.GITHUB_SHA.slice(0,16);
+          let matched=false;
+          for(let attempt=0;attempt<20;attempt++) {
+            const response=await fetch(`https://zjcrop.github.io/AromaSense/?verify=${process.env.GITHUB_SHA}`,{cache:'no-store',signal:AbortSignal.timeout(15000)});
+            const html=await response.text();
+            if(response.ok && html.includes(`name="build-revision" content="${expected}"`)) { matched=true; break; }
+            await new Promise(resolve=>setTimeout(resolve,3000));
+          }
+          if(!matched) throw new Error('AromaSense Pages has not published the expected build');
+          NODE
+      - name: Recognize text through the live production Worker runtime
+        env:
+          AROMASENSE_VERIFY_OCR: '1'
+          AROMASENSE_LIVE_URL: https://zjcrop.github.io/AromaSense/?verify=${{ github.sha }}
+        run: node scripts/live-pages-smoke.mjs

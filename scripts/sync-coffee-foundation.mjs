@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import { fetchBuildBytes } from "./fetch-build-resource.mjs";
 
 export const FOUNDATION_RELEASE_ID = "coffee-foundation-1.0.4";
 export const FOUNDATION_RELEASE_URL = "https://raw.githubusercontent.com/zjcrop/BrewIon/f6b018c9ba5f0b0c3c87465275defe85a7bbafe5/foundation/releases/coffee-foundation-1.0.4.json";
@@ -16,9 +17,7 @@ async function exists(path) {
 }
 
 async function fetchBytes(url) {
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
-  return Buffer.from(await response.arrayBuffer());
+  return fetchBuildBytes(url);
 }
 
 function validateManifest(manifest) {
