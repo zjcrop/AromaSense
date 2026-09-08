@@ -130,6 +130,13 @@ function validTiming(value) {
   return Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
+async function removeChromeProfile(profile) {
+  // Chromium helper processes can briefly keep writing after the parent process exits.
+  // fs.rm retries ENOTEMPTY/EBUSY/EPERM when recursive=true, preventing a successful
+  // recognition diagnostic from being misreported as a failure during temp cleanup.
+  await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+}
+
 async function run() {
   await buildBenchmarkBundle();
   const { server, url } = await startStaticServer();
@@ -197,7 +204,7 @@ async function run() {
     chrome.kill("SIGKILL");
     await new Promise((resolveKill) => chrome.once("exit", resolveKill)).catch(() => {});
     await new Promise((resolveClose) => server.close(resolveClose));
-    await rm(profile, { recursive: true, force: true });
+    await removeChromeProfile(profile);
     await rm(benchmarkOutput, { force: true });
   }
 }
