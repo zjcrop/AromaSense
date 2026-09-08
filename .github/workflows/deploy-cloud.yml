@@ -282,6 +282,20 @@ jobs:
     runs-on: ubuntu-24.04
     needs: connected-web
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify deployed PP-OCR initialization
+        env:
+          AROMASENSE_LIVE_URL: ${{ steps.deployment.outputs.page_url }}
+          AROMASENSE_VERIFY_LIVE_OCR: '1'
+        run: node scripts/live-pages-smoke.mjs

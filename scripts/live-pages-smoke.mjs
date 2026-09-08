@@ -165,6 +165,32 @@ try {
     throw error;
   }
   console.log("AromaSense live Pages smoke: PASS", JSON.stringify(state));
+  if (process.env.AROMASENSE_VERIFY_LIVE_OCR === "1") {
+    const ocr = await cdp.evaluate(`(async () => {
+      const api = globalThis.LuckyBeanPaddleOCR;
+      if (!api || typeof api.preload !== 'function') {
+        return { ready: false, error: 'LuckyBeanPaddleOCR.preload unavailable' };
+      }
+      try {
+        const engine = await api.preload();
+        return {
+          ready: Boolean(engine),
+          version: String(api.version || ''),
+          workerBootstrap: String(api.workerBootstrap || ''),
+          runtimeBase: String(api.runtimeBase?.() || '')
+        };
+      } catch (error) {
+        return { ready: false, error: String(error?.message || error) };
+      } finally {
+        await api?.dispose?.();
+      }
+    })()`);
+    requireCondition(
+      ocr?.ready === true && ocr?.version === "0.4.9" && ocr?.workerBootstrap === "preloaded-blob-module",
+      `Live PP-OCR initialization failed: ${JSON.stringify(ocr)}`
+    );
+    console.log("AromaSense live PP-OCR initialization: PASS", JSON.stringify(ocr));
+  }
   console.log(diagnostics(cdp).join("\n"));
 } finally {
   cdp?.close();

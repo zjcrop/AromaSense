@@ -1,5 +1,6 @@
 import vm from "node:vm";
 import { cp, readFile, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -61,6 +62,15 @@ async function installPagesRuntime() {
   await ensureFoundationRuntimePrepared();
   await cp(foundationOcrSource, pagesOcrOut, { recursive: true, force: true });
   await Promise.all(REQUIRED_ASSETS.map(([relativePath, minimumBytes]) => assertAsset(relativePath, minimumBytes)));
+
+  const manifest = JSON.parse(await readFile(resolve(pagesOcrOut, "manifest.json"), "utf8"));
+  const worker = await readFile(resolve(pagesOcrOut, "worker.js"));
+  const workerBytes = Number(manifest?.workerBytes || 0);
+  const workerSha256 = String(manifest?.workerSha256 || "").toLowerCase();
+  const actualSha256 = createHash("sha256").update(worker).digest("hex");
+  if (workerBytes !== worker.byteLength || workerSha256 !== actualSha256) {
+    throw new Error(`Foundation OCR Worker integrity mismatch: manifest=${workerBytes}/${workerSha256}, actual=${worker.byteLength}/${actualSha256}`);
+  }
 }
 
 async function configurePagesRuntime() {
@@ -155,6 +165,7 @@ async function executeRecognitionCoreSmoke() {
   const paddle = context.LuckyBeanPaddleOCR;
   const safePrimaryIsolation = paddle?.primaryIsolation === "module-worker" || paddle?.primaryIsolation === "webkit-direct-wasm-no-simd";
   if (
+    paddle?.version !== "0.4.9" ||
     paddle?.browserSafe !== true ||
     paddle?.workerOnly !== false ||
     !safePrimaryIsolation ||
