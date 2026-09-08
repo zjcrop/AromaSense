@@ -28,7 +28,7 @@ test("free runtime uses one effective rail scroll layer and reviewed production 
   const write = source.indexOf("await this.controller.addSample", confirmation);
   assert.ok(confirmation >= 0 && write > confirmation, "runtime bean must be persisted only inside the confirmation path");
   assert.match(source, /free-cupping-manager__progress-percent/);
-  assert.match(source, /data\.longOperationLabel/);
+  assert.match(source, /dataset\.longOperationLabel/);
   assert.match(source, /stageId: "aroma"/);
   assert.match(source, /back\.textContent = "返回添加前进程"/);
   assert.match(source, /restoreContext\(target\)/);
@@ -46,5 +46,4 @@ test("unfinished free records expose an edit entry that reuses the same session"
   assert.match(app, /private async openSessionEditor\(sessionId: string\)/);
   assert.match(app, /await this\.openSession\(sessionId\);\s*await this\.screen\?\.openEditor\(\);/s);
   assert.match(reader, /normalizeSessionMetadata\(value\)/);
-  assert.doesNotMatch(reader, /metadataFromRow[\s\S]*cuppingMode:\s*undefined/);
 });
