@@ -35,10 +35,6 @@ async function ensureFoundationRuntimePrepared() {
   const roiWorkerPath = resolve(foundationOcrSource, "roi-worker.js");
   if (await existsFile(manifestPath) && await existsFile(roiWorkerPath)) return;
 
-  // npm 11 may deliberately suppress git-dependency lifecycle scripts unless
-  // they are explicitly approved. Do not rely on LuckyBean's postinstall for a
-  // production-critical OCR runtime: execute the pinned Foundation preparer as
-  // an explicit AromaSense build step when generated assets are absent/incomplete.
   const preparer = resolve(foundationPackage, "scripts/prepare-paddleocr-vendor.mjs");
   if (!(await existsFile(preparer))) {
     throw new Error("Pinned LuckyBean package does not contain the Foundation PP-OCR vendor preparer");
@@ -59,8 +55,6 @@ async function assertAsset(relativePath, minimumBytes) {
 
 async function installPagesRuntime() {
   await ensureFoundationRuntimePrepared();
-  // The producer's validator checks decoded Worker SHA/length and complete models,
-  // WASM and module dependencies. Manifest existence alone is insufficient.
   const verifier = resolve(foundationPackage, "scripts/verify-ocr-runtime.mjs");
   await import(pathToFileURL(verifier).href);
   await cp(foundationOcrSource, pagesOcrOut, { recursive: true, force: true });
@@ -84,6 +78,64 @@ async function configurePagesRuntime() {
   if (baseIndex < 0 || coreIndex < 0 || baseIndex > coreIndex) {
     throw new Error("Foundation OCR asset base must be configured before the formal recognition core loads");
   }
+}
+
+async function patchDelayedOnnxSessionRecovery() {
+  const corePath = resolve(pagesOut, "luckybean-recognition-core.js");
+  let source = await readFile(corePath, "utf8");
+  if (source.includes("predict-runtime-recovery-success")) {
+    console.log("Foundation already contains predict-time ONNX session recovery; downstream hotfix skipped");
+    return;
+  }
+  if (!source.includes("const VERSION = '0.4.12';")) {
+    throw new Error("Pinned Foundation changed without native predict-time ONNX recovery; refusing an unverified OCR bundle");
+  }
+
+  const oldBlock = `async function predict(images) {
+  const ocr = await ensureEngine(); const blocks = [], groups = [];
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index]; emit(\`PP-OCRv5 正在识别第 \${index + 1}/\${images.length} 张图片\`, 20 + Math.round(index / Math.max(1, images.length) * 70));
+    const diagnosticStarted = diagnosticNow();
+    const prediction = ocr.predict(image.blob, { textDetLimitSideLen:currentLimitSide(), textDetLimitType:'min', textDetMaxSideLimit:currentMaxSide(), textDetThresh:0.22, textDetBoxThresh:0.35, textDetUnclipRatio:1.55, textRecScoreThresh:0.28 });
+    const results = await withTimeout(prediction, PREDICT_TIMEOUT_MS, \`PP-OCRv5 第 \${index + 1} 张图片识别超时，已退出本次任务\`, detachEngine);`;
+
+  const newBlock = `async function predict(images) {
+  let ocr = await ensureEngine(); const blocks = [], groups = [];
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index]; emit(\`PP-OCRv5 正在识别第 \${index + 1}/\${images.length} 张图片\`, 20 + Math.round(index / Math.max(1, images.length) * 70));
+    const diagnosticStarted = diagnosticNow();
+    const predictOptions = { textDetLimitSideLen:currentLimitSide(), textDetLimitType:'min', textDetMaxSideLimit:currentMaxSide(), textDetThresh:0.22, textDetBoxThresh:0.35, textDetUnclipRatio:1.55, textRecScoreThresh:0.28 };
+    let results;
+    try {
+      const prediction = ocr.predict(image.blob, predictOptions);
+      results = await withTimeout(prediction, PREDICT_TIMEOUT_MS, \`PP-OCRv5 第 \${index + 1} 张图片识别超时，已退出本次任务\`, detachEngine);
+    } catch (predictError) {
+      const onnxFailure = isOnnxSessionCreationFailure(predictError);
+      const memoryFailure = isWasmMemoryAllocationFailure(predictError);
+      if (!onnxFailure && !memoryFailure) throw predictError;
+      recordDiagnostic('predict-runtime-recovery', diagnosticStarted, { reason:String(predictError?.message || predictError), kind:onnxFailure ? 'onnx-session' : 'wasm-memory', imageIndex:index });
+      if (onnxFailure) rememberRuntimeCompatibilityConstraint();
+      if (memoryFailure) rememberMemoryConstraint();
+      detachEngine();
+      emit(onnxFailure ? '预测阶段 ONNX session 创建失败，正在切换同一 PP-OCRv5 无 SIMD WASM 兼容模式' : '预测阶段 WASM 内存不足，正在切换同一 PP-OCRv5 低内存模式', 12);
+      await delay(80);
+      ocr = await ensureEngine();
+      const retryPrediction = ocr.predict(image.blob, predictOptions);
+      results = await withTimeout(retryPrediction, PREDICT_TIMEOUT_MS, \`PP-OCRv5 第 \${index + 1} 张图片兼容模式重试超时，已退出本次任务\`, detachEngine);
+      recordDiagnostic('predict-runtime-recovery-success', diagnosticStarted, { kind:onnxFailure ? 'onnx-session' : 'wasm-memory', imageIndex:index, mode:engineMode });
+    }`;
+
+  const occurrences = source.split(oldBlock).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(`Foundation predict-time recovery patch anchor mismatch: ${occurrences}`);
+  }
+  source = source.replace(oldBlock, newBlock);
+  await writeFile(corePath, source, "utf8");
+  const verified = await readFile(corePath, "utf8");
+  if (!verified.includes("predict-runtime-recovery-success") || !verified.includes("rememberRuntimeCompatibilityConstraint()")) {
+    throw new Error("AromaSense predict-time ONNX recovery hotfix did not materialize in the production bundle");
+  }
+  console.log("AromaSense downstream hotfix: predict-time ONNX session recovery installed for pinned Foundation 0.4.12");
 }
 
 function createRuntimeContext() {
@@ -178,9 +230,14 @@ async function executeRecognitionCoreSmoke() {
   if (actualBase !== expectedBase) {
     throw new Error(`Foundation OCR runtime base mismatch: ${actualBase} != ${expectedBase}`);
   }
+
+  if (!source.includes("predict-runtime-recovery-success") || !source.includes("rememberRuntimeCompatibilityConstraint()")) {
+    throw new Error("Production recognition core is missing predict-time ONNX session recovery");
+  }
 }
 
 await installPagesRuntime();
 await configurePagesRuntime();
+await patchDelayedOnnxSessionRecovery();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + worker-first low-memory fallback + same-origin ROI Worker assets verified");
+console.log("Foundation recognition runtime: executable core + predict-time ONNX recovery + browser-safe PP-OCR + worker-first low-memory fallback + same-origin ROI Worker assets verified");
