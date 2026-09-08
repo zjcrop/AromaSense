@@ -1,6 +1,6 @@
 import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
 import type { SampleRecord } from "../../core/sample-batch-service";
-import type { CuppingScreenController } from "../cupping-screen-controller";
+import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import type { FlavorGroupPreferenceService } from "../flavor-group-preferences";
 import { OVERLAY_KINDS, type Cleanup, type OverlayManager } from "../interaction-foundation";
 import {
@@ -20,17 +20,74 @@ const BLIND_IDENTITY_FIELDS: readonly [string, string, string][] = [
   ["flavorNotes", "风味信息", "包装或已知风味信息"]
 ];
 
+const SCROLL_MEMORY_PREFIX = "aromasense.cupping.scroll.v2:";
+
 function editableText(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return "";
 }
 
+export function cuppingContentPageKey(state: CuppingScreenState | undefined): string | undefined {
+  const active = state?.active;
+  if (!state || !active) return undefined;
+  const base = `${state.sessionId}:${active.context.sampleId}:${active.context.stageId}`;
+  if (active.context.stageId !== "final") return base;
+  const phaseValue = active.slice.observations.find((item) => item.fieldKey === "final_phase")?.value;
+  const phase = typeof phaseValue === "string" && phaseValue.trim() ? phaseValue.trim() : "flavor";
+  return `${base}:${phase}`;
+}
+
+function installCuppingNavigationStyles(): void {
+  if (document.head.querySelector("style[data-aromasense-cupping-navigation]") ) return;
+  const style = document.createElement("style");
+  style.dataset.aromasenseCuppingNavigation = "true";
+  style.textContent = `
+    .cupping-layout__rail-list{
+      min-height:0!important;
+      overflow-y:auto!important;
+      overflow-x:hidden!important;
+      overscroll-behavior-y:contain;
+      touch-action:pan-y;
+      -webkit-overflow-scrolling:touch;
+      scrollbar-width:thin;
+      scrollbar-gutter:stable;
+    }
+    .sample-rail__active-tab{display:none!important}
+    .sample-rail__item.is-active::before{
+      content:"";
+      position:absolute;
+      z-index:1;
+      left:-6px;
+      right:-4px;
+      top:1px;
+      bottom:1px;
+      border:1px solid rgba(214,173,99,.34);
+      border-left:0;
+      border-radius:0 999px 999px 0;
+      background:linear-gradient(90deg,rgba(104,78,39,.96),rgba(128,95,45,.96));
+      box-shadow:0 4px 14px rgba(0,0,0,.24),inset -1px 0 0 rgba(255,255,255,.08);
+      pointer-events:none;
+    }
+    .sample-rail__item.is-active .sample-rail__select,
+    .sample-rail__item.is-active .sample-rail__actions{position:relative;z-index:3}
+    @media(prefers-reduced-motion:no-preference){
+      .cupping-layout__rail-list{scroll-behavior:smooth}
+    }
+  `;
+  document.head.append(style);
+}
+
 /**
- * Keeps the cupping editor at the user's current vertical position while the
- * base renderer replaces DOM after local persistence. The user can still
- * scroll deliberately inside the editor; renderer/focus-induced page jumps
- * are cancelled and the outer document remains fixed to the viewport.
+ * Keeps each cupping content page at its own vertical position. A page is keyed
+ * by session + sample + stage (and final-assessment sub-phase). First entry is
+ * always the top; deliberate user scrolling is restored whenever that exact
+ * page is visited again. DOM refreshes caused by local persistence do not move
+ * the current viewport.
+ *
+ * The left sample rail uses one native scroll layer. The active background now
+ * belongs to the active card itself, so sample number, identity/progress copy
+ * and current marker cannot drift relative to each other while scrolling.
  *
  * Blind/semi-blind identity editing is deliberately attached here rather than
  * to sensory observations: identity metadata is persisted on the sample row
@@ -41,7 +98,9 @@ export class CuppingScreenRenderer {
   private editor?: HTMLElement;
   private observer?: MutationObserver;
   private blindOverlayCleanup?: Cleanup;
-  private lastScrollTop = 0;
+  private readonly scrollMemory = new Map<string, number>();
+  private currentPageKey?: string;
+  private scrollSessionId?: string;
   private lockedScrollTop?: number;
   private suppressScrollCapture = false;
   private releaseTimer?: ReturnType<typeof setTimeout>;
@@ -52,6 +111,7 @@ export class CuppingScreenRenderer {
 
   private readonly captureInteractionPosition = (): void => {
     if (!this.editor) return;
+    this.rememberCurrentScroll();
     this.lockedScrollTop = this.editor.scrollTop;
     if (this.releaseTimer) clearTimeout(this.releaseTimer);
     this.releaseTimer = setTimeout(() => { this.lockedScrollTop = undefined; }, 3000);
@@ -59,7 +119,10 @@ export class CuppingScreenRenderer {
 
   private readonly captureUserScroll = (): void => {
     if (!this.editor || this.suppressScrollCapture || this.lockedScrollTop !== undefined) return;
-    this.lastScrollTop = this.editor.scrollTop;
+    const key = this.currentPageKey ?? cuppingContentPageKey(this.controller.current());
+    if (!key) return;
+    this.currentPageKey = key;
+    this.scrollMemory.set(key, Math.max(0, this.editor.scrollTop));
   };
 
   private readonly handleBlindStatusClick = (event: Event): void => {
@@ -85,16 +148,21 @@ export class CuppingScreenRenderer {
     private readonly options: CuppingScreenRendererOptions,
     private readonly overlayManager?: OverlayManager
   ) {
+    installCuppingNavigationStyles();
     this.base = new BaseCuppingScreenRenderer(root, controller, flavorService, summaryReader, options);
   }
 
   async initialize(sessionId: string): Promise<void> {
     await this.base.initialize(sessionId);
+    this.scrollSessionId = sessionId;
+    this.loadScrollMemory(sessionId);
     this.installViewportStability();
     this.enhanceBlindStatus();
   }
 
   dispose(): void {
+    this.rememberCurrentScroll();
+    this.persistScrollMemory();
     this.observer?.disconnect();
     this.observer = undefined;
     this.blindOverlayCleanup?.();
@@ -117,11 +185,48 @@ export class CuppingScreenRenderer {
     this.base.dispose();
   }
 
+  private storageKey(sessionId: string): string {
+    return `${SCROLL_MEMORY_PREFIX}${sessionId}`;
+  }
+
+  private loadScrollMemory(sessionId: string): void {
+    this.scrollMemory.clear();
+    try {
+      const raw = sessionStorage.getItem(this.storageKey(sessionId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(parsed)) {
+        const position = Number(value);
+        if (Number.isFinite(position) && position >= 0) this.scrollMemory.set(key, position);
+      }
+    } catch {
+      // Session storage is an enhancement only; in-memory behavior remains valid.
+    }
+  }
+
+  private persistScrollMemory(): void {
+    const sessionId = this.scrollSessionId ?? this.controller.current()?.sessionId;
+    if (!sessionId) return;
+    try {
+      sessionStorage.setItem(this.storageKey(sessionId), JSON.stringify(Object.fromEntries(this.scrollMemory)));
+    } catch {
+      // Ignore quota/privacy-mode failures; never block cupping edits.
+    }
+  }
+
+  private rememberCurrentScroll(): void {
+    if (!this.editor) return;
+    const key = this.currentPageKey ?? cuppingContentPageKey(this.controller.current());
+    if (!key) return;
+    this.currentPageKey = key;
+    this.scrollMemory.set(key, Math.max(0, this.editor.scrollTop));
+  }
+
   private installViewportStability(): void {
     const editor = this.root.querySelector<HTMLElement>(".cupping-main__editor");
     if (!editor) return;
     this.editor = editor;
-    this.lastScrollTop = editor.scrollTop;
+    this.currentPageKey = cuppingContentPageKey(this.controller.current());
 
     this.previousHtmlOverflow = document.documentElement.style.overflow;
     this.previousBodyOverflow = document.body.style.overflow;
@@ -134,6 +239,9 @@ export class CuppingScreenRenderer {
     editor.style.overflowAnchor = "none";
     editor.style.scrollBehavior = "auto";
     editor.style.overscrollBehavior = "contain";
+
+    const initial = this.currentPageKey ? (this.scrollMemory.get(this.currentPageKey) ?? 0) : 0;
+    editor.scrollTop = initial;
 
     editor.addEventListener("scroll", this.captureUserScroll, { passive: true });
     this.root.addEventListener("pointerdown", this.captureInteractionPosition, true);
@@ -352,7 +460,23 @@ export class CuppingScreenRenderer {
   private restoreViewportPosition(): void {
     const editor = this.editor;
     if (!editor) return;
-    const target = this.lockedScrollTop ?? this.lastScrollTop;
+
+    const nextPageKey = cuppingContentPageKey(this.controller.current());
+    const pageChanged = nextPageKey !== this.currentPageKey;
+    let target = 0;
+
+    if (pageChanged) {
+      if (this.currentPageKey) this.scrollMemory.set(this.currentPageKey, Math.max(0, this.lockedScrollTop ?? editor.scrollTop));
+      this.currentPageKey = nextPageKey;
+      this.lockedScrollTop = undefined;
+      target = nextPageKey ? (this.scrollMemory.get(nextPageKey) ?? 0) : 0;
+      this.persistScrollMemory();
+    } else if (nextPageKey) {
+      target = this.lockedScrollTop ?? this.scrollMemory.get(nextPageKey) ?? editor.scrollTop;
+    } else {
+      target = 0;
+    }
+
     this.suppressScrollCapture = true;
     editor.scrollTop = target;
 
@@ -362,7 +486,7 @@ export class CuppingScreenRenderer {
       requestAnimationFrame(() => {
         if (!this.editor) return;
         this.editor.scrollTop = target;
-        this.lastScrollTop = target;
+        if (this.currentPageKey) this.scrollMemory.set(this.currentPageKey, target);
         this.lockedScrollTop = undefined;
         this.suppressScrollCapture = false;
       });
