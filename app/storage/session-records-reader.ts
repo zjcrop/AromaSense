@@ -1,7 +1,6 @@
 import { STAGE_IDS } from "../../shared/protocol/aromasense-v1";
 import { fieldsForStage } from "../core/sensory-dictionary-v1";
-import type { CuppingSessionMetadata } from "../core/session-metadata";
-import { sessionDisplayName } from "../core/session-metadata";
+import { normalizeSessionMetadata, sessionDisplayName, type CuppingSessionMetadata } from "../core/session-metadata";
 import type { SessionStatus } from "../core/session-lifecycle";
 import type { SQLiteDriver } from "./local-cupping-repository";
 
@@ -41,19 +40,17 @@ interface RecordRow {
 const FINAL_EXTRA_FIELD_COUNT = 6 + 8 + 3 + 1 + 1 + 1;
 const EXPECTED_FIELDS_PER_SAMPLE = STAGE_IDS.reduce((sum, stage) => sum + fieldsForStage(stage).length, 0) + FINAL_EXTRA_FIELD_COUNT;
 
+function legacyMetadata(createdAt: string): CuppingSessionMetadata {
+  const date = new Date(createdAt);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString();
+  return { date: local.slice(0, 10), time: local.slice(11, 16), organizer: "历史记录" };
+}
+
 function metadataFromRow(row: RecordRow): CuppingSessionMetadata {
   try {
     const value = JSON.parse(row.metadata_json || "{}") as Partial<CuppingSessionMetadata>;
-    if (value.date && value.time && value.organizer) return {
-      date: String(value.date), time: String(value.time), organizer: String(value.organizer),
-      participants: value.participants ? String(value.participants) : undefined,
-      target: value.target ? String(value.target) : undefined,
-      eventName: value.eventName ? String(value.eventName) : undefined
-    };
-  } catch { /* legacy fallback below */ }
-  const date = new Date(row.created_at);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString();
-  return { date: local.slice(0, 10), time: local.slice(11, 16), organizer: "历史记录" };
+    return normalizeSessionMetadata(value);
+  } catch { return legacyMetadata(row.created_at); }
 }
 
 export class SessionRecordsReader {
