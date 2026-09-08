@@ -37,6 +37,7 @@ import {
 
 const FULL_FRAME_REGION = Object.freeze({ left: 0, top: 0, right: 1, bottom: 1 });
 const WEB_OCR_MAX_EDGE = 2200;
+let ocrSessionOwned = false;
 
 function hasAndroidNativeOcr() {
   return globalThis.__LUCKYBEAN_ANDROID__ === true &&
@@ -46,10 +47,6 @@ function hasAndroidNativeOcr() {
 async function recognizeCoffeeBag(images, options = {}) {
   if (hasAndroidNativeOcr()) return recognizeCoffeeBagUpstream(images, options);
 
-  // Keep high-resolution camera decoding off the UI thread, but do not repeat the
-  // former 1280/960px precision regression. The Foundation ROI worker decodes and
-  // orientation-normalizes the frame, then bounds it to the full 2200px detector
-  // budget before the restored PP-OCRv5 fast path runs once.
   const blocks = [];
   const textGroups = [];
   let engine = '';
@@ -102,9 +99,6 @@ async function recognizeCoffeeBag(images, options = {}) {
 async function preparePackageImage(file) {
   if (!(file instanceof Blob)) throw new TypeError('需要有效的图片文件');
   const android = hasAndroidNativeOcr();
-
-  // Android keeps the original content:// URI contract. Web keeps the File opaque
-  // on the UI thread; decode/orientation/resize happen in the Foundation Worker.
   return {
     blob: file,
     originalName: file?.name || 'coffee-bag-image',
@@ -124,11 +118,19 @@ async function preparePackageImage(file) {
 async function beginOcrSession(reason = 'aromasense-add-flow') {
   if (hasAndroidNativeOcr()) return null;
   const provider = globalThis.LuckyBeanPaddleOCR;
-  if (typeof provider?.beginSession === 'function') return provider.beginSession(reason);
-  return provider?.warmForRecognition?.() ?? provider?.preload?.() ?? null;
+  if (ocrSessionOwned) return provider?.warmForRecognition?.() ?? provider?.preload?.() ?? null;
+  ocrSessionOwned = true;
+  try {
+    if (typeof provider?.beginSession === 'function') return await provider.beginSession(reason);
+    return await (provider?.warmForRecognition?.() ?? provider?.preload?.() ?? null);
+  } catch (error) {
+    ocrSessionOwned = false;
+    throw error;
+  }
 }
 async function endOcrSession(reason = 'aromasense-add-flow') {
-  if (hasAndroidNativeOcr()) return;
+  if (hasAndroidNativeOcr() || !ocrSessionOwned) return;
+  ocrSessionOwned = false;
   const provider = globalThis.LuckyBeanPaddleOCR;
   if (typeof provider?.endSession === 'function') { await provider.endSession(reason); return; }
   await provider?.dispose?.();
