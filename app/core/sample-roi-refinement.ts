@@ -14,6 +14,7 @@ import type {
 import type { RecognizedPage, RecognizedSample } from "./sample-recognition-service";
 
 export const ROI_RECOGNITION_PROTOCOL = "recognition-roi/1.0" as const;
+export const REVIEWED_REGION_MAX_EDGE = 1024;
 
 export interface ROIRefinementProvenance {
   protocol: typeof ROI_RECOGNITION_PROTOCOL;
@@ -252,7 +253,7 @@ export async function refineSegmentationRegionEvidence(input: {
     blob: prepared.blob,
     nativeSource: Boolean(prepared.nativeSource),
     fileName: input.file.name
-  }, normalizedRegion, { locale: "zh-CN", maxEdge: 1280 });
+  }, normalizedRegion, { locale: "zh-CN", maxEdge: REVIEWED_REGION_MAX_EDGE });
   if (result.regionProtocol && result.regionProtocol !== ROI_RECOGNITION_PROTOCOL) {
     throw new Error(`ROI 识别协议不兼容：${result.regionProtocol}`);
   }
