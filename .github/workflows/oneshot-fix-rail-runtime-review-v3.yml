@@ -1,0 +1,38 @@
+name: One-shot rail and runtime review repair v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/oneshot_fix_rail_runtime_review.py'
+      - '.github/workflows/oneshot-fix-rail-runtime-review-v3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Apply guarded product repair
+        run: python scripts/oneshot_fix_rail_runtime_review.py
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run typecheck and full tests
+        run: npm run check
+      - name: Commit repaired product
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'zjcrop'
+          git config user.email '127176814+zjcrop@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(cupping): float rail marker and persist OCR review drafts'
+          git push origin HEAD:main
