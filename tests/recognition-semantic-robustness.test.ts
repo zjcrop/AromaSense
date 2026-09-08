@@ -13,7 +13,7 @@ const USER_REPORTED_OCR = [
   "薇拉省"
 ].join("\n");
 
-test("user-reported high-quality OCR is structurally recovered without forcing field review", async () => {
+test("user-reported OCR is normalized before field recognition while preserving raw evidence", async () => {
   const core = await dynamicImport("luckybean-static-app/src/recognition-core.js");
   const book = JSON.parse(readFileSync("node_modules/luckybean-static-app/public/fallback-codebook.json", "utf8"));
   const document = core.createRecognitionDocument({
@@ -23,14 +23,33 @@ test("user-reported high-quality OCR is structurally recovered without forcing f
     fullText: USER_REPORTED_OCR
   });
   const analysis = core.analyzeRecognitionDocument(document, book);
+  const recognition = analysis.parsed?.parseMetadata?.recognition ?? {};
+  const preSemantic = analysis.parsed?.parseMetadata?.preSemanticNormalization ?? {};
 
-  assert.match(analysis.semanticText, /国家: 哥倫比亞 \/ 哥伦比亚/u);
+  assert.equal(analysis.pipelineVersion, "1.24P-recognition-pipeline.7");
+  assert.equal(recognition.rawSemanticText, USER_REPORTED_OCR, "raw OCR text must remain untouched by translation/normalization");
+  assert.equal(preSemantic.authority, "shadow-only");
+  assert.equal(preSemantic.mayOverwriteRawEvidence, false);
+  assert.match(String(preSemantic.normalizedText ?? ""), /国家: 哥伦比亚/u);
+  assert.match(String(preSemantic.normalizedText ?? ""), /烘焙度: 中烘/u);
+  assert.match(String(preSemantic.normalizedText ?? ""), /庄园: 展望庄园/u);
+  assert.match(String(preSemantic.normalizedText ?? ""), /处理法: 水洗/u);
+  assert.match(String(preSemantic.normalizedText ?? ""), /风味: 榛果、陈皮、红糖/u);
+  assert.match(String(preSemantic.normalizedText ?? ""), /产区: 薇拉省/u);
+  assert.match(String(preSemantic.normalizedText ?? ""), /(?:^|\n)酸度1(?:\n|$)/u);
+  assert.ok(Array.isArray(preSemantic.audit) && preSemantic.audit.length >= 5);
+  assert.ok(preSemantic.audit.some((item: Record<string, any>) =>
+    item.rawText === "薇拉省" && Array.isArray(item.candidates) && item.candidates.some((candidate: Record<string, any>) =>
+      String(candidate.rule ?? "").includes("transliteration") && (candidate.aliases ?? []).includes("Huila")
+    )
+  ));
+
+  assert.match(analysis.semanticText, /国家: 哥伦比亚/u);
   assert.match(analysis.semanticText, /烘焙度: 中烘/u);
   assert.match(analysis.semanticText, /庄园: 展望庄园/u);
   assert.match(analysis.semanticText, /处理法: 水洗/u);
   assert.match(analysis.semanticText, /风味: 榛果、陈皮、红糖/u);
   assert.match(analysis.semanticText, /产区: 薇拉省/u);
-  assert.match(analysis.semanticText, /(?:^|\n)酸度1(?:\n|$)/u);
 
   assert.equal(analysis.parsed.countryCode, "CO-CO");
   assert.equal(analysis.parsed.processCode, "PR-WA");
