@@ -15,7 +15,7 @@ const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
-const P3_OFFICIAL_PRODUCER_SHA = "c67e5ef3b45089ea67837f4bae273f3dcebef60e";
+const P3_OFFICIAL_PRODUCER_SHA = "6e4feef64cd8a4da7bd692f42f2f3f9749fe1c14";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
@@ -71,14 +71,16 @@ test("recognition path never decodes or re-encodes full images on the UI thread"
   assert.doesNotMatch(preview, executableImageWork);
 });
 
-test("full-frame camera photos are bounded during Worker decode before PaddleOCR pixel allocation", () => {
+test("camera photos and arbitrary ROI crops are bounded during Worker decode before PaddleOCR pixel allocation", () => {
   assert.match(roiWorkerSource, /HEADER_PROBE_BYTES/);
-  assert.match(roiWorkerSource, /isFullFrame\(region\)/);
+  assert.match(roiWorkerSource, /ROI_DECODE_MAX_EDGE\s*=\s*3000/);
+  assert.match(roiWorkerSource, /roiDecodeEdge\(region, requestedMaxEdge\)/);
   assert.match(roiWorkerSource, /encodedDimensions\(blob\)/);
   assert.match(roiWorkerSource, /resizeWidth:\s*target\.width/);
   assert.match(roiWorkerSource, /resizeHeight:\s*target\.height/);
   assert.match(roiWorkerSource, /resizeQuality:\s*'high'/);
   assert.match(roiWorkerSource, /decodePreScaled:\s*true/);
+  assert.match(roiWorkerSource, /decodeMaxEdge/);
   assert.doesNotMatch(roiWorkerSource, /getImageData\s*\(/);
 });
 
