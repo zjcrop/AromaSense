@@ -1,4 +1,5 @@
 import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
+import { SampleRecognitionService } from "../../core/sample-recognition-service";
 import {
   cuppingModeFromMetadata,
   cuppingModePolicy
@@ -10,6 +11,7 @@ import {
   CuppingScreenRenderer as StableBaseCuppingScreenRenderer
 } from "./stable-cupping-screen-renderer-base";
 import type { CuppingScreenRendererOptions } from "./cupping-screen-renderer";
+import { SegmentationReviewRecognitionService } from "./segmentation-review-recognizer";
 
 const EDITABLE_SAMPLE_FIELDS: readonly [string, string, string][] = [
   ["country", "国家", "国家"],
@@ -29,11 +31,27 @@ interface RuntimeTimerInternals {
 interface StableBaseInternals {
   base: RuntimeTimerInternals;
 }
+interface ResumeContext {
+  sampleId: string;
+  stageId: string;
+  finalPhase?: string;
+}
+interface ManagerMessage {
+  text: string;
+  error?: boolean;
+}
 
 function textValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return "";
+}
+
+function activeFinalPhase(controller: CuppingScreenController): string | undefined {
+  const active = controller.current()?.active;
+  if (active?.context.stageId !== "final") return undefined;
+  const value = active.slice.observations.find((item) => item.fieldKey === "final_phase")?.value;
+  return typeof value === "string" && value.trim() ? value.trim() : "flavor";
 }
 
 function installFreeCuppingStyles(): void {
@@ -54,6 +72,7 @@ function installFreeCuppingStyles(): void {
     .free-cupping-manager__field span{color:#8f8880;font-size:9px}.free-cupping-manager__field input{width:100%;box-sizing:border-box;padding:6px 0;border:0;border-bottom:1px solid rgba(255,255,255,.08);background:transparent;color:#e9e5de;font:inherit;font-size:12px;outline:none}
     .free-cupping-manager__actions{display:flex;justify-content:flex-end;gap:14px;margin-top:11px}.free-cupping-manager__save,.free-cupping-manager__delete{border:0;background:transparent;font:inherit;font-size:11px;font-weight:750;cursor:pointer}.free-cupping-manager__save{color:#d6ad63}.free-cupping-manager__delete{color:#c9867f}
     .free-cupping-manager button:disabled,.free-cupping-manager input:disabled{opacity:.42;cursor:not-allowed}.free-cupping-manager__status{min-height:18px;margin:8px 0 0;color:#989188;font-size:10px}.free-cupping-manager__status.is-error{color:#d9867e}
+    .free-cupping-manager__capture-input{display:none!important}
     @media(max-width:620px){.free-cupping-manager{padding:8px}.free-cupping-manager__panel{max-height:94dvh;padding:15px 13px}.free-cupping-manager__grid{grid-template-columns:1fr}.free-cupping-manager__field--wide{grid-column:auto}}
   `;
   document.head.append(style);
@@ -69,6 +88,9 @@ export class CuppingScreenRenderer {
   private base: StableBaseCuppingScreenRenderer;
   private observer?: MutationObserver;
   private managerOverlay?: HTMLElement;
+  private resumeContext?: ResumeContext;
+  private managerMessage?: ManagerMessage;
+  private readonly runtimeRecognizer: SegmentationReviewRecognitionService;
 
   constructor(
     private readonly root: HTMLElement,
@@ -79,6 +101,7 @@ export class CuppingScreenRenderer {
     private readonly overlayManager?: OverlayManager
   ) {
     installFreeCuppingStyles();
+    this.runtimeRecognizer = new SegmentationReviewRecognitionService(new SampleRecognitionService(), root);
     this.base = this.createBase();
   }
 
@@ -150,9 +173,73 @@ export class CuppingScreenRenderer {
     manage.className = "cupping-rail-tools__sample-manager";
     manage.dataset.runtimeSampleManager = "true";
     manage.textContent = "豆子管理";
-    manage.title = "暂停当前编辑，添加、删除或修改本次自由杯测的豆子";
+    manage.title = "保存当前页面状态后，识别添加、删除或修改本次自由杯测的豆子";
     manage.addEventListener("click", () => void this.openManager());
     tools.append(manage);
+  }
+
+  private captureResumeContext(): void {
+    const active = this.controller.current()?.active;
+    if (!active) {
+      this.resumeContext = undefined;
+      return;
+    }
+    this.resumeContext = {
+      sampleId: active.context.sampleId,
+      stageId: active.context.stageId,
+      ...(active.context.stageId === "final" ? { finalPhase: activeFinalPhase(this.controller) } : {})
+    };
+  }
+
+  private async nextFrame(): Promise<void> {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  private async waitFor(predicate: () => boolean, frames = 45): Promise<boolean> {
+    for (let index = 0; index < frames; index += 1) {
+      if (predicate()) return true;
+      await this.nextFrame();
+    }
+    return predicate();
+  }
+
+  private sampleSelectButton(sampleId: string): HTMLButtonElement | undefined {
+    const cards = [...this.root.querySelectorAll<HTMLElement>(".sample-rail__item")];
+    return cards.find((card) => card.dataset.sampleId === sampleId)?.querySelector<HTMLButtonElement>(".sample-rail__select") ?? undefined;
+  }
+
+  private stageButton(context: ResumeContext): HTMLButtonElement | undefined {
+    const buttons = [...this.root.querySelectorAll<HTMLButtonElement>(".cupping-stage-step")];
+    if (context.stageId === "final" && context.finalPhase) {
+      return buttons.find((item) => item.dataset.stageId === "final" && item.dataset.finalPhase === context.finalPhase);
+    }
+    return buttons.find((item) => item.dataset.stageId === context.stageId);
+  }
+
+  private resumeSatisfied(context: ResumeContext): boolean {
+    const active = this.controller.current()?.active;
+    if (!active || active.context.sampleId !== context.sampleId || active.context.stageId !== context.stageId) return false;
+    return context.stageId !== "final" || !context.finalPhase || activeFinalPhase(this.controller) === context.finalPhase;
+  }
+
+  private async restoreResumeContext(): Promise<void> {
+    const context = this.resumeContext;
+    if (!context) return;
+    const state = this.controller.current();
+    if (!state?.samples.some((sample) => sample.sampleId === context.sampleId)) {
+      this.resumeContext = undefined;
+      return;
+    }
+
+    const select = this.sampleSelectButton(context.sampleId);
+    select?.click();
+    await this.waitFor(() => this.controller.current()?.active?.context.sampleId === context.sampleId);
+    await this.waitFor(() => Boolean(this.stageButton(context)) || this.resumeSatisfied(context));
+
+    if (!this.resumeSatisfied(context)) {
+      this.stageButton(context)?.click();
+      await this.waitFor(() => this.resumeSatisfied(context));
+    }
   }
 
   private async reloadBase(): Promise<void> {
@@ -165,13 +252,15 @@ export class CuppingScreenRenderer {
     await this.base.initialize(state.sessionId);
     this.installObserver();
     this.applyModeRuntime();
+    await this.restoreResumeContext();
   }
 
   private async openManager(): Promise<void> {
     const state = this.controller.current();
     if (!state || cuppingModeFromMetadata(state.sessionMetadata) !== "free") return;
     try {
-      await this.controller.pauseEditing();
+      this.captureResumeContext();
+      await this.controller.leaveSession();
       this.renderManager();
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
@@ -188,6 +277,43 @@ export class CuppingScreenRenderer {
     this.managerOverlay?.remove();
     this.managerOverlay = undefined;
     this.renderManager();
+  }
+
+  private async recognizeAndAddPhoto(file: File, overlay: HTMLElement, add: HTMLButtonElement, status: HTMLElement): Promise<void> {
+    add.disabled = true;
+    status.textContent = `正在识别 ${file.name || "照片"}…`;
+    status.classList.remove("is-error");
+    overlay.hidden = true;
+    try {
+      const page = await this.runtimeRecognizer.recognizePage(file, 0);
+      if (!page.samples.length) throw new Error("照片中没有得到可添加的样品");
+      for (const sample of page.samples) {
+        const recognition = sample.metadata.recognition && typeof sample.metadata.recognition === "object"
+          ? sample.metadata.recognition as Record<string, unknown>
+          : {};
+        await this.controller.addSample(crypto.randomUUID(), {
+          label: sample.label,
+          metadata: {
+            ...sample.metadata,
+            recognition: {
+              ...recognition,
+              runtimeRosterAddition: true,
+              runtimeRequiresReview: sample.requiresReview || page.requiresSegmentationReview,
+              runtimeAddedAt: this.options.now()
+            }
+          }
+        }, this.options.now());
+      }
+      this.managerMessage = {
+        text: `已通过拍照识别加入 ${page.samples.length} 个豆子${page.samples.some((item) => item.requiresReview) ? "；存在待核对字段，请在下方检查后保存" : ""}`
+      };
+      this.rebuildManager();
+    } catch (error) {
+      overlay.hidden = false;
+      add.disabled = false;
+      status.textContent = `识别添加失败：${error instanceof Error ? error.message : String(error)}`;
+      status.classList.add("is-error");
+    }
   }
 
   private renderManager(): void {
@@ -210,7 +336,7 @@ export class CuppingScreenRenderer {
     title.textContent = "自由杯测 · 豆子管理";
     const note = document.createElement("p");
     note.className = "free-cupping-manager__note";
-    note.textContent = "当前感官编辑已暂停并落盘。可新增、删除未锁定样品，或修改豆名与基础信息；关闭后从左侧样品继续杯测。";
+    note.textContent = "当前杯测内容已落盘。新增豆子会进入与首页一致的 PP-OCRv5 拍照识别/多条目分割流程；关闭后自动回到进入管理前的样品与流程页。";
     titles.append(title, note);
     const close = document.createElement("button");
     close.type = "button";
@@ -220,20 +346,29 @@ export class CuppingScreenRenderer {
     close.addEventListener("click", () => void this.closeManager());
     head.append(titles, close);
 
+    const status = document.createElement("div");
+    status.className = "free-cupping-manager__status";
+    if (this.managerMessage) {
+      status.textContent = this.managerMessage.text;
+      status.classList.toggle("is-error", Boolean(this.managerMessage.error));
+      this.managerMessage = undefined;
+    }
+
+    const captureInput = document.createElement("input");
+    captureInput.type = "file";
+    captureInput.accept = "image/*";
+    captureInput.setAttribute("capture", "environment");
+    captureInput.className = "free-cupping-manager__capture-input";
+
     const add = document.createElement("button");
     add.type = "button";
     add.className = "free-cupping-manager__add";
-    add.textContent = "+ 添加豆子";
-    add.addEventListener("click", async () => {
-      add.disabled = true;
-      try {
-        await this.controller.addSample(crypto.randomUUID(), { metadata: {} }, this.options.now());
-        this.rebuildManager();
-      } catch (error) {
-        add.disabled = false;
-        status.textContent = error instanceof Error ? error.message : String(error);
-        status.classList.add("is-error");
-      }
+    add.textContent = "+ 拍照识别添加豆子";
+    add.addEventListener("click", () => captureInput.click());
+    captureInput.addEventListener("change", () => {
+      const file = captureInput.files?.[0];
+      captureInput.value = "";
+      if (file) void this.recognizeAndAddPhoto(file, overlay, add, status);
     });
 
     const list = document.createElement("div");
@@ -316,9 +451,7 @@ export class CuppingScreenRenderer {
       list.append(card);
     }
 
-    const status = document.createElement("div");
-    status.className = "free-cupping-manager__status";
-    panel.append(head, add, list, status);
+    panel.append(head, add, captureInput, list, status);
     overlay.append(panel);
     overlay.addEventListener("click", (event) => { if (event.target === overlay) void this.closeManager(); });
     this.managerOverlay = overlay;
