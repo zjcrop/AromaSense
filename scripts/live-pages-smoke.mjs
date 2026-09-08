@@ -118,24 +118,41 @@ try {
     requireCondition(!expectedBuild || actualBuild === expectedBuild, `Live build mismatch: ${actualBuild} != ${expectedBuild}`);
     const ocr = await cdp.evaluate(`(async () => {
       const api = globalThis.LuckyBeanPaddleOCR;
+      const core = globalThis.LuckyBeanRecognitionCore;
       if (api?.version !== '0.4.10') throw new Error('Expected worker-first low-memory PP-OCR 0.4.10 provider');
+      if (typeof core?.recognizeCoffeeBag !== 'function') throw new Error('Expected AromaSense bounded recognition core');
+
+      // 4032 x 3024 is a common 12 MP phone-camera frame. The production path must
+      // reduce this encoded JPEG in the ROI Worker before PaddleOCR allocates pixels.
       const canvas = document.createElement('canvas');
-      canvas.width = 960; canvas.height = 640;
+      canvas.width = 4032; canvas.height = 3024;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 640);
-      ctx.fillStyle = '#111'; ctx.font = 'bold 52px Arial';
-      ctx.fillText('ETHIOPIA GUJI', 70, 180);
-      ctx.fillText('WASHED 1950M', 70, 300);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#111'; ctx.font = 'bold 230px Arial';
+      ctx.fillText('ETHIOPIA GUJI', 260, 900);
+      ctx.fillText('WASHED 1950M', 260, 1450);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      canvas.width = 1; canvas.height = 1;
       try {
-        const result = await api.recognizeCoffeeBag([{ id: 'live-ocr-check', blob }]);
-        return { text: result.fullText, blocks: result.blocks.length, version: api.version, workerBootstrap: api.workerBootstrap, memoryFallback: api.memoryFallback };
+        const result = await core.recognizeCoffeeBag([{ id: 'live-high-res-ocr-check', role: 'front', blob }], { locale: 'zh-CN' });
+        return {
+          text: result.fullText,
+          blocks: result.blocks.length,
+          version: api.version,
+          workerBootstrap: api.workerBootstrap,
+          memoryFallback: api.memoryFallback,
+          batchMode: result.batch?.mode || '',
+          maxEdge: result.batch?.maxEdge || 0,
+          inputBytes: blob.size
+        };
       } finally { await api.dispose(); }
     })()`);
     requireCondition(/ETHIOPIA/i.test(ocr?.text) && /WASHED/i.test(ocr?.text), `Live OCR text mismatch: ${JSON.stringify(ocr)}`);
+    requireCondition(ocr.batchMode === 'worker-bounded-full-frame', `Live OCR did not use bounded full-frame preprocessing: ${JSON.stringify(ocr)}`);
+    requireCondition(Number(ocr.maxEdge) > 0 && Number(ocr.maxEdge) <= 1280, `Live OCR max edge is not bounded: ${JSON.stringify(ocr)}`);
     requireCondition(ocr.workerBootstrap === 'preloaded-blob-module', 'Live OCR must use the verified Worker');
     requireCondition(ocr.memoryFallback === 'direct-module-worker-wasm-no-simd-low-memory->direct-wasm-no-simd-last-resort', 'Live OCR must expose the worker-first low-memory fallback');
-    console.log("AromaSense live OCR recognition: PASS", JSON.stringify({ build: actualBuild, ...ocr }));
+    console.log("AromaSense live high-resolution OCR recognition: PASS", JSON.stringify({ build: actualBuild, ...ocr }));
   }
   console.log(diagnostics(cdp).join("\n"));
 } finally {
