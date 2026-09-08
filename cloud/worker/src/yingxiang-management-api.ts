@@ -35,7 +35,6 @@ export async function handleYingxiangParticipantRoute(request: Request, url: URL
   }
   const body = await parseJsonObject(request); if (!body) return json({ok:false,error:"INVALID_JSON"},400);
   if (match[2] === "submissions") {
-    // ACK retries remain valid after an event closes; no new writes are allowed then.
     let bundle;
     try { bundle = await validateYingxiangSubmission(body.bundle,p.event_id,p.event_revision,contracts.manifest.samples); }
     catch (e) { return json({ok:false,error:e instanceof Error && e.message.startsWith("YINGXIANG_") ? e.message : "YINGXIANG_SUBMISSION_INVALID"},400); }
@@ -66,12 +65,38 @@ export async function handleYingxiangParticipantRoute(request: Request, url: URL
   return json({ok:true});
 }
 
+async function cancelEvent(db: D1Database, eventId: string, userId: string, status: string): Promise<Response> {
+  if (status === "completed") return json({ok:false,error:"YINGXIANG_EVENT_ALREADY_COMPLETED"},409);
+  if (status === "cancelled") return json({ok:true,eventId,status:"cancelled"});
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE yingxiang_events SET status='cancelled',event_revision=event_revision+1,updated_at=?1 WHERE event_id=?2 AND owner_user_id=?3 AND status IN ('draft','published','active')").bind(now,eventId,userId),
+    db.prepare("UPDATE yingxiang_participants SET status='released',released_at=COALESCE(released_at,?1) WHERE event_id=?2 AND status='active'").bind(now,eventId),
+    db.prepare("UPDATE yingxiang_invites SET revoked_at=COALESCE(revoked_at,?1) WHERE event_id=?2").bind(now,eventId)
+  ]);
+  return json({ok:true,eventId,status:"cancelled",cancelledAt:now});
+}
+
+async function deleteEvent(db: D1Database, eventId: string, userId: string, status: string): Promise<Response> {
+  if (!['draft','cancelled'].includes(status)) return json({ok:false,error:"YINGXIANG_EVENT_DELETE_REQUIRES_CANCEL"},409);
+  await db.batch([
+    db.prepare("DELETE FROM yingxiang_submissions WHERE participant_id IN (SELECT participant_id FROM yingxiang_participants WHERE event_id=?1)").bind(eventId),
+    db.prepare("DELETE FROM yingxiang_progress WHERE participant_id IN (SELECT participant_id FROM yingxiang_participants WHERE event_id=?1)").bind(eventId),
+    db.prepare("DELETE FROM yingxiang_participant_access WHERE participant_id IN (SELECT participant_id FROM yingxiang_participants WHERE event_id=?1)").bind(eventId),
+    db.prepare("DELETE FROM yingxiang_participants WHERE event_id=?1").bind(eventId),
+    db.prepare("DELETE FROM yingxiang_calibration_groups WHERE event_id=?1").bind(eventId),
+    db.prepare("DELETE FROM yingxiang_invites WHERE event_id=?1").bind(eventId),
+    db.prepare("DELETE FROM yingxiang_events WHERE event_id=?1 AND owner_user_id=?2").bind(eventId,userId)
+  ]);
+  return json({ok:true,eventId,deleted:true});
+}
+
 export async function handleYingxiangManagementRoute(request: Request, url: URL, db: D1Database, user: YingxiangAuthenticatedUser): Promise<Response | undefined> {
   if (url.pathname === "/api/v1/yingxiang/events" && request.method === "GET") {
     const rows = await db.prepare("SELECT * FROM yingxiang_events WHERE owner_user_id = ?1 ORDER BY updated_at DESC, event_id LIMIT 200").bind(user.userId).all<NonNullable<Awaited<ReturnType<typeof eventById>>>>();
     return json({ok:true,events:rows.results.map(e => { const c = eventContracts(e); return c ? publicEvent(e,c.policy,c.manifest,true) : null; }).filter(Boolean)});
   }
-  const match = url.pathname.match(/^\/api\/v1\/yingxiang\/events\/([^/]+)\/(dashboard|republish|participants\/([^/]+)\/release|invites\/([^/]+)\/revoke)$/);
+  const match = url.pathname.match(/^\/api\/v1\/yingxiang\/events\/([^/]+)\/(dashboard|republish|cancel|delete|participants\/([^/]+)\/release|invites\/([^/]+)\/revoke)$/);
   if (!match) return undefined;
   const eventId = decodeURIComponent(match[1]); const event = await eventById(db,eventId);
   if (!event || event.owner_user_id !== user.userId) return json({ok:false,error:"YINGXIANG_EVENT_NOT_FOUND"},404);
@@ -93,6 +118,8 @@ export async function handleYingxiangManagementRoute(request: Request, url: URL,
   }
   if (request.method !== "POST") return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
   const now = new Date().toISOString();
+  if (match[2] === "cancel") return cancelEvent(db,eventId,user.userId,event.status);
+  if (match[2] === "delete") return deleteEvent(db,eventId,user.userId,event.status);
   if (match[3]) {
     await db.prepare("UPDATE yingxiang_participants SET status = 'released',released_at = COALESCE(released_at,?1) WHERE event_id = ?2 AND participant_id = ?3").bind(now,eventId,decodeURIComponent(match[3])).run();
     return json({ok:true,status:"released"});
