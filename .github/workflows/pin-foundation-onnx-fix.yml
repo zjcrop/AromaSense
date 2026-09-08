@@ -1,0 +1,40 @@
+name: One-shot pin Coffee Foundation ONNX fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/pin-foundation-onnx-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Pin package and regenerate lock atomically
+        run: |
+          npm install --package-lock-only --ignore-scripts --save-exact 'luckybean-static-app@github:zjcrop/luckybean#129cb5e98dc3745acd0778f7cf45803088da3bee'
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const expected='129cb5e98dc3745acd0778f7cf45803088da3bee';
+          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
+          const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          if(!String(pkg.dependencies?.['luckybean-static-app']||'').includes(expected)) throw new Error('package.json Foundation pin mismatch');
+          if(!String(lock.packages?.['']?.dependencies?.['luckybean-static-app']||'').includes(expected)) throw new Error('package-lock root Foundation pin mismatch');
+          if(!String(lock.packages?.['node_modules/luckybean-static-app']?.resolved||'').includes(expected)) throw new Error('package-lock resolved Foundation SHA mismatch');
+          NODE
+      - name: Commit pin and lock
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          git diff --cached --check
+          git commit -m 'fix(ocr): pin Foundation ONNX session fallback'
+          git push origin HEAD:main
