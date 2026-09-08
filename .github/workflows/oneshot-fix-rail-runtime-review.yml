@@ -1,3 +1,4 @@
+# One-shot migration trigger; workflow deletes itself after a verified repair.
 name: One-shot rail and runtime review repair
 
 on:
@@ -482,7 +483,6 @@ jobs:
           test_path = Path("tests/runtime-cupping-review-regression.test.ts")
           test_path.write_text('''import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";\nimport test from "node:test";\n\ntest("active rail marker is rail-level, scrollbars stay hidden and active text stays above it", () => {\n  const rail = readFileSync("app/ui/dom/sample-rail-renderer.ts", "utf8");\n  const runtime = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");\n  assert.match(rail, /const scrollContainer = root;/);\n  assert.match(rail, /\(railHost \?\? document\.body\)\.append\(tab\)/);\n  assert.match(rail, /position:absolute;[\\s\\S]*?sample-rail__active-tab/);\n  assert.match(rail, /scrollbar-width:none/);\n  assert.match(runtime, /sample-rail__item\.is-active::before\{content:none!important;display:none!important\}/);\n  assert.match(runtime, /sample-rail__active-tab\{display:block!important\}/);\n  assert.match(runtime, /::-webkit-scrollbar/);\n});\n\ntest("runtime bean OCR closes busy state before confirmation and persists pending candidates", () => {\n  const source = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");\n  assert.match(source, /saveRuntimeRecognitionDraft\(page, 0, \[\], preview\);[\\s\\S]*?setBusyProgress\(false, 100, ""\);[\\s\\S]*?openRecognitionReview/);\n  assert.match(source, /aromasense\.runtime-recognition-draft\.v1/);\n  assert.match(source, /localStorage\?\.setItem/);\n  assert.match(source, /识别结果已暂存/);\n  assert.match(source, /继续确认已识别豆子/);\n  assert.match(source, /clearRuntimeRecognitionDraft\(\)/);\n  assert.doesNotMatch(source, /setBusyProgress\(true, 80, `识别完成/);\n});\n''')
 
-          # Remove this one-shot workflow in the same product commit so it cannot run again.
           Path(".github/workflows/oneshot-fix-rail-runtime-review.yml").unlink()
           PY
       - name: Install dependencies
