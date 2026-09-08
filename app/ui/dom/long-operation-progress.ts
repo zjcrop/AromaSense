@@ -15,7 +15,8 @@ export interface LongOperationProgressOptions {
 
 const CONTROLLERS = new WeakMap<HTMLElement, LongOperationProgressController>();
 const FOUNDATION_PROGRESS_EVENT = "coffee-foundation:ocr-progress";
-const INITIAL_ESTIMATED_TOTAL_MS = 10_000;
+const INITIAL_ESTIMATED_TOTAL_MS = 30_000;
+const MAX_ESTIMATED_TOTAL_MS = 60_000;
 const MAX_PREDICTED_WHILE_BUSY = 97.5;
 
 export function shouldShowLongOperationProgress(
@@ -262,10 +263,17 @@ export class LongOperationProgressController {
   }
 
   private calibrateEstimate(elapsedMs: number, confirmed: number): void {
-    if (confirmed < 3 || confirmed >= 99 || elapsedMs < 250) return;
-    const impliedTotal = elapsedMs / Math.max(0.03, confirmed / 100);
-    const bounded = Math.max(elapsedMs + 1000, Math.min(120_000, impliedTotal));
-    this.estimatedTotalMs = this.estimatedTotalMs * 0.76 + bounded * 0.24;
+    if (elapsedMs < 500) return;
+    // Foundation percentages are stage milestones, not a linear time axis. Using
+    // elapsed / percent produced 90s+ estimates from a single cold-start stage.
+    // Keep a conservative 30s prior and only extend it when real elapsed time is
+    // actually approaching the current estimate; late confirmed progress may
+    // shorten it gradually, but it never explodes from a milestone jump.
+    if (elapsedMs > this.estimatedTotalMs * 0.86) {
+      this.estimatedTotalMs = Math.min(MAX_ESTIMATED_TOTAL_MS, Math.max(this.estimatedTotalMs, elapsedMs + 7_000));
+    } else if (confirmed >= 72 && elapsedMs < this.estimatedTotalMs * 0.72) {
+      this.estimatedTotalMs = Math.max(elapsedMs + 2_500, this.estimatedTotalMs * 0.94);
+    }
   }
 
   private renderProgress(): void {
@@ -292,10 +300,13 @@ export class LongOperationProgressController {
       : status;
     const remainingMs = Math.max(0, this.estimatedTotalMs - elapsedMs);
     this.labelNode.textContent = detailLabel;
-    this.elapsedNode.textContent = remainingMs < 800 ? "即将完成" : `预计剩余 ${Math.max(1, Math.round(remainingMs / 1000))} 秒`;
+    const etaReady = elapsedMs >= 3_000;
+    this.elapsedNode.textContent = !etaReady ? "正在估算" : remainingMs < 800 ? "即将完成" : `预计剩余 ${Math.max(1, Math.round(remainingMs / 1000))} 秒`;
     this.fillNode.style.width = `${this.latestPercent.toFixed(2)}%`;
     this.progressNode.setAttribute("aria-valuenow", this.latestPercent.toFixed(2));
-    this.progressNode.setAttribute("aria-valuetext", `${detailLabel}；${Math.round(this.latestPercent)}%；预计剩余 ${Math.max(0, Math.round(remainingMs / 1000))} 秒`);
+    this.progressNode.setAttribute("aria-valuetext", etaReady
+      ? `${detailLabel}；${Math.round(this.latestPercent)}%；预计剩余 ${Math.max(0, Math.round(remainingMs / 1000))} 秒`
+      : `${detailLabel}；${Math.round(this.latestPercent)}%；正在估算剩余时间`);
   }
 }
 

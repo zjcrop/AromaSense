@@ -1,4 +1,4 @@
-const PREVIEW_MAX_EDGE = 1280;
+const PREVIEW_MAX_EDGE = 960;
 
 const WORKER_SOURCE = String.raw`
 const HEADER_PROBE_BYTES = 1024 * 1024;
@@ -62,7 +62,7 @@ self.onmessage = async (event) => {
     if (dimensions) {
       const target = boundedSize(dimensions.width, dimensions.height, limit);
       bitmap = await createImageBitmap(blob, {
-        imageOrientation: 'from-image', resizeWidth: target.width, resizeHeight: target.height, resizeQuality: 'high'
+        imageOrientation: 'from-image', resizeWidth: target.width, resizeHeight: target.height, resizeQuality: 'medium'
       });
     } else {
       bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
@@ -77,7 +77,7 @@ self.onmessage = async (event) => {
       context.drawImage(source,0,0,target.width,target.height);
       source.close();
       bitmap = undefined;
-      const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.82 });
+      const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.76 });
       self.postMessage({ ok:true, preview, width:target.width, height:target.height });
       return;
     }
@@ -86,7 +86,7 @@ self.onmessage = async (event) => {
     if (!context) throw new Error('preview 2d context unavailable');
     context.drawImage(bitmap,0,0,width,height);
     bitmap.close(); bitmap = undefined;
-    const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.82 });
+    const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.76 });
     self.postMessage({ ok:true, preview, width, height });
   } catch (error) {
     try { bitmap?.close?.(); } catch {}

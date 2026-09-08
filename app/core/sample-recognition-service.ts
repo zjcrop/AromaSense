@@ -334,7 +334,7 @@ export class SampleRecognitionService {
     });
 
     let structureFallbackReason: string | undefined;
-    if (harvest.shouldUseStructureAi && this.foundation?.structurePage) {
+    if (!layout.requiresReview && harvest.shouldUseStructureAi && this.foundation?.structurePage) {
       const structured = await this.foundation.structurePage({
         fullText: harvest.fullText,
         blocks: harvest.blocks,
@@ -383,7 +383,9 @@ export class SampleRecognitionService {
         ? "structure-ai-returned-single-record"
         : structured.reason ?? "structure-ai-unavailable";
     } else if (harvest.shouldUseStructureAi) {
-      structureFallbackReason = "structure-ai-gateway-unavailable";
+      structureFallbackReason = layout.requiresReview
+        ? "segmentation-review-before-ai"
+        : "structure-ai-gateway-unavailable";
     }
 
     const samples = layout.segments.map((segment, sampleIndex) => {

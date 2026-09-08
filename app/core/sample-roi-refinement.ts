@@ -2,6 +2,7 @@ import type { OCRBox, OCRPoint } from "./ocr-layout-model";
 import {
   requireLuckyBeanRecognitionCore,
   type LuckyBeanCoreBlock,
+  type LuckyBeanPreparedImage,
   type LuckyBeanRecognitionRegion,
   type LuckyBeanRegionRecognitionResult
 } from "./luckybean-upstream-adapter";
@@ -232,6 +233,7 @@ export function regionRecognitionAvailable(): boolean {
 
 export async function refineSegmentationRegionEvidence(input: {
   file: File;
+  preparedImage?: LuckyBeanPreparedImage;
   model: SegmentationReviewModel;
   regionIndex: number;
 }): Promise<ROIRefinementResult> {
@@ -241,7 +243,7 @@ export async function refineSegmentationRegionEvidence(input: {
   if (typeof core.recognizeImageRegion !== "function") {
     throw new Error("当前 Recognition Foundation 尚未提供 ROI 二次识别接口");
   }
-  const prepared = await core.preparePackageImage(input.file);
+  const prepared = input.preparedImage ?? await core.preparePackageImage(input.file);
   const normalizedRegion = regionContract(region.box);
   const result = await core.recognizeImageRegion({
     id: `roi-source-${Date.now().toString(36)}`,
@@ -250,7 +252,7 @@ export async function refineSegmentationRegionEvidence(input: {
     blob: prepared.blob,
     nativeSource: Boolean(prepared.nativeSource),
     fileName: input.file.name
-  }, normalizedRegion, { locale: "zh-CN", maxEdge: 2200 });
+  }, normalizedRegion, { locale: "zh-CN", maxEdge: 1280 });
   if (result.regionProtocol && result.regionProtocol !== ROI_RECOGNITION_PROTOCOL) {
     throw new Error(`ROI 识别协议不兼容：${result.regionProtocol}`);
   }
