@@ -38,14 +38,20 @@ test("recognition and spreadsheet status expose monotonic stage progress", () =>
   assert.equal(parseLongOperationStatus("正在读取分享数据…"), undefined);
 });
 
-test("setup installs one shared immediate one-way progress controller instead of patching OCR core", () => {
+test("setup installs one predictive one-way self-closing progress controller instead of patching OCR core", () => {
   const setupSource = readFileSync("app/ui/dom/batch-setup-renderer.ts", "utf8");
   const progressSource = readFileSync("app/ui/dom/long-operation-progress.ts", "utf8");
   assert.match(setupSource, /ensureLongOperationProgress\(root\)/);
   assert.match(progressSource, /root\.hasAttribute\("aria-busy"\)/);
   assert.match(progressSource, /coffee-foundation:ocr-progress/);
-  assert.match(progressSource, /Math\.max\(this\.latestPercent/);
-  assert.match(progressSource, /进度只向右推进/);
+  assert.match(progressSource, /INITIAL_ESTIMATED_TOTAL_MS/);
+  assert.match(progressSource, /MAX_PREDICTED_WHILE_BUSY/);
+  assert.match(progressSource, /estimatedTotalMs/);
+  assert.match(progressSource, /预计剩余/);
+  assert.match(progressSource, /进度不会倒退/);
+  assert.match(progressSource, /completeAndHide\(\)/);
+  assert.match(progressSource, /failed \? 1100 : 360/);
+  assert.match(progressSource, /Math\.max\(this\.confirmedPercent/);
   assert.doesNotMatch(progressSource, /infinite/);
   assert.doesNotMatch(progressSource, /@keyframes/);
   assert.doesNotMatch(progressSource, /recognizePage\(/);
