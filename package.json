@@ -10,7 +10,7 @@
     "check": "npm run typecheck && npm test && node --test tests/fetch-build-resource.test.mjs"
   },
   "dependencies": {
-    "luckybean-static-app": "github:zjcrop/luckybean#8b26be9062135fc5a134072068ab0fb76b0c11f1",
+    "luckybean-static-app": "github:zjcrop/luckybean#129cb5e98dc3745acd0778f7cf45803088da3bee",
     "qrcode": "^1.5.4",
     "sql.js": "1.14.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
