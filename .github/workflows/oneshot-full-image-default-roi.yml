@@ -27,8 +27,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run complete checks
         run: npm run check
-      - name: Bundle WebView application
-        run: npm run bundle:webview
+      - name: Bundle web application
+        run: npm run bundle:web
       - name: Remove one-shot files
         run: |
           rm -f scripts/oneshot-full-image-default-roi.py
