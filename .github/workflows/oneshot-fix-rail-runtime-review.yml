@@ -1,0 +1,501 @@
+name: One-shot rail and runtime review repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/oneshot-fix-rail-runtime-review.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Apply bounded source repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one replacement target, found {count}\nTARGET:\n{old[:500]}")
+              p.write_text(text.replace(old, new, 1))
+
+          rail = "app/ui/dom/sample-rail-renderer.ts"
+          replace_once(rail, '''interface ActiveTabState {
+            tab: HTMLElement;
+            scrollContainer?: HTMLElement;
+            scrollHandler?: () => void;
+            resizeHandler?: () => void;
+            resizeObserver?: ResizeObserver;
+          }''', '''interface ActiveTabState {
+            tab: HTMLElement;
+            railHost?: HTMLElement;
+            scrollContainer?: HTMLElement;
+            scrollHandler?: () => void;
+            resizeHandler?: () => void;
+            resizeObserver?: ResizeObserver;
+          }''')
+
+          replace_once(rail, '''      overflow:hidden!important;''', '''      overflow:visible!important;''')
+          replace_once(rail, '''    .cupping-layout__rail-list{
+              flex:1 1 auto;
+              min-height:0;
+              overflow-y:auto!important;
+              overflow-x:hidden!important;
+              scrollbar-width:thin;
+            }
+            .sample-rail{position:relative;overflow:visible!important}''', '''    .cupping-layout__rail-list{
+              position:relative;
+              z-index:2;
+              flex:1 1 auto;
+              min-height:0;
+              overflow-y:auto!important;
+              overflow-x:hidden!important;
+              scrollbar-width:none;
+              -ms-overflow-style:none;
+            }
+            .cupping-layout__rail-list::-webkit-scrollbar{width:0;height:0;display:none}
+            .sample-rail{position:relative}''')
+
+          replace_once(rail, '''    .sample-rail__item.is-active{
+              border-top-color:transparent!important;
+              border-right-color:transparent!important;
+              border-bottom-color:rgba(255,255,255,.05)!important;
+              background:transparent!important;
+              box-shadow:none!important;
+            }''', '''    .sample-rail__item.is-active{
+              z-index:8!important;
+              border-top-color:transparent!important;
+              border-right-color:transparent!important;
+              border-bottom-color:rgba(255,255,255,.05)!important;
+              background:transparent!important;
+              box-shadow:none!important;
+            }
+            .sample-rail__item.is-active .sample-rail__select,
+            .sample-rail__item.is-active .sample-rail__number,
+            .sample-rail__item.is-active .sample-rail__active-copy{
+              position:relative;
+              z-index:9!important;
+            }
+            .sample-rail__item.is-active .sample-rail__sample-name{
+              position:relative;
+              z-index:10!important;
+              font-size:clamp(20px,2vw,23px)!important;
+              font-weight:760!important;
+              text-shadow:0 1px 9px rgba(0,0,0,.32);
+            }''')
+
+          replace_once(rail, '''    .sample-rail__active-tab{
+              position:fixed;
+              z-index:1;
+              margin:0;
+              border:1px solid rgba(214,173,99,.34);
+              border-left:0;
+              border-radius:0 999px 999px 0;
+              background:linear-gradient(90deg,rgba(104,78,39,.96),rgba(128,95,45,.96));
+              box-shadow:0 4px 14px rgba(0,0,0,.24),inset -1px 0 0 rgba(255,255,255,.08);
+              opacity:0;
+              pointer-events:none;
+              transform:translate3d(0,0,0);
+              transform-origin:left center;
+              will-change:left,top,width,height,opacity,transform;
+            }''', '''    .sample-rail__active-tab{
+              position:absolute;
+              z-index:1;
+              margin:0;
+              border:1px solid rgba(214,173,99,.42);
+              border-radius:14px 999px 999px 14px;
+              background:linear-gradient(90deg,rgba(82,64,37,.92),rgba(128,95,45,.96));
+              box-shadow:0 5px 18px rgba(0,0,0,.30),inset 0 0 0 1px rgba(255,255,255,.055);
+              opacity:0;
+              pointer-events:none;
+              transform:translate3d(0,0,0);
+              transform-origin:left center;
+              will-change:left,top,width,height,opacity,transform;
+            }''')
+
+          replace_once(rail, '''function ensureActiveTabState(root: HTMLElement): ActiveTabState {
+            const current = activeTabStates.get(root);
+            if (current) return current;
+            const tab = element("span", "sample-rail__active-tab");
+            tab.setAttribute("aria-hidden", "true");
+            root.append(tab);
+            const scrollContainer = root.closest<HTMLElement>(".cupping-layout__rail") ?? undefined;
+            const state: ActiveTabState = { tab, scrollContainer };
+            if (scrollContainer) {
+              state.scrollHandler = () => positionActiveTab(root, false);
+              scrollContainer.addEventListener("scroll", state.scrollHandler, { passive: true });
+              if (typeof ResizeObserver !== "undefined") {
+                state.resizeObserver = new ResizeObserver(() => positionActiveTab(root, false));
+                state.resizeObserver.observe(scrollContainer);
+              }
+            }
+            state.resizeHandler = () => positionActiveTab(root, false);
+            window.addEventListener("resize", state.resizeHandler, { passive: true });
+            activeTabStates.set(root, state);
+            return state;
+          }''', '''function ensureActiveTabState(root: HTMLElement): ActiveTabState {
+            const current = activeTabStates.get(root);
+            if (current) return current;
+            const tab = element("span", "sample-rail__active-tab");
+            tab.setAttribute("aria-hidden", "true");
+            const railHost = root.closest<HTMLElement>(".cupping-layout__rail") ?? undefined;
+            const scrollContainer = root;
+            const state: ActiveTabState = { tab, railHost, scrollContainer };
+            (railHost ?? document.body).append(tab);
+            state.scrollHandler = () => positionActiveTab(root, false);
+            scrollContainer.addEventListener("scroll", state.scrollHandler, { passive: true });
+            if (typeof ResizeObserver !== "undefined") {
+              state.resizeObserver = new ResizeObserver(() => positionActiveTab(root, false));
+              state.resizeObserver.observe(scrollContainer);
+              if (railHost) state.resizeObserver.observe(railHost);
+            }
+            state.resizeHandler = () => positionActiveTab(root, false);
+            window.addEventListener("resize", state.resizeHandler, { passive: true });
+            activeTabStates.set(root, state);
+            return state;
+          }''')
+
+          replace_once(rail, '''function targetActiveTabGeometry(root: HTMLElement): ActiveTabGeometry | undefined {
+            const state = ensureActiveTabState(root);
+            const card = activeCard(root);
+            const number = card?.querySelector<HTMLElement>(".sample-rail__number");
+            const copy = card?.querySelector<HTMLElement>(".sample-rail__active-copy");
+            const rail = state.scrollContainer;
+            if (!card || !number || !rail) return undefined;
+            const cardRect = card.getBoundingClientRect();
+            const numberRect = number.getBoundingClientRect();
+            const copyRect = copy?.getBoundingClientRect();
+            const railRect = rail.getBoundingClientRect();
+            const compact = root.classList.contains("is-compact");
+            const requiredHeight = Math.max(numberRect.height + (compact ? 6 : 8), (copyRect?.height ?? 0) + 12);
+            const height = Math.ceil(Math.max(compact ? 33 : 48, requiredHeight));
+            const protrusion = compact ? 7 : 18;
+            const left = Math.round(cardRect.left - 1);
+            const visible = cardRect.bottom > railRect.top && cardRect.top < railRect.bottom;
+            return {
+              top: Math.round(cardRect.top + cardRect.height / 2 - height / 2),
+              left,
+              width: Math.max(compact ? 40 : 54, Math.round(railRect.right + protrusion - left)),
+              height,
+              visible
+            };
+          }''', '''function targetActiveTabGeometry(root: HTMLElement): ActiveTabGeometry | undefined {
+            const state = ensureActiveTabState(root);
+            const card = activeCard(root);
+            const number = card?.querySelector<HTMLElement>(".sample-rail__number");
+            const copy = card?.querySelector<HTMLElement>(".sample-rail__active-copy");
+            const railHost = state.railHost;
+            const viewport = state.scrollContainer;
+            if (!card || !number || !railHost || !viewport) return undefined;
+            const cardRect = card.getBoundingClientRect();
+            const numberRect = number.getBoundingClientRect();
+            const copyRect = copy?.getBoundingClientRect();
+            const railRect = railHost.getBoundingClientRect();
+            const viewportRect = viewport.getBoundingClientRect();
+            const compact = root.classList.contains("is-compact");
+            const requiredHeight = Math.max(numberRect.height + (compact ? 6 : 8), (copyRect?.height ?? 0) + 12);
+            const height = Math.ceil(Math.max(compact ? 33 : 48, requiredHeight));
+            const protrusion = compact ? 9 : 16;
+            const left = Math.max(2, Math.round(cardRect.left - railRect.left - 2));
+            const visible = cardRect.bottom > viewportRect.top && cardRect.top < viewportRect.bottom;
+            return {
+              top: Math.round(cardRect.top - railRect.top + cardRect.height / 2 - height / 2),
+              left,
+              width: Math.max(compact ? 38 : 54, Math.round(railRect.width + protrusion - left - 2)),
+              height,
+              visible
+            };
+          }''')
+
+          replace_once(rail, '''  if (!target.visible || !animate || duration <= 0 || !fromRect) return;
+            state.tab.animate(
+              [
+                { left: `${Math.round(fromRect.left)}px`, top: `${Math.round(fromRect.top)}px`, width: `${Math.round(fromRect.width)}px`, height: `${Math.round(fromRect.height)}px`, opacity: 1 },
+                { left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, opacity: 1 }
+              ],
+              { duration, easing: ACTIVATION_EASING }
+            );''', '''  if (!target.visible || !animate || duration <= 0 || !fromRect) return;
+            const hostRect = state.railHost?.getBoundingClientRect();
+            const fromLeft = hostRect ? Math.round(fromRect.left - hostRect.left) : Math.round(fromRect.left);
+            const fromTop = hostRect ? Math.round(fromRect.top - hostRect.top) : Math.round(fromRect.top);
+            state.tab.animate(
+              [
+                { left: `${fromLeft}px`, top: `${fromTop}px`, width: `${Math.round(fromRect.width)}px`, height: `${Math.round(fromRect.height)}px`, opacity: 1 },
+                { left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, opacity: 1 }
+              ],
+              { duration, easing: ACTIVATION_EASING }
+            );''')
+
+          replace_once(rail, '''  root.append(activeTabState.tab);''', '''  activeTabState.railHost?.append(activeTabState.tab);''')
+
+          stable = "app/ui/dom/stable-cupping-screen-renderer.ts"
+          replace_once(stable, '''interface ManagerMessage { text: string; error?: boolean; }
+          ''', '''interface ManagerMessage { text: string; error?: boolean; }
+          interface RuntimeRecognitionDraft {
+            version: 1;
+            sessionId: string;
+            page: RecognizedPage;
+            index: number;
+            addedSampleIds: string[];
+            preview?: string;
+            updatedAt: string;
+          }
+          ''')
+
+          replace_once(stable, '''    .cupping-layout__rail-list.sample-rail{overflow-x:hidden!important;overflow-y:auto!important;touch-action:pan-y!important;overscroll-behavior-y:contain!important;scroll-behavior:smooth!important;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+              .sample-rail__active-tab{display:none!important}
+              .sample-rail__item.is-active::before{content:"";position:absolute;z-index:1;inset:1px -4px 1px -6px;border:1px solid rgba(214,173,99,.34);border-left:0;border-radius:0 999px 999px 0;background:linear-gradient(90deg,rgba(104,78,39,.96),rgba(128,95,45,.96));box-shadow:0 4px 14px rgba(0,0,0,.24),inset -1px 0 0 rgba(255,255,255,.08);pointer-events:none}''', '''    .cupping-layout__rail-list.sample-rail{overflow-x:hidden!important;overflow-y:auto!important;touch-action:pan-y!important;overscroll-behavior-y:contain!important;scroll-behavior:smooth!important;-webkit-overflow-scrolling:touch;scrollbar-width:none!important;-ms-overflow-style:none!important}
+              .cupping-layout__rail-list.sample-rail::-webkit-scrollbar,.cupping-main__editor::-webkit-scrollbar,.batch-review__panel::-webkit-scrollbar,.free-cupping-manager__panel::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}
+              .cupping-main__editor,.batch-review__panel,.free-cupping-manager__panel{scrollbar-width:none!important;-ms-overflow-style:none!important}
+              .sample-rail__active-tab{display:block!important}
+              .sample-rail__item.is-active::before{content:none!important;display:none!important}''')
+
+          replace_once(stable, '''  private managerMessage?: ManagerMessage;
+            private managerPageMode = false;''', '''  private managerMessage?: ManagerMessage;
+            private managerPageMode = false;
+            private runtimeDraftMemory?: RuntimeRecognitionDraft;''')
+
+          marker = '''  private async recognizeAndReviewPhoto(file: File, add: HTMLButtonElement, status: HTMLElement): Promise<void> {'''
+          helper = '''  private runtimeDraftKey(): string | undefined {
+            const sessionId = this.controller.current()?.sessionId?.trim();
+            return sessionId ? `aromasense.runtime-recognition-draft.v1.${sessionId}` : undefined;
+          }
+
+          private reviewedSample(sample: RecognizedSample, value: BatchReviewValue): RecognizedSample {
+            const metadata: Record<string, unknown> = { ...sample.metadata };
+            for (const [key] of EDITABLE_SAMPLE_FIELDS) delete metadata[key];
+            for (const [key, fieldValue] of Object.entries(value.fields)) {
+              const normalized = fieldValue.trim();
+              if (normalized) metadata[key] = normalized;
+            }
+            return { ...sample, label: value.label.trim(), metadata };
+          }
+
+          private saveRuntimeRecognitionDraft(
+            page: RecognizedPage,
+            index: number,
+            addedSampleIds: readonly string[],
+            preview?: string,
+            currentValue?: BatchReviewValue
+          ): RuntimeRecognitionDraft | undefined {
+            const sessionId = this.controller.current()?.sessionId;
+            const key = this.runtimeDraftKey();
+            if (!sessionId || !key || !page.samples.length) return undefined;
+            const safeIndex = Math.max(0, Math.min(page.samples.length - 1, Math.trunc(index)));
+            const samples = page.samples.map((sample, sampleIndex) =>
+              sampleIndex === safeIndex && currentValue ? this.reviewedSample(sample, currentValue) : sample
+            );
+            const draft: RuntimeRecognitionDraft = {
+              version: 1,
+              sessionId,
+              page: { ...page, samples },
+              index: safeIndex,
+              addedSampleIds: [...new Set(addedSampleIds.filter(Boolean))],
+              preview,
+              updatedAt: this.options.now()
+            };
+            this.runtimeDraftMemory = draft;
+            try {
+              const persisted = preview && preview.length > 750_000 ? { ...draft, preview: undefined } : draft;
+              window.localStorage?.setItem(key, JSON.stringify(persisted));
+            } catch { /* in-memory draft still protects the current app lifetime */ }
+            return draft;
+          }
+
+          private loadRuntimeRecognitionDraft(): RuntimeRecognitionDraft | undefined {
+            const state = this.controller.current();
+            const key = this.runtimeDraftKey();
+            if (!state || !key) return undefined;
+            if (this.runtimeDraftMemory?.sessionId === state.sessionId) return this.runtimeDraftMemory;
+            try {
+              const raw = window.localStorage?.getItem(key);
+              if (!raw) return undefined;
+              const parsed = JSON.parse(raw) as Partial<RuntimeRecognitionDraft>;
+              if (parsed.version !== 1 || parsed.sessionId !== state.sessionId || !parsed.page || !Array.isArray(parsed.page.samples) || !parsed.page.samples.length) return undefined;
+              const index = Number(parsed.index);
+              if (!Number.isInteger(index) || index < 0 || index >= parsed.page.samples.length) return undefined;
+              const draft: RuntimeRecognitionDraft = {
+                version: 1,
+                sessionId: state.sessionId,
+                page: parsed.page as RecognizedPage,
+                index,
+                addedSampleIds: Array.isArray(parsed.addedSampleIds) ? parsed.addedSampleIds.map(String).filter(Boolean) : [],
+                preview: typeof parsed.preview === "string" ? parsed.preview : undefined,
+                updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : ""
+              };
+              this.runtimeDraftMemory = draft;
+              return draft;
+            } catch { return undefined; }
+          }
+
+          private clearRuntimeRecognitionDraft(): void {
+            const key = this.runtimeDraftKey();
+            this.runtimeDraftMemory = undefined;
+            if (!key) return;
+            try { window.localStorage?.removeItem(key); } catch { /* best effort */ }
+          }
+
+          ''' + marker
+          replace_once(stable, marker, helper)
+
+          replace_once(stable, '''      const preview = await previewPromise;
+              this.setBusyProgress(true, 80, `识别完成 · 等待确认 ${page.samples.length} 个豆子`);
+              status.textContent = `识别到 ${page.samples.length} 个豆子，请逐一确认后加入当前杯测。`;
+              this.openRecognitionReview(page, preview, status, add);''', '''      const preview = await previewPromise;
+              this.saveRuntimeRecognitionDraft(page, 0, [], preview);
+              this.setBusyProgress(false, 100, "");
+              status.textContent = `识别到 ${page.samples.length} 个豆子，请逐一确认后加入当前杯测。`;
+              this.openRecognitionReview(page, preview, status, add, 0, []);''')
+
+          replace_once(stable, '''  private openRecognitionReview(page: RecognizedPage, preview: string | undefined, status: HTMLElement, add: HTMLButtonElement): void {
+            const samples = [...page.samples];
+            const addedIds: string[] = [];
+            const openAt = (index: number): void => {''', '''  private openRecognitionReview(
+            page: RecognizedPage,
+            preview: string | undefined,
+            status: HTMLElement,
+            add: HTMLButtonElement,
+            startIndex = 0,
+            restoredAddedIds: readonly string[] = []
+          ): void {
+            const samples = [...page.samples];
+            const addedIds: string[] = [...restoredAddedIds];
+            const openAt = (index: number): void => {''')
+
+          replace_once(stable, '''        onExit: () => {
+                  this.runtimeReview?.close(); this.runtimeReview = undefined; add.disabled = false;
+                  this.setBusyProgress(false, 0, "");
+                  status.textContent = addedIds.length ? `已加入 ${addedIds.length} 个豆子；其余候选未确认，因此没有写入。` : "已取消本次新增；未确认豆子没有写入。";
+                },''', '''        onExit: (value) => {
+                  this.saveRuntimeRecognitionDraft(page, index, addedIds, preview, value);
+                  this.runtimeReview?.close(); this.runtimeReview = undefined; add.disabled = false;
+                  this.setBusyProgress(false, 0, "");
+                  this.managerMessage = { text: `识别结果已暂存：已加入 ${addedIds.length} 个，待确认 ${samples.length - index} 个。可随时继续确认。` };
+                  this.rebuildManager();
+                },''')
+
+          replace_once(stable, '''          const metadata: Record<string, unknown> = { ...sample.metadata };
+                  for (const [key] of EDITABLE_SAMPLE_FIELDS) delete metadata[key];
+                  for (const [key, fieldValue] of Object.entries(value.fields)) if (fieldValue.trim()) metadata[key] = fieldValue.trim();''', '''          const reviewed = this.reviewedSample(sample, value);
+                  const metadata: Record<string, unknown> = { ...reviewed.metadata };''')
+          replace_once(stable, '''          await this.controller.addSample(id, { label: value.label.trim(), metadata }, this.options.now());
+                  addedIds.push(id);
+                  this.runtimeReview?.close(); this.runtimeReview = undefined;
+                  if (index + 1 < samples.length) { openAt(index + 1); return; }
+                  this.setBusyProgress(true, 100, "新增豆子确认完成");
+                  await this.finishRuntimeAddition(addedIds, status);''', '''          try {
+                    await this.controller.addSample(id, { label: reviewed.label, metadata }, this.options.now());
+                    addedIds.push(id);
+                    this.runtimeReview?.close(); this.runtimeReview = undefined;
+                    if (index + 1 < samples.length) {
+                      this.saveRuntimeRecognitionDraft(page, index + 1, addedIds, preview);
+                      this.setBusyProgress(false, 0, "");
+                      openAt(index + 1);
+                      return;
+                    }
+                    this.clearRuntimeRecognitionDraft();
+                    this.setBusyProgress(true, 100, "新增豆子确认完成");
+                    await this.finishRuntimeAddition(addedIds, status);
+                  } catch (error) {
+                    this.setBusyProgress(false, 0, "");
+                    throw error;
+                  }''')
+          replace_once(stable, '''    openAt(0);
+            }''', '''    openAt(Math.max(0, Math.min(samples.length - 1, startIndex)));
+            }''')
+
+          replace_once(stable, '''    const add = document.createElement("button"); add.type = "button"; add.className = "free-cupping-manager__add"; add.textContent = "+ 拍照识别添加豆子"; add.addEventListener("click", () => captureInput.click());
+            captureInput.addEventListener("change", () => { const file = captureInput.files?.[0]; captureInput.value = ""; if (file) void this.recognizeAndReviewPhoto(file, add, status); });
+
+            const list = document.createElement("div");''', '''    const add = document.createElement("button"); add.type = "button"; add.className = "free-cupping-manager__add"; add.textContent = "+ 拍照识别添加豆子"; add.addEventListener("click", () => captureInput.click());
+            captureInput.addEventListener("change", () => { const file = captureInput.files?.[0]; captureInput.value = ""; if (file) void this.recognizeAndReviewPhoto(file, add, status); });
+            const pendingDraft = this.loadRuntimeRecognitionDraft();
+            const resume = pendingDraft ? document.createElement("button") : undefined;
+            if (resume && pendingDraft) {
+              resume.type = "button";
+              resume.className = "free-cupping-manager__resume";
+              resume.textContent = `继续确认已识别豆子 · ${pendingDraft.index + 1}/${pendingDraft.page.samples.length}`;
+              resume.addEventListener("click", () => {
+                const draft = this.loadRuntimeRecognitionDraft();
+                if (!draft) { this.rebuildManager(); return; }
+                add.disabled = true;
+                this.setBusyProgress(false, 0, "");
+                status.textContent = `继续确认已暂存的识别结果：${draft.index + 1}/${draft.page.samples.length}`;
+                this.openRecognitionReview(draft.page, draft.preview, status, add, draft.index, draft.addedSampleIds);
+              });
+            }
+
+            const list = document.createElement("div");''')
+
+          replace_once(stable, '''    panel.append(head, add, captureInput, list, status, progress); overlay.append(panel);''', '''    panel.append(head, add);
+            if (resume) panel.append(resume);
+            panel.append(captureInput, list, status, progress); overlay.append(panel);''')
+
+          replace_once(stable, '''    .free-cupping-manager__add{width:100%;min-height:42px;margin:0 0 12px;border:1px solid rgba(214,173,99,.36);border-radius:8px;background:#1c1c1c;color:#d6ad63;font:inherit;font-weight:750;cursor:pointer}''', '''    .free-cupping-manager__add,.free-cupping-manager__resume{width:100%;min-height:42px;margin:0 0 12px;border:1px solid rgba(214,173,99,.36);border-radius:8px;background:#1c1c1c;color:#d6ad63;font:inherit;font-weight:750;cursor:pointer}
+              .free-cupping-manager__resume{margin-top:-4px;border-color:rgba(131,185,230,.34);color:#9fc8eb;background:#181c20}''')
+
+          acceptance = "scripts/cupping-rail-scroll-acceptance.mjs"
+          replace_once(acceptance, '''    await waitExpression(cdp,`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===false`,"expanded rail");
+              const before=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return null;const s=getComputedStyle(n);return{overflowY:s.overflowY,touchAction:s.touchAction,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight,scrollTop:n.scrollTop,activeTabDisplay:getComputedStyle(document.querySelector('.sample-rail__active-tab')||n).display};})()`);
+              requireCondition(before?.overflowY==="auto",`Computed overflowY is not auto: ${JSON.stringify(before)}`);
+              requireCondition(before?.touchAction==="pan-y",`Computed touch-action is not pan-y: ${JSON.stringify(before)}`);
+              requireCondition(before?.scrollHeight>before?.clientHeight,`Rail does not overflow with 30 samples: ${JSON.stringify(before)}`);
+              const moved=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return null;n.scrollTop=n.scrollHeight;return n.scrollTop;})()`);
+              requireCondition(Number(moved)>0,`Rail scrollTop did not move: ${moved}`);
+              const after=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');return n instanceof HTMLElement?{scrollTop:n.scrollTop,max:n.scrollHeight-n.clientHeight}:null;})()`);
+              requireCondition(after?.scrollTop>0&&after.scrollTop<=after.max+1,`Rail scrolling is out of range: ${JSON.stringify(after)}`);
+              console.log("AromaSense cupping rail scroll acceptance: PASS",JSON.stringify({before,after}));''', '''    await waitExpression(cdp,`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===false`,"expanded rail");
+              await click(cdp,".sample-rail__select");
+              await waitExpression(cdp,`getComputedStyle(document.querySelector('.sample-rail__active-tab')).opacity==='1'`,"floating active tab");
+              const before=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');const tab=document.querySelector('.sample-rail__active-tab');const active=document.querySelector('.sample-rail__item.is-active');const number=active?.querySelector('.sample-rail__number');if(!(n instanceof HTMLElement)||!(tab instanceof HTMLElement)||!(active instanceof HTMLElement)||!(number instanceof HTMLElement))return null;const s=getComputedStyle(n),ts=getComputedStyle(tab),as=getComputedStyle(active),ns=getComputedStyle(number);return{overflowY:s.overflowY,touchAction:s.touchAction,scrollbarWidth:s.scrollbarWidth,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight,scrollTop:n.scrollTop,tabParent:tab.parentElement?.className||'',tabPosition:ts.position,tabOpacity:ts.opacity,tabTop:tab.getBoundingClientRect().top,tabZ:Number(ts.zIndex)||0,activeZ:Number(as.zIndex)||0,numberZ:Number(ns.zIndex)||0};})()`);
+              requireCondition(before?.overflowY==="auto",`Computed overflowY is not auto: ${JSON.stringify(before)}`);
+              requireCondition(before?.touchAction==="pan-y",`Computed touch-action is not pan-y: ${JSON.stringify(before)}`);
+              requireCondition(before?.scrollbarWidth==="none",`Vertical scrollbar is still visible: ${JSON.stringify(before)}`);
+              requireCondition(before?.scrollHeight>before?.clientHeight,`Rail does not overflow with 30 samples: ${JSON.stringify(before)}`);
+              requireCondition(/cupping-layout__rail/.test(before?.tabParent||"")&&before?.tabPosition==="absolute",`Active marker is not a rail-level floating layer: ${JSON.stringify(before)}`);
+              requireCondition(before?.activeZ>before?.tabZ&&before?.numberZ>before?.tabZ,`Active text is not layered above marker: ${JSON.stringify(before)}`);
+              const smallMove=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return null;n.scrollTop=20;return n.scrollTop;})()`);
+              requireCondition(Number(smallMove)>0,`Rail small scroll did not move: ${smallMove}`);
+              await delay(180);
+              const followed=await cdp.evaluate(`(()=>{const tab=document.querySelector('.sample-rail__active-tab');return tab instanceof HTMLElement?{top:tab.getBoundingClientRect().top,opacity:getComputedStyle(tab).opacity}:null;})()`);
+              requireCondition(followed?.opacity==="1"&&followed.top<before.tabTop,`Floating marker did not follow visible active item: ${JSON.stringify({before,followed})}`);
+              const moved=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return null;n.scrollTop=n.scrollHeight;return n.scrollTop;})()`);
+              requireCondition(Number(moved)>0,`Rail scrollTop did not move: ${moved}`);
+              const after=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');return n instanceof HTMLElement?{scrollTop:n.scrollTop,max:n.scrollHeight-n.clientHeight}:null;})()`);
+              requireCondition(after?.scrollTop>0&&after.scrollTop<=after.max+1,`Rail scrolling is out of range: ${JSON.stringify(after)}`);
+              console.log("AromaSense cupping rail scroll acceptance: PASS",JSON.stringify({before,followed,after}));''')
+
+          test_path = Path("tests/runtime-cupping-review-regression.test.ts")
+          test_path.write_text('''import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";\nimport test from "node:test";\n\ntest("active rail marker is rail-level, scrollbars stay hidden and active text stays above it", () => {\n  const rail = readFileSync("app/ui/dom/sample-rail-renderer.ts", "utf8");\n  const runtime = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");\n  assert.match(rail, /const scrollContainer = root;/);\n  assert.match(rail, /\(railHost \?\? document\.body\)\.append\(tab\)/);\n  assert.match(rail, /position:absolute;[\\s\\S]*?sample-rail__active-tab/);\n  assert.match(rail, /scrollbar-width:none/);\n  assert.match(runtime, /sample-rail__item\.is-active::before\{content:none!important;display:none!important\}/);\n  assert.match(runtime, /sample-rail__active-tab\{display:block!important\}/);\n  assert.match(runtime, /::-webkit-scrollbar/);\n});\n\ntest("runtime bean OCR closes busy state before confirmation and persists pending candidates", () => {\n  const source = readFileSync("app/ui/dom/stable-cupping-screen-renderer.ts", "utf8");\n  assert.match(source, /saveRuntimeRecognitionDraft\(page, 0, \[\], preview\);[\\s\\S]*?setBusyProgress\(false, 100, ""\);[\\s\\S]*?openRecognitionReview/);\n  assert.match(source, /aromasense\.runtime-recognition-draft\.v1/);\n  assert.match(source, /localStorage\?\.setItem/);\n  assert.match(source, /识别结果已暂存/);\n  assert.match(source, /继续确认已识别豆子/);\n  assert.match(source, /clearRuntimeRecognitionDraft\(\)/);\n  assert.doesNotMatch(source, /setBusyProgress\(true, 80, `识别完成/);\n});\n''')
+
+          # Remove this one-shot workflow in the same product commit so it cannot run again.
+          Path(".github/workflows/oneshot-fix-rail-runtime-review.yml").unlink()
+          PY
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run typecheck and full tests
+        run: npm run check
+      - name: Commit repaired product
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'zjcrop'
+          git config user.email '127176814+zjcrop@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(cupping): float active rail marker and persist OCR review drafts'
+          git push origin HEAD:main
