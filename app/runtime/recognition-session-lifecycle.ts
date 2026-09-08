@@ -6,7 +6,12 @@ let ending = false;
 function isAddAction(target: EventTarget | null): boolean {
   const node = target instanceof Element ? target.closest("button") : null;
   if (!node || !node.closest(".batch-setup__capture-actions")) return false;
-  return !node.classList.contains("batch-setup__clear");
+  if (node.classList.contains("batch-setup__clear")) return false;
+  // The manual-split button acquires the same OCR session inside its camera handler,
+  // after the capture intent is accepted. Excluding it here avoids a double session
+  // depth while preserving immediate warmup for every other add route.
+  if (node.hasAttribute("data-manual-split-photo")) return false;
+  return true;
 }
 
 async function begin(reason = "aromasense-add-flow"): Promise<void> {
