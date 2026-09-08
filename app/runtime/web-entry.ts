@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   });
   yingxiang.start();
 
-  startup.setStatus("recognition", "ready", "图像识别在进入录入流程时预热；退出录入页面后释放");
+  startup.setStatus("recognition", "ready", "图像识别按需加载；进入录入流程时预热，退出录入页面后释放");
   startup.allowEnter();
 
   startup.setStatus("account", "loading", "正在读取本地账户状态…");
