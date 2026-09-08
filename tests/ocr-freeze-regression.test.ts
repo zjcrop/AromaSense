@@ -16,7 +16,7 @@ const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
-const P3_OFFICIAL_PRODUCER_SHA = "129cb5e98dc3745acd0778f7cf45803088da3bee";
+const P3_OFFICIAL_PRODUCER_SHA = "fc12bcf01a8366734a681d7e33694920b52e99bd";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
@@ -51,10 +51,14 @@ test("AromaSense pins the exact immutable official LuckyBean Recognition produce
 });
 
 test("pinned Foundation handles ONNX session initialization failure without switching OCR engines", () => {
-  assert.match(paddleOcrSource, /const VERSION = '0\.4\.11'/u);
+  assert.match(paddleOcrSource, /const VERSION = '0\.4\.12'/u);
   assert.match(paddleOcrSource, /function isOnnxSessionCreationFailure\(error\)/u);
   assert.match(paddleOcrSource, /Failed to create ONNX session/u);
   assert.match(paddleOcrSource, /startSessionCompatibilityEngine/u);
+  assert.match(paddleOcrSource, /async function startWebKitEngine\(\)/u);
+  assert.match(paddleOcrSource, /WEBKIT \? startWebKitEngine\(\)/u);
+  assert.match(paddleOcrSource, /return startSessionCompatibilityEngine\(generation, error\)/u);
+  assert.match(paddleOcrSource, /webkit-direct-wasm-no-simd->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort/u);
   assert.match(paddleOcrSource, /direct-module-no-simd-session-retry/u);
   assert.match(paddleOcrSource, /direct-wasm-no-simd-session-last-resort/u);
   assert.match(paddleOcrSource, /COMPATIBILITY_FALLBACK_SESSION_KEY/u);

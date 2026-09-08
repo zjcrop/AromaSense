@@ -119,9 +119,10 @@ try {
     const ocr = await cdp.evaluate(`(async () => {
       const api = globalThis.LuckyBeanPaddleOCR;
       const core = globalThis.LuckyBeanRecognitionCore;
-      if (api?.version !== '0.4.11') throw new Error('Expected PP-OCRv5 0.4.11 ONNX-session-compatible provider');
+      if (api?.version !== '0.4.12') throw new Error('Expected PP-OCRv5 0.4.12 Region ONNX-session-compatible provider');
       if (api?.sessionFallback !== 'onnx-session->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort') throw new Error('Expected PP-OCRv5 ONNX session compatibility fallback contract');
       if (typeof core?.recognizeCoffeeBag !== 'function') throw new Error('Expected AromaSense bounded recognition core');
+      if (typeof core?.preparePackageImage !== 'function' || typeof core?.recognizeImageRegion !== 'function') throw new Error('Expected production Region OCR core');
 
       // 4032 x 3024 is a common 12 MP phone-camera frame. The production path must
       // reduce this encoded JPEG in the ROI Worker before PaddleOCR allocates pixels.
@@ -135,10 +136,22 @@ try {
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
       canvas.width = 1; canvas.height = 1;
       try {
+        // Region-first is intentional: this is the same cold-start order as the
+        // post-segmentation browser flow reported by users. Do not warm whole-image OCR first.
+        const prepared = await core.preparePackageImage(blob);
+        const source = { id: 'live-region-source', role: 'front', blob: prepared.blob, nativeSource: Boolean(prepared.nativeSource), fileName: 'live-region.jpg' };
+        const region1 = await core.recognizeImageRegion(source, { x: 0.03, y: 0.14, width: 0.78, height: 0.24, coordinateSpace: 'normalized' }, { locale: 'zh-CN', maxEdge: 1280 });
+        const region2 = await core.recognizeImageRegion(source, { x: 0.03, y: 0.35, width: 0.78, height: 0.24, coordinateSpace: 'normalized' }, { locale: 'zh-CN', maxEdge: 1280 });
         const result = await core.recognizeCoffeeBag([{ id: 'live-high-res-ocr-check', role: 'front', blob }], { locale: 'zh-CN' });
         return {
           text: result.fullText,
           blocks: result.blocks.length,
+          region1Text: region1.fullText || '',
+          region2Text: region2.fullText || '',
+          region1Protocol: region1.regionProtocol || '',
+          region2Protocol: region2.regionProtocol || '',
+          region1Output: [region1.outputWidth || 0, region1.outputHeight || 0],
+          region2Output: [region2.outputWidth || 0, region2.outputHeight || 0],
           version: api.version,
           workerBootstrap: api.workerBootstrap,
           memoryFallback: api.memoryFallback,
@@ -150,6 +163,9 @@ try {
         };
       } finally { await api.dispose(); }
     })()`);
+    requireCondition(/ETHIOPIA/i.test(ocr?.region1Text), `Live Region 1 OCR mismatch: ${JSON.stringify(ocr)}`);
+    requireCondition(/WASHED/i.test(ocr?.region2Text), `Live Region 2 OCR mismatch: ${JSON.stringify(ocr)}`);
+    requireCondition(ocr?.region1Protocol === 'recognition-roi/1.0' && ocr?.region2Protocol === 'recognition-roi/1.0', `Live Region OCR protocol mismatch: ${JSON.stringify(ocr)}`);
     requireCondition(/ETHIOPIA/i.test(ocr?.text) && /WASHED/i.test(ocr?.text), `Live OCR text mismatch: ${JSON.stringify(ocr)}`);
     requireCondition(ocr.batchMode === 'worker-bounded-full-frame', `Live OCR did not use bounded full-frame preprocessing: ${JSON.stringify(ocr)}`);
     requireCondition(Number(ocr.maxEdge) > 0 && Number(ocr.maxEdge) <= 1280, `Live OCR max edge is not bounded: ${JSON.stringify(ocr)}`);
