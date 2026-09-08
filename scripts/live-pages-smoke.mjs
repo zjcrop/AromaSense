@@ -119,7 +119,8 @@ try {
     const ocr = await cdp.evaluate(`(async () => {
       const api = globalThis.LuckyBeanPaddleOCR;
       const core = globalThis.LuckyBeanRecognitionCore;
-      if (api?.version !== '0.4.10') throw new Error('Expected worker-first low-memory PP-OCR 0.4.10 provider');
+      if (api?.version !== '0.4.11') throw new Error('Expected PP-OCRv5 0.4.11 ONNX-session-compatible provider');
+      if (api?.sessionFallback !== 'onnx-session->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort') throw new Error('Expected PP-OCRv5 ONNX session compatibility fallback contract');
       if (typeof core?.recognizeCoffeeBag !== 'function') throw new Error('Expected AromaSense bounded recognition core');
 
       // 4032 x 3024 is a common 12 MP phone-camera frame. The production path must
@@ -141,6 +142,8 @@ try {
           version: api.version,
           workerBootstrap: api.workerBootstrap,
           memoryFallback: api.memoryFallback,
+          sessionFallback: api.sessionFallback,
+          runtimeCompatibility: api.runtimeCompatibility,
           batchMode: result.batch?.mode || '',
           maxEdge: result.batch?.maxEdge || 0,
           inputBytes: blob.size
@@ -152,6 +155,7 @@ try {
     requireCondition(Number(ocr.maxEdge) > 0 && Number(ocr.maxEdge) <= 1280, `Live OCR max edge is not bounded: ${JSON.stringify(ocr)}`);
     requireCondition(ocr.workerBootstrap === 'preloaded-blob-module', 'Live OCR must use the verified Worker');
     requireCondition(ocr.memoryFallback === 'direct-module-worker-wasm-no-simd-low-memory->direct-wasm-no-simd-last-resort', 'Live OCR must expose the worker-first low-memory fallback');
+    requireCondition(ocr.sessionFallback === 'onnx-session->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort', 'Live OCR must expose the ONNX session compatibility fallback');
     console.log("AromaSense live high-resolution OCR recognition: PASS", JSON.stringify({ build: actualBuild, ...ocr }));
   }
   console.log(diagnostics(cdp).join("\n"));
