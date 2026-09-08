@@ -69,7 +69,15 @@ async function run(appUrl){
     const after=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');return n instanceof HTMLElement?{scrollTop:n.scrollTop,max:n.scrollHeight-n.clientHeight}:null;})()`);
     requireCondition(after?.scrollTop>0&&after.scrollTop<=after.max+1,`Rail scrolling is out of range: ${JSON.stringify(after)}`);
     console.log("AromaSense cupping rail scroll acceptance: PASS",JSON.stringify({before,after}));
-  } finally { cdp?.close(); chrome.kill("SIGTERM"); await rm(profile,{recursive:true,force:true}); }
+  } finally {
+    cdp?.close();
+    if (chrome.exitCode === null) {
+      const exited = new Promise((resolveExit) => chrome.once("exit", resolveExit));
+      chrome.kill("SIGTERM");
+      await Promise.race([exited, delay(1800)]);
+    }
+    await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:120}).catch(()=>undefined);
+  }
 }
 
 const {server,url}=await startStaticServer();
