@@ -54,7 +54,12 @@ test("recognition path never decodes or re-encodes full images on the UI thread"
   assert.match(commonEntry, /__LUCKYBEAN_ANDROID__/);
   assert.match(commonEntry, /nativeSource:\s*android/);
   assert.match(commonEntry, /native-direct/);
-  assert.match(commonEntry, /runtime-direct/);
+  assert.match(commonEntry, /worker-bounded-full-frame/);
+  assert.match(commonEntry, /FULL_FRAME_REGION/);
+  assert.match(commonEntry, /recognizeImageRegion\(image, FULL_FRAME_REGION/);
+  assert.match(commonEntry, /WEB_OCR_MAX_EDGE\s*=\s*1280/);
+  assert.match(commonEntry, /WEB_OCR_LOW_MEMORY_MAX_EDGE\s*=\s*960/);
+  assert.match(commonEntry, /LuckyBeanPaddleOCR\?\.lowMemory/);
   assert.doesNotMatch(commonEntry, executableImageWork);
   assert.doesNotMatch(recognitionService, executableTesseractFallback);
   assert.doesNotMatch(recognitionService, executableImageWork);
