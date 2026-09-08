@@ -72,10 +72,11 @@ async function run(appUrl){
       if(!(list instanceof HTMLElement)||!(host instanceof HTMLElement)||!(marker instanceof HTMLElement)||!(active instanceof HTMLElement)||!(name instanceof HTMLElement))return null;
       const ls=getComputedStyle(list),hs=getComputedStyle(host),ms=getComputedStyle(marker),as=getComputedStyle(active),ns=getComputedStyle(name);
       const mr=marker.getBoundingClientRect(),hr=host.getBoundingClientRect();
-      return {overflowY:ls.overflowY,touchAction:ls.touchAction,scrollbarWidth:ls.scrollbarWidth,scrollHeight:list.scrollHeight,clientHeight:list.clientHeight,scrollTop:list.scrollTop,hostOverflow:hs.overflow,markerParent:marker.parentElement?.className||'',markerPosition:ms.position,markerOpacity:ms.opacity,markerTop:mr.top,markerRight:mr.right,hostRight:hr.right,markerZ:Number(ms.zIndex)||0,listZ:Number(ls.zIndex)||0,activeZ:Number(as.zIndex)||0,nameZ:Number(ns.zIndex)||0,nameFont:parseFloat(ns.fontSize)||0};
+      return {overflowY:ls.overflowY,touchAction:ls.touchAction,scrollBehavior:ls.scrollBehavior,scrollbarWidth:ls.scrollbarWidth,scrollHeight:list.scrollHeight,clientHeight:list.clientHeight,scrollTop:list.scrollTop,hostOverflow:hs.overflow,markerParent:marker.parentElement?.className||'',markerPosition:ms.position,markerOpacity:ms.opacity,markerTop:mr.top,markerRight:mr.right,hostRight:hr.right,markerZ:Number(ms.zIndex)||0,listZ:Number(ls.zIndex)||0,activeZ:Number(as.zIndex)||0,nameZ:Number(ns.zIndex)||0,nameFont:parseFloat(ns.fontSize)||0};
     })()`);
     requireCondition(before?.overflowY==="auto",`Computed overflowY is not auto: ${JSON.stringify(before)}`);
     requireCondition(before?.touchAction==="pan-y",`Computed touch-action is not pan-y: ${JSON.stringify(before)}`);
+    requireCondition(before?.scrollBehavior==="smooth",`Rail lost product smooth scrolling: ${JSON.stringify(before)}`);
     requireCondition(before?.scrollbarWidth==="none",`Rail scrollbar is still visible: ${JSON.stringify(before)}`);
     requireCondition(before?.scrollHeight>before?.clientHeight,`Rail does not overflow with 30 samples: ${JSON.stringify(before)}`);
     requireCondition(before?.hostOverflow==="visible",`Rail host still clips floating marker: ${JSON.stringify(before)}`);
@@ -84,19 +85,23 @@ async function run(appUrl){
     requireCondition(before?.listZ>before?.markerZ&&before?.activeZ>before?.markerZ&&before?.nameZ>before?.markerZ,`Active text/card is not above marker: ${JSON.stringify(before)}`);
     requireCondition(before?.nameFont>=20,`Active sample name is not visibly enlarged: ${JSON.stringify(before)}`);
 
-    const smallMove=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return null;n.scrollTop=24;return n.scrollTop;})()`);
+    const scrollTestReady=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return false;n.style.scrollBehavior='auto';n.scrollTop=24;return true;})()`);
+    requireCondition(scrollTestReady===true,"Unable to initiate deterministic rail scroll");
+    const smallMove=await waitExpression(cdp,`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');return n instanceof HTMLElement&&n.scrollTop>0?n.scrollTop:false;})()`,"rail small scroll movement");
     requireCondition(Number(smallMove)>0,`Rail small scroll did not move: ${smallMove}`);
     await delay(360);
     const followed=await cdp.evaluate(`(()=>{const m=document.querySelector('.cupping-rail-active-float');return m instanceof HTMLElement?{top:m.getBoundingClientRect().top,opacity:getComputedStyle(m).opacity}:null;})()`);
     requireCondition(followed?.opacity==="1"&&followed.top<before.markerTop-4,`Floating marker did not follow active item while scrolling: ${JSON.stringify({before,followed})}`);
 
-    const moved=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return null;n.scrollTop=n.scrollHeight;return n.scrollTop;})()`);
+    const bottomStarted=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return false;n.scrollTop=n.scrollHeight;return true;})()`);
+    requireCondition(bottomStarted===true,"Unable to initiate rail bottom scroll");
+    const moved=await waitExpression(cdp,`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');if(!(n instanceof HTMLElement))return false;const max=n.scrollHeight-n.clientHeight;return max>0&&n.scrollTop>=max-1?n.scrollTop:false;})()`,"rail bottom scroll movement");
     requireCondition(Number(moved)>0,`Rail scrollTop did not move: ${moved}`);
     await delay(360);
     const after=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');const m=document.querySelector('.cupping-rail-active-float');return n instanceof HTMLElement&&m instanceof HTMLElement?{scrollTop:n.scrollTop,max:n.scrollHeight-n.clientHeight,markerOpacity:getComputedStyle(m).opacity}:null;})()`);
     requireCondition(after?.scrollTop>0&&after.scrollTop<=after.max+1,`Rail scrolling is out of range: ${JSON.stringify(after)}`);
     requireCondition(after?.markerOpacity==="0",`Marker should hide when active item scrolls out of viewport: ${JSON.stringify(after)}`);
-    console.log("AromaSense cupping rail scroll + floating marker acceptance: PASS",JSON.stringify({before,followed,after}));
+    console.log("AromaSense cupping rail scroll + floating marker acceptance: PASS",JSON.stringify({before,smallMove,followed,after}));
   } finally {
     cdp?.close();
     if (chrome.exitCode === null) {
