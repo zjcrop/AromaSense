@@ -167,7 +167,7 @@ async function executeRecognitionCoreSmoke() {
     paddle?.autoPreload !== false ||
     paddle?.roiWorkerOnly !== true ||
     paddle?.regionRecognition !== "recognition-roi/1.0" ||
-    paddle?.memoryFallback !== "direct-wasm-no-simd-low-memory" ||
+    paddle?.memoryFallback !== "direct-module-worker-wasm-no-simd-low-memory->direct-wasm-no-simd-last-resort" ||
     typeof paddle?.recognizeRegion !== "function" ||
     typeof paddle?.runtimeBase !== "function"
   ) {
@@ -183,4 +183,4 @@ async function executeRecognitionCoreSmoke() {
 await installPagesRuntime();
 await configurePagesRuntime();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + low-memory fallback + same-origin ROI Worker assets verified");
+console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + worker-first low-memory fallback + same-origin ROI Worker assets verified");
