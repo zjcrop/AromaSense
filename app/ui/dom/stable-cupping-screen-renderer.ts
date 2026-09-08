@@ -23,6 +23,8 @@ import {
 } from "./batch-review-dialog";
 import { compactImagePreview } from "./image-preview-data";
 import { SegmentationReviewRecognitionService } from "./segmentation-review-recognizer";
+import { openManualROIRecognitionDialog } from "./manual-roi-recognition-dialog";
+import { mergeSupplementalRecognizedSample, recognizeManualROIFromOriginal } from "../../core/sample-manual-roi-recognition";
 
 const EDITABLE_SAMPLE_FIELDS: readonly [string, string, string][] = [
   ["country", "国家", "国家"],
@@ -452,7 +454,7 @@ export class CuppingScreenRenderer {
       this.saveRuntimeRecognitionDraft(page, 0, [], preview);
       this.setBusyProgress(false, 100, "");
       status.textContent = `识别到 ${page.samples.length} 个豆子，请逐一确认后加入当前杯测。`;
-      this.openRecognitionReview(page, preview, status, add, 0, []);
+      this.openRecognitionReview(page, preview, status, add, 0, [], file);
     } catch (error) {
       window.clearInterval(timer); add.disabled = false;
       this.setBusyProgress(false, 0, "");
@@ -466,9 +468,11 @@ export class CuppingScreenRenderer {
     status: HTMLElement,
     add: HTMLButtonElement,
     startIndex = 0,
-    restoredAddedIds: readonly string[] = []
+    restoredAddedIds: readonly string[] = [],
+    sourceFile?: File
   ): void {
     const samples = [...page.samples];
+    const workingPage = (): RecognizedPage => ({ ...page, samples: [...samples] });
     const addedIds: string[] = [...restoredAddedIds];
     const openAt = (index: number): void => {
       const sample = samples[index];
@@ -488,7 +492,7 @@ export class CuppingScreenRenderer {
         label: sample.label,
         fields: reviewFields(sample),
         onExit: (value) => {
-          this.saveRuntimeRecognitionDraft(page, index, addedIds, preview, value);
+          this.saveRuntimeRecognitionDraft(workingPage(), index, addedIds, preview, value);
           this.runtimeReview?.close();
           this.runtimeReview = undefined;
           add.disabled = false;
@@ -498,6 +502,26 @@ export class CuppingScreenRenderer {
           };
           this.rebuildManager();
         },
+        onSupplementalRecognition: sourceFile ? async () => {
+          const currentValue = this.runtimeReview?.read();
+          if (currentValue) samples[index] = this.reviewedSample(samples[index], currentValue);
+          let changed = false;
+          await openManualROIRecognitionDialog({
+            root: this.managerOverlay!,
+            file: sourceFile,
+            onRecognize: async (box) => {
+              const result = await recognizeManualROIFromOriginal({ file: sourceFile, page: workingPage(), box, label: samples[index].label });
+              samples[index] = mergeSupplementalRecognizedSample(samples[index], result.sample, result.box);
+              this.saveRuntimeRecognitionDraft(workingPage(), index, addedIds, preview);
+              status.textContent = "局部信息已补充到当前豆子，请核对冲突候选后确认。";
+              changed = true;
+            }
+          });
+          if (changed) {
+            this.runtimeReview?.close(); this.runtimeReview = undefined;
+            openAt(index);
+          }
+        } : undefined,
         onConfirm: async (value: BatchReviewValue) => {
           this.setBusyProgress(false, 0, "");
           const reviewed = this.reviewedSample(sample, value);
@@ -518,7 +542,7 @@ export class CuppingScreenRenderer {
             this.runtimeReview?.close();
             this.runtimeReview = undefined;
             if (index + 1 < samples.length) {
-              this.saveRuntimeRecognitionDraft(page, index + 1, addedIds, preview);
+              this.saveRuntimeRecognitionDraft(workingPage(), index + 1, addedIds, preview);
               openAt(index + 1);
               return;
             }
@@ -567,7 +591,7 @@ export class CuppingScreenRenderer {
     const head = document.createElement("div"); head.className = "free-cupping-manager__head";
     const titles = document.createElement("div"); titles.className = "free-cupping-manager__titles";
     const title = document.createElement("h2"); title.className = "free-cupping-manager__title"; title.textContent = this.managerPageMode ? "自由杯测 · 编辑" : "自由杯测 · 豆子管理";
-    const note = document.createElement("p"); note.className = "free-cupping-manager__note"; note.textContent = "当前杯测内容已落盘。拍照新增会经过 PP-OCRv5 识别、必要的多条目分割和逐豆确认；确认前不会写入当前杯测。";
+    const note = document.createElement("p"); note.className = "free-cupping-manager__note"; note.textContent = "当前杯测内容已落盘。拍照新增默认直接整图 PP-OCRv5 识别；需要补充小字或局部信息时，可在确认页手工框选原图区域再次识别。确认前不会写入当前杯测。";
     titles.append(title, note);
     const headActions = document.createElement("div"); headActions.className = "free-cupping-manager__head-actions";
     const pageToggle = document.createElement("button"); pageToggle.type = "button"; pageToggle.className = "free-cupping-manager__page-toggle"; pageToggle.textContent = this.managerPageMode ? "浮层模式" : "进入杯测编辑页面";

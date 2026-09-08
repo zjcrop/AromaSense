@@ -32,6 +32,7 @@ export interface BatchReviewDialogOptions {
   onChange?(value: BatchReviewValue): void;
   onExit(value: BatchReviewValue): void | Promise<void>;
   onPrevious?(value: BatchReviewValue): void | Promise<void>;
+  onSupplementalRecognition?(): void | Promise<void>;
   onConfirm(value: BatchReviewValue): boolean | void | Promise<boolean | void>;
 }
 
@@ -141,6 +142,23 @@ export function openBatchReviewDialog(options: BatchReviewDialogOptions): BatchR
   if (options.previewUrl || options.rawText?.trim() || options.recognitionStatus || options.fields.some((field) => field.candidates?.length || field.confidence !== undefined)) {
     const source = element("details", "batch-review__source");
     source.append(element("summary", "batch-review__details-title", "来源与识别证据"));
+    if (options.onSupplementalRecognition) {
+      const sourceActions = element("div", "batch-review__source-actions");
+      const sourceStatus = element("p", "batch-review__validation");
+      sourceStatus.hidden = true;
+      const roi = button("batch-review__secondary", "框选补充识别", async () => {
+        roi.disabled = true; sourceStatus.hidden = true;
+        try {
+          await options.onSupplementalRecognition?.();
+        } catch (error) {
+          sourceStatus.textContent = `局部识别失败：${errorMessage(error)}`;
+          sourceStatus.hidden = false;
+          roi.disabled = false;
+        }
+      });
+      sourceActions.append(roi);
+      source.append(sourceActions, sourceStatus);
+    }
     if (options.previewUrl) {
       const figure = element("figure", "batch-review__figure");
       const image = element("img", "batch-review__image");

@@ -23,6 +23,13 @@ export class SegmentationReviewRecognitionService extends SampleRecognitionServi
   }
 
   override async recognizePage(file: File, index = 0): Promise<RecognizedPage> {
+    // Whole-image recognition is the production default. A segmentation-review flag
+    // is evidence for confirmation, not permission to interrupt the fast path.
+    return this.delegate.recognizePage(file, index);
+  }
+
+  /** Explicit fallback for genuinely complex multi-record images. */
+  async recognizeWithAutomaticSegmentation(file: File, index = 0): Promise<RecognizedPage> {
     const page = await this.delegate.recognizePage(file, index);
     if (!page.requiresSegmentationReview) return page;
     if (!buildSegmentationReviewModel(page)) return page;

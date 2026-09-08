@@ -26,6 +26,8 @@ import {
 import type { RecognizedPage, RecognizedSample, SampleRecognitionService } from "../../core/sample-recognition-service";
 import { parseSpreadsheetFile, SPREADSHEET_ACCEPT } from "../../core/spreadsheet-import";
 import { openBatchReviewDialog, type BatchReviewDialogHandle, type BatchReviewField, type BatchReviewValue } from "./batch-review-dialog";
+import { openManualROIRecognitionDialog } from "./manual-roi-recognition-dialog";
+import { mergeSupplementalRecognizedSample, recognizeManualROIFromOriginal } from "../../core/sample-manual-roi-recognition";
 import { eventManifestFromSubmission, type EventManifest } from "../../core/submission-bundle";
 import { button, clearElement, element } from "./dom-helpers";
 import { compactImagePreview } from "./image-preview-data";
@@ -75,7 +77,16 @@ const CUPPING_TARGET_OPTIONS: readonly CuppingTargetChoice[] = ["open", "blind",
 
 interface ReviewCandidateLike { normalizedValue?: string; value?: string; score?: number }
 interface ReviewDecisionLike { field?: string; value?: string; confidence?: number; candidates?: ReviewCandidateLike[] }
-interface RowState { id: string; previewDataUrl?: string; status?: string; requiresReview: boolean; confirmed: boolean }
+interface RowState {
+  id: string;
+  previewDataUrl?: string;
+  status?: string;
+  requiresReview: boolean;
+  confirmed: boolean;
+  sourceFile?: File;
+  sourcePage?: RecognizedPage;
+  sourceSampleIndex?: number;
+}
 interface SampleSetupDraft { label?: string; metadata: Record<string, unknown> }
 interface ConfirmedImportSession {
   title?: string;
@@ -704,6 +715,43 @@ export class BatchSetupRenderer {
       onChange: (value) => { this.applyReviewValue(row, value, true, false); this.scheduleSave(); },
       onExit: async (value) => { this.applyReviewValue(row, value, false, false); await this.saveDraft(); this.review?.close(); this.review = undefined; },
       onPrevious: index > 0 ? async (value) => { this.applyReviewValue(row, value, false, false); await this.saveDraft(); this.openReview(rows[index - 1]); } : undefined,
+      onSupplementalRecognition: state.sourceFile && state.sourcePage ? async () => {
+        const currentValue = this.review?.read();
+        if (currentValue) this.applyReviewValue(row, currentValue, false, false);
+        const sourceFile = state.sourceFile!;
+        const sourcePage = state.sourcePage!;
+        const currentMetadata = this.metadata.get(row) ?? {};
+        const currentRecognition = record(currentMetadata.recognition);
+        const base: RecognizedSample = {
+          label: row.querySelector<HTMLInputElement>(".batch-setup__sample-label")?.value ?? "",
+          rawText: String(currentRecognition?.rawText ?? ""),
+          engine: String(currentRecognition?.engine ?? sourcePage.engine),
+          confidence: typeof currentRecognition?.confidence === "number" ? currentRecognition.confidence : undefined,
+          requiresReview: state.requiresReview,
+          metadata: { ...currentMetadata }
+        };
+        let changed = false;
+        await openManualROIRecognitionDialog({
+          root: this.root,
+          file: sourceFile,
+          onRecognize: async (box) => {
+            const result = await recognizeManualROIFromOriginal({ file: sourceFile, page: sourcePage, box, label: base.label });
+            const merged = mergeSupplementalRecognizedSample(base, result.sample, result.box);
+            this.metadata.set(row, merged.metadata);
+            const labelInput = row.querySelector<HTMLInputElement>(".batch-setup__sample-label");
+            if (labelInput) labelInput.value = merged.label;
+            state.requiresReview = merged.requiresReview;
+            state.status = `${state.status ?? sourcePage.engine} · 手工框选补充识别`;
+            this.refreshRow(row);
+            await this.saveDraft();
+            changed = true;
+          }
+        });
+        if (changed) {
+          this.review?.close(); this.review = undefined;
+          this.openReview(row);
+        }
+      } : undefined,
       onConfirm: async (value) => {
         const validation = this.applyReviewValue(row, value, false, true); await this.saveDraft();
         if (validation?.state === "invalid") return false;
@@ -718,10 +766,19 @@ export class BatchSetupRenderer {
     });
   }
 
-  private addRecognizedPage(page: RecognizedPage, preview: string): number {
+  private addRecognizedPage(page: RecognizedPage, preview: string, sourceFile?: File): number {
     for (let index = 0; index < page.samples.length; index += 1) {
       const sample: RecognizedSample = page.samples[index]; const needsReview = sample.requiresReview || page.requiresSegmentationReview;
-      this.addRow(sample.label, sample.metadata, { id: this.rowId(), previewDataUrl: preview, status: [page.engine, page.samples.length > 1 ? `同图样品 ${index + 1}/${page.samples.length}` : "单样品", `版面 ${page.layoutType}`, needsReview ? "存在待核对字段" : "自动识别完成"].join(" · "), requiresReview: needsReview, confirmed: false });
+      this.addRow(sample.label, sample.metadata, {
+        id: this.rowId(),
+        previewDataUrl: preview,
+        status: [page.engine, page.samples.length > 1 ? `同图样品 ${index + 1}/${page.samples.length}` : "单样品", `整图识别 · 版面 ${page.layoutType}`, needsReview ? "存在待核对字段" : "自动识别完成"].join(" · "),
+        requiresReview: needsReview,
+        confirmed: false,
+        sourceFile,
+        sourcePage: page,
+        sourceSampleIndex: index
+      });
     }
     return page.samples.length;
   }
@@ -748,7 +805,7 @@ export class BatchSetupRenderer {
         this.showStatus(`识别 ${index + 1}/${images.length}：${file.name} · LuckyBean 正式识别核心`);
         try {
           const result = await this.recognizer.recognizePage(file, index);
-          count += this.addRecognizedPage(result, preview ?? "");
+          count += this.addRecognizedPage(result, preview ?? "", file);
           this.showStatus(`完成 ${index + 1}/${images.length}：${file.name} · ${result.samples.length} 个样品`);
         } catch (error) {
           failed += 1;
