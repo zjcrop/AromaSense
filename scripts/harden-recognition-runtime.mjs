@@ -106,7 +106,9 @@ function createRuntimeContext() {
     CustomEvent: class CustomEvent {
       constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
     },
-    Worker: class Worker {},
+    Worker: class Worker {
+      terminate() {}
+    },
     Image: class Image {},
     HTMLCanvasElement: class HTMLCanvasElement {},
     OffscreenCanvas: class OffscreenCanvas {},
@@ -165,10 +167,11 @@ async function executeRecognitionCoreSmoke() {
     paddle?.autoPreload !== false ||
     paddle?.roiWorkerOnly !== true ||
     paddle?.regionRecognition !== "recognition-roi/1.0" ||
+    paddle?.memoryFallback !== "direct-wasm-no-simd-low-memory" ||
     typeof paddle?.recognizeRegion !== "function" ||
     typeof paddle?.runtimeBase !== "function"
   ) {
-    throw new Error("Foundation PP-OCR browser-safe provider/ROI contract failed runtime smoke");
+    throw new Error("Foundation PP-OCR browser-safe provider/ROI/memory-fallback contract failed runtime smoke");
   }
   const actualBase = paddle.runtimeBase();
   const expectedBase = "https://example.test/AromaSense/vendor/paddleocr/";
@@ -180,4 +183,4 @@ async function executeRecognitionCoreSmoke() {
 await installPagesRuntime();
 await configurePagesRuntime();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + same-origin ROI Worker assets verified");
+console.log("Foundation recognition runtime: executable core + browser-safe PP-OCR + low-memory fallback + same-origin ROI Worker assets verified");
