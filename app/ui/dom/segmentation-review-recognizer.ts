@@ -1,15 +1,14 @@
 import { SampleRecognitionService, type RecognizedPage } from "../../core/sample-recognition-service";
 import { buildSegmentationReviewModel } from "../../core/sample-segmentation-review";
-import { openSegmentationReviewDialog } from "./segmentation-review-dialog";
+import { openSegmentationReviewDialogV2 } from "./segmentation-review-dialog-v2";
 
 /**
  * UI-only decorator for the production recognition service.
  *
- * Automatic OCR and segmentation still run in the shared Recognition/Foundation
- * path. Only pages explicitly marked as segmentation-review candidates are paused
- * for human geometry correction before the existing setup flow receives samples.
- * The original File is retained only for explicit Worker/native recognition passes;
- * AromaSense never decodes or crops it on the UI thread.
+ * First-pass OCR is only evidence for locating candidate regions. When a page is
+ * marked for segmentation review, the v2 review flow keeps the untouched File as
+ * the source of truth, lets the user correct geometry on a Worker-generated small
+ * preview, then re-runs every accepted region against the original image pixels.
  */
 export class SegmentationReviewRecognitionService extends SampleRecognitionService {
   constructor(
@@ -27,7 +26,7 @@ export class SegmentationReviewRecognitionService extends SampleRecognitionServi
     const page = await this.delegate.recognizePage(file, index);
     if (!page.requiresSegmentationReview) return page;
     if (!buildSegmentationReviewModel(page)) return page;
-    return openSegmentationReviewDialog({
+    return openSegmentationReviewDialogV2({
       root: this.root,
       page,
       file,
