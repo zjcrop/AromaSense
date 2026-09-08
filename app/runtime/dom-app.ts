@@ -55,12 +55,7 @@ export interface AppPreloadState {
 }
 
 type RootMode = "setup" | "cupping" | "account" | "records" | "replay" | "empty";
-
-interface HomeModalHandle {
-  overlay: HTMLElement;
-  content: HTMLElement;
-  close(): void;
-}
+interface HomeModalHandle { overlay: HTMLElement; content: HTMLElement; close(): void; }
 
 export class AromaSenseDomApp {
   private screen?: CuppingScreenRenderer;
@@ -90,7 +85,6 @@ export class AromaSenseDomApp {
     this.interaction = new InteractionFoundation();
     const repository = new LocalCuppingRepository(db);
     this.revisions = new RevisionCheckpointService(db, repository, this.syncQueue, { revisionId: () => crypto.randomUUID(), queueId: () => crypto.randomUUID() });
-
     if (options.cloudBaseUrl) this.yingxiangDelivery = new YingxiangDeliveryService(db,new YingxiangClient(options.cloudBaseUrl,async () => (await this.authStore.get())?.token),options.now);
     if (this.hasCloudAuthConfiguration()) {
       this.authClient = new CloudflareAuthClient(options.cloudBaseUrl!, options.firebaseApiKey!, this.authStore, this.pendingRegistrationStore);
@@ -99,27 +93,15 @@ export class AromaSenseDomApp {
     }
   }
 
-  navigationApi(): AromaSenseNavigationApi {
-    return this.interaction.api;
-  }
-
+  navigationApi(): AromaSenseNavigationApi { return this.interaction.api; }
   preload(): Promise<AppPreloadState> {
     if (this.preloadPromise) return this.preloadPromise;
     this.preloadPromise = (async () => {
       await this.syncEngine?.recoverInterrupted();
-      const [session, pending, counts, recent] = await Promise.all([
-        this.authClient?.current(), this.authClient?.pendingRegistration(), this.syncQueue.counts(), new RecentSessionReader(this.db).list(50)
-      ]);
-      const waiting = counts.pending + counts.failed + counts.conflict;
-      const configured = this.hasCloudAuthConfiguration();
+      const [session, pending, counts, recent] = await Promise.all([this.authClient?.current(), this.authClient?.pendingRegistration(), this.syncQueue.counts(), new RecentSessionReader(this.db).list(50)]);
+      const waiting = counts.pending + counts.failed + counts.conflict; const configured = this.hasCloudAuthConfiguration();
       const account = !configured ? "cloud-unconfigured" as const : session ? "signed-in" as const : pending ? "pending-verification" as const : "signed-out" as const;
-      return {
-        account,
-        accountMessage: !configured ? "Firebase / Cloudflare 云端认证尚未配置，本地功能可用"
-          : session ? `已读取登录账户 ${session.email}` : pending ? `等待 Firebase 邮箱验证：${pending.email}` : "未登录，本地功能可用",
-        syncMessage: waiting ? `${waiting} 项任务等待处理` : "本地同步队列已恢复",
-        unfinishedSessions: recent.filter((item) => item.status === "draft" || item.status === "active").length
-      };
+      return { account, accountMessage: !configured ? "Firebase / Cloudflare 云端认证尚未配置，本地功能可用" : session ? `已读取登录账户 ${session.email}` : pending ? `等待 Firebase 邮箱验证：${pending.email}` : "未登录，本地功能可用", syncMessage: waiting ? `${waiting} 项任务等待处理` : "本地同步队列已恢复", unfinishedSessions: recent.filter((item) => item.status === "draft" || item.status === "active").length };
     })().catch((error) => { this.preloadPromise = undefined; throw error; });
     return this.preloadPromise;
   }
@@ -128,314 +110,119 @@ export class AromaSenseDomApp {
   async start(): Promise<void> { await this.preload(); await this.showSetup(); }
 
   async showAccount(returnSessionId?: string): Promise<void> {
-    this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
+    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined;
     this.setRootMode("account", () => returnSessionId ? this.openSession(returnSessionId) : this.showSetup());
     await new AccountRenderer(this.root, this.authClient, {
       onAuthenticated: async () => { await this.syncPending(); if (returnSessionId) await this.openSession(returnSessionId); else await this.showSetup(); },
       onSkip: async () => { if (returnSessionId) await this.openSession(returnSessionId); else await this.showSetup(); },
-      onSync: async () => { await this.syncPending(); },
-      getSyncSummary: () => this.syncQueue.counts()
+      onSync: async () => { await this.syncPending(); }, getSyncSummary: () => this.syncQueue.counts()
     }).render();
   }
 
   async showSetup(): Promise<void> {
-    this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined; this.setRootMode("setup");
-    const localRepository = new LocalCuppingRepository(this.db);
-    const recentSessions = await new RecentSessionReader(this.db).list(10);
+    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("setup");
+    const localRepository = new LocalCuppingRepository(this.db); const recentSessions = await new RecentSessionReader(this.db).list(10);
     const setup = new BatchSetupRenderer(this.root, new CuppingSetupService(localRepository), this.recognizer, {
-      now: this.options.now,
-      createSessionId: this.options.createSessionId,
-      createSampleId: this.options.createSampleId,
-      onCreated: (sessionId) => this.openSession(sessionId),
-      onResume: (sessionId) => this.openSession(sessionId),
-      onOpenRecent: (sessionId, readOnly) => readOnly ? this.showReplay(sessionId) : this.openSession(sessionId),
-      onOpenAccount: () => this.showHomeAccountModal(),
-      onOpenRecords: () => this.showHomeRecordsModal(),
-      recentSessions,
-      syncLabel: "账户",
-      loadDraft: () => this.preferences.get<BatchSetupDraft>(BATCH_SETUP_DRAFT_KEY),
-      saveDraft: (draft) => this.preferences.set(BATCH_SETUP_DRAFT_KEY, draft, this.options.now()),
-      clearDraft: () => this.preferences.remove(BATCH_SETUP_DRAFT_KEY),
-      foundationGateway: createCoffeeFoundationGateway(this.options.cloudBaseUrl, async () => (await this.authClient?.current())?.token),
-      cacheEvent: async (manifest) => { await new EventCacheStore(this.db).put(manifest, this.options.now()); }
+      now: this.options.now, createSessionId: this.options.createSessionId, createSampleId: this.options.createSampleId,
+      onCreated: (sessionId) => this.openSession(sessionId), onResume: (sessionId) => this.openSession(sessionId), onOpenRecent: (sessionId, readOnly) => readOnly ? this.showReplay(sessionId) : this.openSession(sessionId),
+      onOpenAccount: () => this.showHomeAccountModal(), onOpenRecords: () => this.showHomeRecordsModal(), recentSessions, syncLabel: "账户",
+      loadDraft: () => this.preferences.get<BatchSetupDraft>(BATCH_SETUP_DRAFT_KEY), saveDraft: (draft) => this.preferences.set(BATCH_SETUP_DRAFT_KEY, draft, this.options.now()), clearDraft: () => this.preferences.remove(BATCH_SETUP_DRAFT_KEY),
+      foundationGateway: createCoffeeFoundationGateway(this.options.cloudBaseUrl, async () => (await this.authClient?.current())?.token), cacheEvent: async (manifest) => { await new EventCacheStore(this.db).put(manifest, this.options.now()); }
     });
     await setup.render();
   }
 
   async openSession(sessionId: string): Promise<void> {
-    this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("cupping", () => this.showSetup());
-    const repository = new LocalCuppingRepository(this.db);
-    const editor = new CuppingSessionController(repository, this.options.observationIdFactory);
-    const controller = new CuppingScreenController(repository, new StageProgressReader(this.db), editor, this.revisions);
-    const flavorService = new FlavorGroupPreferenceService(this.preferences);
+    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("cupping", () => this.showSetup());
+    const repository = new LocalCuppingRepository(this.db); const editor = new CuppingSessionController(repository, this.options.observationIdFactory); const controller = new CuppingScreenController(repository, new StageProgressReader(this.db), editor, this.revisions); const flavorService = new FlavorGroupPreferenceService(this.preferences);
     this.screen = new CuppingScreenRenderer(this.root, controller, flavorService, new SampleSummaryReader(this.db), {
-      now: this.options.now,
-      onExit: async () => { void this.yingxiangDelivery?.sync(); await this.showSetup(); },
-      onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); },
-      onOpenRecords: async () => { await this.showRecords(); },
-      onSessionFinished: async (sessionId) => { void this.syncPending([sessionId]); }
+      now: this.options.now, onExit: async () => { void this.yingxiangDelivery?.sync(); await this.showSetup(); }, onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); }, onOpenRecords: async () => { await this.showRecords(); }, onSessionFinished: async (activeSessionId) => { void this.syncPending([activeSessionId]); }
     }, this.interaction.overlayManager);
     await this.screen.initialize(sessionId);
-    this.sessionFlowCleanup = this.interaction.flowNavigation.register({
-      id: `cupping-flow:${sessionId}`,
-      priority: 500,
-      canBack: () => {
-        const state = controller.current();
-        if (!state?.active || state.sessionStatus === "completed" || state.sessionStatus === "archived") return false;
-        if (state.active.context.stageId === "preparation") return false;
-        return Boolean(this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])"));
-      },
+    this.sessionFlowCleanup = this.interaction.flowNavigation.register({ id: `cupping-flow:${sessionId}`, priority: 500,
+      canBack: () => { const state = controller.current(); if (!state?.active || state.sessionStatus === "completed" || state.sessionStatus === "archived") return false; if (state.active.context.stageId === "preparation") return false; return Boolean(this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])")); },
       back: () => { this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])")?.click(); }
     });
-    this.root.dataset.sessionId = sessionId;
-    void this.yingxiangDelivery?.sync();
+    this.root.dataset.sessionId = sessionId; void this.yingxiangDelivery?.sync();
+  }
+
+  private async openSessionEditor(sessionId: string): Promise<void> {
+    await this.openSession(sessionId);
+    await this.screen?.openEditor();
   }
 
   async showRecords(): Promise<void> {
-    this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("records", () => this.showSetup());
-    const repository = new LocalCuppingRepository(this.db);
-    const recordService = new SessionRecordService(repository, this.options.now);
-    const records = await new SessionRecordsReader(this.db).list(300);
-    const shareClient = this.hasCloudAuthConfiguration()
-      ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token)
-      : undefined;
+    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("records", () => this.showSetup());
+    const repository = new LocalCuppingRepository(this.db); const recordService = new SessionRecordService(repository, this.options.now); const records = await new SessionRecordsReader(this.db).list(300);
+    const shareClient = this.hasCloudAuthConfiguration() ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token) : undefined;
     const renderer = new SessionRecordsRenderer(this.root, {
-      records,
-      onBack: () => this.showSetup(),
-      onOpen: async (sessionId, readOnly) => { if (readOnly) await this.showReplay(sessionId); else await this.openSession(sessionId); },
-      onDelete: async (sessionIds) => { for (const sessionId of sessionIds) await recordService.delete(sessionId); await this.showRecords(); },
-      onSync: async (sessionIds) => { await this.syncPending(sessionIds); await this.showRecords(); },
-      onShare: async (sessionId) => {
-        if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接");
-        const snapshot = await recordService.snapshot(sessionId);
-        return (await shareClient.create(snapshot)).shareUrl;
-      },
-      onExport: async (sessionId) => { await this.downloadRecord(await recordService.snapshot(sessionId)); },
-      loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY),
-      saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
+      records, onBack: () => this.showSetup(), onOpen: async (sessionId, readOnly) => { if (readOnly) await this.showReplay(sessionId); else await this.openSession(sessionId); }, onEdit: (sessionId) => this.openSessionEditor(sessionId),
+      onDelete: async (sessionIds) => { for (const sessionId of sessionIds) await recordService.delete(sessionId); await this.showRecords(); }, onSync: async (sessionIds) => { await this.syncPending(sessionIds); await this.showRecords(); },
+      onShare: async (sessionId) => { if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接"); const snapshot = await recordService.snapshot(sessionId); return (await shareClient.create(snapshot)).shareUrl; },
+      onExport: async (sessionId) => { await this.downloadRecord(await recordService.snapshot(sessionId)); }, loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY), saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
     });
     await renderer.render();
   }
 
   async showReplay(sessionId: string): Promise<void> {
-    this.closeHomeModal();
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("replay", () => this.showRecords());
-    const snapshot = await new SessionRecordService(new LocalCuppingRepository(this.db), this.options.now).snapshot(sessionId);
-    const store = new ComparisonMappingStore(this.db);
-    new RecordReplayRenderer(this.root, snapshot, () => this.showRecords(), {
-      initial: await store.get(sessionId),
-      onImport: async (bundle) => {
-        const value = { bundle, mapping: mapComparison(snapshot, bundle) };
-        await store.replace(sessionId, value, this.options.now());
-        return value;
-      },
-      onClear: () => store.clear(sessionId)
-    }).render();
+    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("replay", () => this.showRecords());
+    const snapshot = await new SessionRecordService(new LocalCuppingRepository(this.db), this.options.now).snapshot(sessionId); const store = new ComparisonMappingStore(this.db);
+    new RecordReplayRenderer(this.root, snapshot, () => this.showRecords(), { initial: await store.get(sessionId), onImport: async (bundle) => { const value = { bundle, mapping: mapComparison(snapshot, bundle) }; await store.replace(sessionId, value, this.options.now()); return value; }, onClear: () => store.clear(sessionId) }).render();
   }
 
   async syncPending(sessionIds?: readonly string[]): Promise<SyncRunResult | undefined> {
-    await this.yingxiangDelivery?.sync();
-    if (!this.syncEngine || !(await this.authClient?.current())) return undefined;
-    if (sessionIds?.length) await this.syncQueue.retrySessions(sessionIds, this.options.now());
-    return this.syncEngine.runOnce(sessionIds);
+    await this.yingxiangDelivery?.sync(); if (!this.syncEngine || !(await this.authClient?.current())) return undefined; if (sessionIds?.length) await this.syncQueue.retrySessions(sessionIds, this.options.now()); return this.syncEngine.runOnce(sessionIds);
   }
-
   async syncCounts() { return this.syncQueue.counts(); }
-
-  dispose(): void {
-    this.closeHomeModal();
-    this.rootBackCleanup?.(); this.rootBackCleanup = undefined;
-    this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined;
-    this.screen?.dispose(); this.screen = undefined;
-    this.setRootMode("empty");
-    this.interaction.dispose();
-  }
+  dispose(): void { this.closeHomeModal(); this.rootBackCleanup?.(); this.rootBackCleanup = undefined; this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined; this.screen?.dispose(); this.screen = undefined; this.setRootMode("empty"); this.interaction.dispose(); }
 
   private installHomeModalStyles(): void {
     if (document.head.querySelector("style[data-aromasense-home-modal]")) return;
-    const style = document.createElement("style");
-    style.dataset.aromasenseHomeModal = "true";
-    style.textContent = `
+    const style = document.createElement("style"); style.dataset.aromasenseHomeModal = "true"; style.textContent = `
       .home-modal{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:22px;background:transparent;backdrop-filter:none}
       .home-modal__content{width:min(860px,calc(100vw - 32px));max-height:min(86dvh,820px);overflow:auto;border:1px solid rgba(214,173,99,.28);border-radius:16px;background:#151515;box-shadow:0 16px 42px rgba(0,0,0,.44)}
-      .home-modal__content.account-screen{min-height:0;padding:1px 0 24px}
-      .home-modal__content .account-card{margin:28px auto 18px}
-      .home-modal__content.session-records{min-height:0!important;max-width:none!important;margin:0!important;padding:18px!important}
-      .home-modal__content .session-records__version{display:none!important}
-      .home-modal__loading{display:grid;place-items:center;min-height:180px;padding:24px;color:#b7b0a4;font-size:12px;letter-spacing:.06em}
+      .home-modal__content.account-screen{min-height:0;padding:1px 0 24px}.home-modal__content .account-card{margin:28px auto 18px}.home-modal__content.session-records{min-height:0!important;max-width:none!important;margin:0!important;padding:18px!important}.home-modal__content .session-records__version{display:none!important}.home-modal__loading{display:grid;place-items:center;min-height:180px;padding:24px;color:#b7b0a4;font-size:12px;letter-spacing:.06em}
       @media(max-width:620px){.home-modal{padding:10px}.home-modal__content{width:calc(100vw - 20px);max-height:92dvh;border-radius:12px}.home-modal__content.session-records{padding:12px!important}}
-    `;
-    document.head.append(style);
+    `; document.head.append(style);
   }
 
   private createHomeModal(label: string): HomeModalHandle {
-    this.closeHomeModal();
-    this.installHomeModalStyles();
-    const overlay = document.createElement("div");
-    overlay.className = "home-modal";
-    overlay.setAttribute("role", "dialog");
-    overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", label);
-    const content = document.createElement("div");
-    content.className = "home-modal__content";
-    overlay.append(content);
-    let unregister: Cleanup = () => undefined;
-    const close = (): void => {
-      unregister();
-      if (this.homeModal === overlay) {
-        this.homeModal = undefined;
-        this.homeModalCleanup = undefined;
-      }
-      overlay.remove();
-    };
-    overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) close(); });
-    overlay.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      this.interaction.api.back({ source: "escape" });
-    });
-    document.body.append(overlay);
-    unregister = this.interaction.overlayManager.register({
-      id: `home-modal:${label}`,
-      element: overlay,
-      kind: OVERLAY_KINDS.MODAL,
-      priority: 100,
-      dismiss: close
-    });
-    this.homeModal = overlay;
-    this.homeModalCleanup = unregister;
-    return { overlay, content, close };
+    this.closeHomeModal(); this.installHomeModalStyles(); const overlay = document.createElement("div"); overlay.className = "home-modal"; overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", label); const content = document.createElement("div"); content.className = "home-modal__content"; overlay.append(content); let unregister: Cleanup = () => undefined;
+    const close = (): void => { unregister(); if (this.homeModal === overlay) { this.homeModal = undefined; this.homeModalCleanup = undefined; } overlay.remove(); };
+    overlay.addEventListener("pointerdown", (event) => { if (event.target === overlay) close(); }); overlay.addEventListener("keydown", (event) => { if (event.key !== "Escape") return; event.preventDefault(); this.interaction.api.back({ source: "escape" }); }); document.body.append(overlay);
+    unregister = this.interaction.overlayManager.register({ id: `home-modal:${label}`, element: overlay, kind: OVERLAY_KINDS.MODAL, priority: 100, dismiss: close }); this.homeModal = overlay; this.homeModalCleanup = unregister; return { overlay, content, close };
   }
-
-  private closeHomeModal(): void {
-    this.homeModalCleanup?.();
-    this.homeModalCleanup = undefined;
-    this.homeModal?.remove();
-    this.homeModal = undefined;
-  }
+  private closeHomeModal(): void { this.homeModalCleanup?.(); this.homeModalCleanup = undefined; this.homeModal?.remove(); this.homeModal = undefined; }
 
   private async showHomeAccountModal(): Promise<void> {
-    const modal = this.createHomeModal("账户");
-    modal.content.classList.add("account-screen");
-    await new AccountRenderer(modal.content, this.authClient, {
-      onAuthenticated: async () => {
-        await this.syncPending();
-        modal.close();
-        await this.showSetup();
-      },
-      onSkip: () => modal.close(),
-      onSync: async () => { await this.syncPending(); },
-      getSyncSummary: () => this.syncQueue.counts()
-    }).render();
+    const modal = this.createHomeModal("账户"); modal.content.classList.add("account-screen");
+    await new AccountRenderer(modal.content, this.authClient, { onAuthenticated: async () => { await this.syncPending(); modal.close(); await this.showSetup(); }, onSkip: () => modal.close(), onSync: async () => { await this.syncPending(); }, getSyncSummary: () => this.syncQueue.counts() }).render();
   }
 
   private async showHomeRecordsModal(): Promise<void> {
-    const modal = this.createHomeModal("杯测记录");
-    modal.content.classList.add("session-records");
-    const loading = document.createElement("div");
-    loading.className = "home-modal__loading";
-    loading.textContent = "正在读取杯测记录…";
-    modal.content.append(loading);
-    await new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
-      else setTimeout(resolve, 0);
-    });
-    if (this.homeModal !== modal.overlay) return;
-
-    const repository = new LocalCuppingRepository(this.db);
-    const recordService = new SessionRecordService(repository, this.options.now);
-    const records = await new SessionRecordsReader(this.db).list(300);
-    if (this.homeModal !== modal.overlay) return;
-    const shareClient = this.hasCloudAuthConfiguration()
-      ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token)
-      : undefined;
+    const modal = this.createHomeModal("杯测记录"); modal.content.classList.add("session-records"); const loading = document.createElement("div"); loading.className = "home-modal__loading"; loading.textContent = "正在读取杯测记录…"; modal.content.append(loading);
+    await new Promise<void>((resolve) => { if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve()); else setTimeout(resolve, 0); }); if (this.homeModal !== modal.overlay) return;
+    const repository = new LocalCuppingRepository(this.db); const recordService = new SessionRecordService(repository, this.options.now); const records = await new SessionRecordsReader(this.db).list(300); if (this.homeModal !== modal.overlay) return;
+    const shareClient = this.hasCloudAuthConfiguration() ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token) : undefined;
     const renderer = new SessionRecordsRenderer(modal.content, {
-      records,
-      onBack: () => modal.close(),
-      onOpen: async (sessionId, readOnly) => {
-        modal.close();
-        if (readOnly) await this.showReplay(sessionId);
-        else await this.openSession(sessionId);
-      },
-      onDelete: async (sessionIds) => {
-        for (const sessionId of sessionIds) await recordService.delete(sessionId);
-        modal.close();
-        await this.showHomeRecordsModal();
-      },
-      onSync: async (sessionIds) => {
-        await this.syncPending(sessionIds);
-        modal.close();
-        await this.showHomeRecordsModal();
-      },
-      onShare: async (sessionId) => {
-        if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接");
-        const snapshot = await recordService.snapshot(sessionId);
-        return (await shareClient.create(snapshot)).shareUrl;
-      },
-      onExport: async (sessionId) => { this.downloadRecord(await recordService.snapshot(sessionId)); },
-      loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY),
-      saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
+      records, onBack: () => modal.close(),
+      onOpen: async (sessionId, readOnly) => { modal.close(); if (readOnly) await this.showReplay(sessionId); else await this.openSession(sessionId); },
+      onEdit: async (sessionId) => { modal.close(); await this.openSessionEditor(sessionId); },
+      onDelete: async (sessionIds) => { for (const sessionId of sessionIds) await recordService.delete(sessionId); modal.close(); await this.showHomeRecordsModal(); },
+      onSync: async (sessionIds) => { await this.syncPending(sessionIds); modal.close(); await this.showHomeRecordsModal(); },
+      onShare: async (sessionId) => { if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接"); const snapshot = await recordService.snapshot(sessionId); return (await shareClient.create(snapshot)).shareUrl; },
+      onExport: async (sessionId) => { this.downloadRecord(await recordService.snapshot(sessionId)); }, loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY), saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
     });
     await renderer.render();
-
     const toolbar = modal.content.querySelector<HTMLElement>(".session-records__toolbar");
-    if (toolbar) {
-      const importButton = document.createElement("button");
-      importButton.type = "button";
-      importButton.className = "session-records__tool";
-      importButton.textContent = "导入";
-      importButton.addEventListener("click", () => {
-        modal.close();
-        queueMicrotask(() => this.root.querySelector<HTMLButtonElement>(".batch-setup__import-inline")?.click());
-      });
-      toolbar.prepend(importButton);
-    }
+    if (toolbar) { const importButton = document.createElement("button"); importButton.type = "button"; importButton.className = "session-records__tool"; importButton.textContent = "导入"; importButton.addEventListener("click", () => { modal.close(); queueMicrotask(() => this.root.querySelector<HTMLButtonElement>(".batch-setup__import-inline")?.click()); }); toolbar.prepend(importButton); }
   }
 
-  private downloadFile(filename: string, body: string, type: string): void {
-    const blob = new Blob([body], { type });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
-
-  private async downloadRecord(snapshot: CuppingRecordSnapshot): Promise<void> {
-    const bundle = await this.submissions.create(snapshot);
-    const prefix = `AromaSense-${snapshot.session.metadata.date}-${snapshot.session.sessionId.slice(0, 8)}`;
-    this.downloadFile(`${prefix}.json`, JSON.stringify(snapshot, null, 2), "application/json;charset=utf-8");
-    this.downloadFile(`${prefix}.csv`, completeCsv(snapshot, bundle), "text/csv;charset=utf-8");
-    this.downloadFile(`${prefix}.submission.json`, JSON.stringify(bundle, null, 2), "application/json;charset=utf-8");
-  }
-
-  private hasCloudAuthConfiguration(): boolean {
-    return Boolean(this.options.cloudBaseUrl && this.options.firebaseApiKey && this.options.firebaseProjectId);
-  }
-
+  private downloadFile(filename: string, body: string, type: string): void { const blob = new Blob([body], { type }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 0); }
+  private async downloadRecord(snapshot: CuppingRecordSnapshot): Promise<void> { const bundle = await this.submissions.create(snapshot); const prefix = `AromaSense-${snapshot.session.metadata.date}-${snapshot.session.sessionId.slice(0, 8)}`; this.downloadFile(`${prefix}.json`, JSON.stringify(snapshot, null, 2), "application/json;charset=utf-8"); this.downloadFile(`${prefix}.csv`, completeCsv(snapshot, bundle), "text/csv;charset=utf-8"); this.downloadFile(`${prefix}.submission.json`, JSON.stringify(bundle, null, 2), "application/json;charset=utf-8"); }
+  private hasCloudAuthConfiguration(): boolean { return Boolean(this.options.cloudBaseUrl && this.options.firebaseApiKey && this.options.firebaseProjectId); }
   private setRootMode(mode: RootMode, back?: () => void | Promise<void>): void {
-    this.rootBackCleanup?.();
-    this.rootBackCleanup = undefined;
-    this.sessionFlowCleanup?.();
-    this.sessionFlowCleanup = undefined;
-    this.root.replaceChildren();
-    if (mode !== "cupping") delete this.root.dataset.sessionId;
-    this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen", "session-records", "record-replay");
-    if (mode === "setup") this.root.classList.add("batch-setup");
-    if (mode === "cupping") this.root.classList.add("aromasense-cupping");
-    if (mode === "account") this.root.classList.add("account-screen");
-    if (mode === "records") this.root.classList.add("session-records");
-    if (mode === "replay") this.root.classList.add("record-replay");
-    this.root.dataset.screen = mode;
-    this.interaction.navigationManager.setActivePage(mode);
-    if (back) this.rootBackCleanup = this.interaction.navigationManager.registerChildBack({ id: `screen:${mode}`, back });
+    this.rootBackCleanup?.(); this.rootBackCleanup = undefined; this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined; this.root.replaceChildren(); if (mode !== "cupping") delete this.root.dataset.sessionId;
+    this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen", "session-records", "record-replay"); if (mode === "setup") this.root.classList.add("batch-setup"); if (mode === "cupping") this.root.classList.add("aromasense-cupping"); if (mode === "account") this.root.classList.add("account-screen"); if (mode === "records") this.root.classList.add("session-records"); if (mode === "replay") this.root.classList.add("record-replay"); this.root.dataset.screen = mode; this.interaction.navigationManager.setActivePage(mode); if (back) this.rootBackCleanup = this.interaction.navigationManager.registerChildBack({ id: `screen:${mode}`, back });
   }
 }
