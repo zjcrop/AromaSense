@@ -31,9 +31,8 @@ function now(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
 
-const STEADY_REGION_DEFAULT_MS = 4_200;
-const STEADY_REGION_MIN_MS = 1_500;
-const STEADY_REGION_MAX_MS = 9_000;
+const STEADY_REGION_MIN_MS = 900;
+const STEADY_REGION_MAX_MS = 7_500;
 
 function median(values: readonly number[]): number | undefined {
   const sorted = values.filter(Number.isFinite).filter((value) => value > 0).sort((a, b) => a - b);
@@ -47,16 +46,14 @@ export function estimateRegionBatchRemainingMs(
   remainingRegions: number
 ): number | undefined {
   if (remainingRegions <= 0) return 0;
-  if (!durations.length) return undefined;
-  // Region 1 includes OCR model/session cold-start on many browsers. Never multiply
-  // that one-time cost by every remaining crop. Once region 2+ exists, use their
-  // median as the steady-state per-region cost.
-  const steadySamples = durations.slice(1);
-  const observed = median(steadySamples);
-  const firstRegionDerived = Math.max(STEADY_REGION_MIN_MS, Math.min(STEADY_REGION_MAX_MS, durations[0] * 0.18));
-  const perRegion = observed === undefined
-    ? Math.min(STEADY_REGION_DEFAULT_MS * 1.35, firstRegionDerived)
-    : Math.max(STEADY_REGION_MIN_MS, Math.min(STEADY_REGION_MAX_MS, observed));
+  // Never extrapolate the first region. It may include model download, Worker
+  // bootstrap or an ONNX runtime compatibility rebuild, all of which are one-off
+  // costs. A concrete ETA is shown only after at least one steady-state region
+  // (region 2+) has completed.
+  if (durations.length < 2) return undefined;
+  const observed = median(durations.slice(1));
+  if (observed === undefined) return undefined;
+  const perRegion = Math.max(STEADY_REGION_MIN_MS, Math.min(STEADY_REGION_MAX_MS, observed));
   return Math.round(perRegion * remainingRegions);
 }
 
