@@ -1,4 +1,4 @@
-const PREVIEW_MAX_EDGE = 960;
+const PREVIEW_MAX_EDGE = 720;
 
 const WORKER_SOURCE = String.raw`
 const HEADER_PROBE_BYTES = 1024 * 1024;
@@ -57,7 +57,7 @@ self.onmessage = async (event) => {
   let bitmap;
   try {
     if (!(blob instanceof Blob)) throw new Error('invalid preview blob');
-    const limit = Math.max(640, Math.min(1600, Number(maxEdge) || 1280));
+    const limit = Math.max(480, Math.min(1200, Number(maxEdge) || 720));
     const dimensions = await encodedDimensions(blob);
     if (dimensions) {
       const target = boundedSize(dimensions.width, dimensions.height, limit);
@@ -77,7 +77,7 @@ self.onmessage = async (event) => {
       context.drawImage(source,0,0,target.width,target.height);
       source.close();
       bitmap = undefined;
-      const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.76 });
+      const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.72 });
       self.postMessage({ ok:true, preview, width:target.width, height:target.height });
       return;
     }
@@ -86,7 +86,7 @@ self.onmessage = async (event) => {
     if (!context) throw new Error('preview 2d context unavailable');
     context.drawImage(bitmap,0,0,width,height);
     bitmap.close(); bitmap = undefined;
-    const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.76 });
+    const preview = await canvas.convertToBlob({ type:'image/jpeg', quality:0.72 });
     self.postMessage({ ok:true, preview, width, height });
   } catch (error) {
     try { bitmap?.close?.(); } catch {}
@@ -117,10 +117,10 @@ export async function createSegmentationImagePreview(
   const worker = new Worker(workerUrl);
   try {
     const result = await new Promise<{ ok: boolean; preview?: Blob; width?: number; height?: number }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("生成分割预览超时")), 12_000);
+      const timer = setTimeout(() => reject(new Error("生成分割预览超时")), 7_000);
       worker.onmessage = (event: MessageEvent) => { clearTimeout(timer); resolve(event.data ?? { ok: false }); };
       worker.onerror = () => { clearTimeout(timer); reject(new Error("分割预览 Worker 失败")); };
-      worker.postMessage({ blob: source, maxEdge: Math.max(640, Math.min(1600, Math.round(maxEdge))) });
+      worker.postMessage({ blob: source, maxEdge: Math.max(480, Math.min(1200, Math.round(maxEdge))) });
     });
     if (!result.ok || !(result.preview instanceof Blob) || !Number(result.width) || !Number(result.height)) return undefined;
     return { blob: result.preview, width: Number(result.width), height: Number(result.height) };
