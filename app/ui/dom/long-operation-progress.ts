@@ -15,6 +15,8 @@ export interface LongOperationProgressOptions {
 
 const CONTROLLERS = new WeakMap<HTMLElement, LongOperationProgressController>();
 const FOUNDATION_PROGRESS_EVENT = "coffee-foundation:ocr-progress";
+const INITIAL_ESTIMATED_TOTAL_MS = 10_000;
+const MAX_PREDICTED_WHILE_BUSY = 97.5;
 
 export function shouldShowLongOperationProgress(
   busySinceMs: number | undefined,
@@ -67,7 +69,7 @@ function installLongOperationProgressStyles(): void {
     .aromasense-long-progress__label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:720;letter-spacing:.02em}
     .aromasense-long-progress__elapsed{flex:0 0 auto;color:#9f978b;font-size:10px;font-variant-numeric:tabular-nums}
     .aromasense-long-progress__track{position:relative;height:5px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.09)}
-    .aromasense-long-progress__fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:#d6ad63;will-change:width;transition:width .28s ease;transform:none!important}
+    .aromasense-long-progress__fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:#d6ad63;will-change:width;transition:width .16s linear;transform:none!important}
     .aromasense-long-progress__note{margin-top:7px;color:#8f8880;font-size:9px;line-height:1.35}
     @media(prefers-reduced-motion:reduce){.aromasense-long-progress__fill{transition:none}}
   `;
@@ -97,13 +99,16 @@ export class LongOperationProgressController {
   private busySinceMs?: number;
   private revealTimer?: ReturnType<typeof setTimeout>;
   private updateTimer?: ReturnType<typeof setInterval>;
+  private hideTimer?: ReturnType<typeof setTimeout>;
   private latestPercent = 0;
+  private confirmedPercent = 0;
   private foundationPercent?: number;
   private foundationStatus = "";
+  private estimatedTotalMs = INITIAL_ESTIMATED_TOTAL_MS;
 
   constructor(private readonly root: HTMLElement, options: LongOperationProgressOptions = {}) {
     this.delayMs = Math.max(0, options.delayMs ?? LONG_OPERATION_PROGRESS_DELAY_MS);
-    this.updateIntervalMs = Math.max(100, options.updateIntervalMs ?? 250);
+    this.updateIntervalMs = Math.max(80, options.updateIntervalMs ?? 120);
     installLongOperationProgressStyles();
 
     this.overlay = document.createElement("section");
@@ -132,7 +137,7 @@ export class LongOperationProgressController {
 
     const note = document.createElement("div");
     note.className = "aromasense-long-progress__note";
-    note.textContent = "进度只向右推进；识别阶段优先使用 PP-OCRv5 实际运行进度。";
+    note.textContent = "按预计耗时连续推进，并用实际 OCR 节点平滑校准；进度不会倒退。";
     this.overlay.append(head, this.progressNode, note);
     document.body.append(this.overlay);
 
@@ -174,7 +179,8 @@ export class LongOperationProgressController {
   private syncBusyState(): void {
     const busy = this.root.hasAttribute("aria-busy");
     if (!busy) {
-      this.reset();
+      if (this.busySinceMs !== undefined) this.completeAndHide();
+      else this.hardReset();
       return;
     }
     if (this.busySinceMs !== undefined) {
@@ -182,10 +188,14 @@ export class LongOperationProgressController {
       return;
     }
 
+    if (this.hideTimer) clearTimeout(this.hideTimer);
+    this.hideTimer = undefined;
     this.busySinceMs = Date.now();
-    this.latestPercent = 0;
+    this.latestPercent = 0.6;
+    this.confirmedPercent = 0.6;
     this.foundationPercent = undefined;
     this.foundationStatus = "";
+    this.estimatedTotalMs = INITIAL_ESTIMATED_TOTAL_MS;
 
     const reveal = () => {
       if (!this.root.hasAttribute("aria-busy") || this.busySinceMs === undefined) return;
@@ -201,20 +211,46 @@ export class LongOperationProgressController {
   private clearTimers(): void {
     if (this.revealTimer) clearTimeout(this.revealTimer);
     if (this.updateTimer) clearInterval(this.updateTimer);
+    if (this.hideTimer) clearTimeout(this.hideTimer);
     this.revealTimer = undefined;
     this.updateTimer = undefined;
+    this.hideTimer = undefined;
   }
 
-  private reset(): void {
+  private hardReset(): void {
     this.clearTimers();
     this.busySinceMs = undefined;
     this.overlay.hidden = true;
     this.latestPercent = 0;
+    this.confirmedPercent = 0;
     this.foundationPercent = undefined;
     this.foundationStatus = "";
+    this.estimatedTotalMs = INITIAL_ESTIMATED_TOTAL_MS;
     this.fillNode.style.width = "0%";
     this.progressNode.setAttribute("aria-valuenow", "0");
     this.progressNode.removeAttribute("aria-valuetext");
+  }
+
+  private completeAndHide(): void {
+    const status = this.statusText();
+    const failed = /失败|错误|异常|停止/u.test(status);
+    this.clearActiveTimersOnly();
+    this.latestPercent = failed ? Math.min(99, Math.max(this.latestPercent, this.confirmedPercent)) : 100;
+    this.confirmedPercent = Math.max(this.confirmedPercent, this.latestPercent);
+    this.fillNode.style.width = `${this.latestPercent.toFixed(2)}%`;
+    this.progressNode.setAttribute("aria-valuenow", this.latestPercent.toFixed(2));
+    this.labelNode.textContent = failed ? status : "识别完成";
+    this.elapsedNode.textContent = failed ? "任务已停止" : "完成";
+    this.progressNode.setAttribute("aria-valuetext", failed ? `${status}；任务已停止` : "识别完成；100%" );
+    this.busySinceMs = undefined;
+    this.hideTimer = setTimeout(() => this.hardReset(), failed ? 1100 : 360);
+  }
+
+  private clearActiveTimersOnly(): void {
+    if (this.revealTimer) clearTimeout(this.revealTimer);
+    if (this.updateTimer) clearInterval(this.updateTimer);
+    this.revealTimer = undefined;
+    this.updateTimer = undefined;
   }
 
   private statusText(): string {
@@ -225,25 +261,41 @@ export class LongOperationProgressController {
     return status || rootFallbackLabel(this.root);
   }
 
+  private calibrateEstimate(elapsedMs: number, confirmed: number): void {
+    if (confirmed < 3 || confirmed >= 99 || elapsedMs < 250) return;
+    const impliedTotal = elapsedMs / Math.max(0.03, confirmed / 100);
+    const bounded = Math.max(elapsedMs + 1000, Math.min(120_000, impliedTotal));
+    this.estimatedTotalMs = this.estimatedTotalMs * 0.76 + bounded * 0.24;
+  }
+
   private renderProgress(): void {
     if (this.busySinceMs === undefined || !this.root.hasAttribute("aria-busy")) return;
     const now = Date.now();
     if (!shouldShowLongOperationProgress(this.busySinceMs, now, this.delayMs)) return;
 
     const status = this.statusText();
-    const elapsedSeconds = Math.max(0, Math.floor((now - this.busySinceMs) / 1000));
+    const elapsedMs = Math.max(0, now - this.busySinceMs);
     const parsed = parseLongOperationStatus(status);
-    const candidate = Math.max(1, parsed?.percent ?? 1, this.foundationPercent ?? 0);
-    this.latestPercent = Math.max(this.latestPercent, Math.min(100, candidate));
+    const confirmed = Math.max(0.6, parsed?.percent ?? 0, this.foundationPercent ?? 0);
+    this.confirmedPercent = Math.max(this.confirmedPercent, Math.min(99, confirmed));
+    this.calibrateEstimate(elapsedMs, this.confirmedPercent);
+
+    const predictedByTime = Math.min(MAX_PREDICTED_WHILE_BUSY, elapsedMs / Math.max(1000, this.estimatedTotalMs) * 100);
+    const desired = Math.min(MAX_PREDICTED_WHILE_BUSY, Math.max(this.confirmedPercent, predictedByTime));
+    if (desired > this.latestPercent) {
+      const delta = desired - this.latestPercent;
+      this.latestPercent = Math.min(desired, this.latestPercent + Math.max(0.10, delta * 0.10));
+    }
 
     const detailLabel = this.foundationStatus && /识别/u.test(status)
       ? `${status} · ${this.foundationStatus}`
       : status;
+    const remainingMs = Math.max(0, this.estimatedTotalMs - elapsedMs);
     this.labelNode.textContent = detailLabel;
-    this.elapsedNode.textContent = `已耗时 ${elapsedSeconds} 秒`;
+    this.elapsedNode.textContent = remainingMs < 800 ? "即将完成" : `预计剩余 ${Math.max(1, Math.round(remainingMs / 1000))} 秒`;
     this.fillNode.style.width = `${this.latestPercent.toFixed(2)}%`;
     this.progressNode.setAttribute("aria-valuenow", this.latestPercent.toFixed(2));
-    this.progressNode.setAttribute("aria-valuetext", `${detailLabel}；${Math.round(this.latestPercent)}%；已耗时 ${elapsedSeconds} 秒`);
+    this.progressNode.setAttribute("aria-valuetext", `${detailLabel}；${Math.round(this.latestPercent)}%；预计剩余 ${Math.max(0, Math.round(remainingMs / 1000))} 秒`);
   }
 }
 
