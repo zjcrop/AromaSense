@@ -10,7 +10,7 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     env:
-      PATCH_REVISION: "2"
+      PATCH_REVISION: "3"
     steps:
       - uses: actions/checkout@v7
         with:
