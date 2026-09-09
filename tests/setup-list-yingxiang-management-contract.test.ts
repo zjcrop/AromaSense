@@ -6,14 +6,20 @@ function source(path: string): string {
   return readFileSync(path, "utf8");
 }
 
-test("setup home exposes the six requested actions in a fixed 2x3 order", () => {
+test("setup home exposes only batch intake and clear list while batch intake owns six sources", () => {
   const text = source("app/ui/dom/home-action-enhancements.ts");
-  for (const label of ["拍照识别", "分割识别", "文字录入", "二维码录入", "数据导入", "清空列"]) {
-    assert.ok(text.includes(label), `missing home action: ${label}`);
+  assert.match(text, /batch\.textContent = "批量录入"/u);
+  assert.match(text, /clear\.textContent = "清空列表"/u);
+  assert.match(text, /const visible = button === batch \|\| button === clear/u);
+  assert.match(text, /data-aromasense-intake-hidden/u);
+  for (const label of ["图片", "分割识别", "文字录入", "表格", "链接", "二维码"]) {
+    assert.ok(text.includes(label), `missing batch intake source: ${label}`);
   }
-  assert.match(text, /const ordered = \[photo, split, text, qr, data, clear\]/u);
+  assert.match(text, /const ordered = \[photo, split, text, sheet, link, qr\]/u);
   assert.match(text, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/u);
-  assert.doesNotMatch(text, /textContent = "批量识别"/u);
+  assert.match(text, /import-source__footer/u);
+  assert.match(text, /import-source__title/u);
+  assert.match(text, /\.remove\(\)/u);
 });
 
 test("recognized setup rows are accepted by default and only expose delete", () => {
