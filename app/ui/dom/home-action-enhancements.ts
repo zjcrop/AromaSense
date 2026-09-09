@@ -86,6 +86,10 @@ function installHomeActionStyles(): void {
   document.head.append(style);
 }
 
+function setTextIfChanged(node: HTMLElement | undefined | null, text: string): void {
+  if (node && node.textContent?.trim() !== text) node.textContent = text;
+}
+
 function removeCuppingListHeading(root: ParentNode = document): void {
   for (const title of root.querySelectorAll<HTMLElement>(".batch-setup__home-section-title")) {
     if (title.textContent?.trim() !== "杯测列表") continue;
@@ -112,11 +116,11 @@ function removeCuppingTypeHeading(root: ParentNode = document): void {
 
 function renameSplitRecognition(root: ParentNode = document): void {
   for (const control of root.querySelectorAll<HTMLButtonElement>("[data-manual-split-photo]")) {
-    if (control.textContent?.trim() !== "分割识别") control.textContent = "分割识别";
-    control.setAttribute("aria-label", "分割识别");
+    setTextIfChanged(control, "分割识别");
+    if (control.getAttribute("aria-label") !== "分割识别") control.setAttribute("aria-label", "分割识别");
   }
   for (const title of root.querySelectorAll<HTMLElement>(".manual-split-photo__title")) {
-    if (title.textContent?.trim() !== "分割识别") title.textContent = "分割识别";
+    setTextIfChanged(title, "分割识别");
   }
   for (const panel of root.querySelectorAll<HTMLElement>(".manual-split-photo__panel")) {
     if (panel.getAttribute("aria-label") === "手工切分拍照") panel.setAttribute("aria-label", "分割识别");
@@ -215,8 +219,8 @@ function enhanceBatchSourcePicker(panel: HTMLElement): void {
   const close = panel.querySelector<HTMLButtonElement>(".import-source__close");
   if (close && close.parentElement !== footer) footer.append(close);
   if (close) {
-    close.textContent = "关闭";
-    close.setAttribute("aria-label", "关闭");
+    setTextIfChanged(close, "关闭");
+    if (close.getAttribute("aria-label") !== "关闭") close.setAttribute("aria-label", "关闭");
   }
   if (header && !header.children.length) header.remove();
 }
@@ -255,24 +259,24 @@ function normalizeTwoHomeActions(actions: HTMLElement): void {
   const data = buttons.find((button) => button.dataset.homeAction === "import-data");
 
   if (batch) {
-    batch.textContent = "批量录入";
-    batch.setAttribute("aria-label", "批量录入");
+    setTextIfChanged(batch, "批量录入");
+    if (batch.getAttribute("aria-label") !== "批量录入") batch.setAttribute("aria-label", "批量录入");
     batch.classList.add("batch-setup__home-capture-action");
   }
   if (clear) {
-    clear.textContent = "清空列表";
-    clear.setAttribute("aria-label", "清空列表");
+    setTextIfChanged(clear, "清空列表");
+    if (clear.getAttribute("aria-label") !== "清空列表") clear.setAttribute("aria-label", "清空列表");
     clear.classList.add("batch-setup__home-capture-action");
   }
   if (manual) {
-    manual.textContent = "文字录入";
-    manual.setAttribute("aria-label", "文字录入");
+    setTextIfChanged(manual, "文字录入");
+    if (manual.getAttribute("aria-label") !== "文字录入") manual.setAttribute("aria-label", "文字录入");
   }
   if (split) {
-    split.textContent = "分割识别";
-    split.setAttribute("aria-label", "分割识别");
+    setTextIfChanged(split, "分割识别");
+    if (split.getAttribute("aria-label") !== "分割识别") split.setAttribute("aria-label", "分割识别");
   }
-  if (data) data.textContent = "数据导入";
+  setTextIfChanged(data, "数据导入");
 
   for (const button of [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")]) {
     const visible = button === batch || button === clear;
@@ -280,6 +284,7 @@ function normalizeTwoHomeActions(actions: HTMLElement): void {
       button.hidden = false;
       delete button.dataset.aromasenseIntakeHidden;
       button.removeAttribute("aria-hidden");
+      if (button.tabIndex < 0) button.tabIndex = 0;
     } else {
       button.hidden = true;
       button.dataset.aromasenseIntakeHidden = "true";
@@ -299,5 +304,23 @@ function scan(): void {
   for (const panel of document.querySelectorAll<HTMLElement>(".import-source__panel")) enhanceBatchSourcePicker(panel);
 }
 
+const observerOptions: MutationObserverInit = { childList: true, subtree: true };
+let scanTimer: number | undefined;
+let observer: MutationObserver;
+
+function scheduleScan(): void {
+  if (scanTimer !== undefined) return;
+  scanTimer = window.setTimeout(() => {
+    scanTimer = undefined;
+    observer.disconnect();
+    try {
+      scan();
+    } finally {
+      observer.observe(document.documentElement, observerOptions);
+    }
+  }, 0);
+}
+
 scan();
-new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+observer = new MutationObserver(scheduleScan);
+observer.observe(document.documentElement, observerOptions);

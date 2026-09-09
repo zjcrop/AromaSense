@@ -8,8 +8,8 @@ function source(path: string): string {
 
 test("setup home exposes only batch intake and clear list while batch intake owns six sources", () => {
   const text = source("app/ui/dom/home-action-enhancements.ts");
-  assert.match(text, /batch\.textContent = "批量录入"/u);
-  assert.match(text, /clear\.textContent = "清空列表"/u);
+  assert.match(text, /setTextIfChanged\(batch, "批量录入"\)/u);
+  assert.match(text, /setTextIfChanged\(clear, "清空列表"\)/u);
   assert.match(text, /const visible = button === batch \|\| button === clear/u);
   assert.match(text, /data-aromasense-intake-hidden/u);
   for (const label of ["图片", "分割识别", "文字录入", "表格", "链接", "二维码"]) {
