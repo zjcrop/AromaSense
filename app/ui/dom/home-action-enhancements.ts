@@ -15,6 +15,9 @@ function installHomeActionStyles(): void {
       min-width:0!important;
       box-sizing:border-box!important;
     }
+    .batch-setup__capture-actions>[data-aromasense-intake-hidden="true"]{
+      display:none!important;
+    }
     .batch-setup__session-meta-input{
       text-align:center!important;
       text-align-last:center!important;
@@ -31,6 +34,42 @@ function installHomeActionStyles(): void {
       align-items:center!important;
       justify-content:center!important;
       text-align:center!important;
+    }
+    .import-source__panel.is-batch-intake-picker{
+      display:flex!important;
+      flex-direction:column!important;
+      justify-content:center!important;
+      min-height:min(680px,88vh)!important;
+    }
+    .import-source__panel.is-batch-intake-picker .import-source__grid{
+      width:min(620px,100%)!important;
+      margin:auto!important;
+      grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    }
+    .import-source__panel.is-batch-intake-picker .import-source__link-form:not([hidden]){
+      width:min(620px,100%)!important;
+      margin:auto!important;
+    }
+    .import-source__footer{
+      display:flex!important;
+      justify-content:center!important;
+      align-items:center!important;
+      width:100%!important;
+      margin-top:auto!important;
+      padding-top:18px!important;
+      border-top:1px solid rgba(255,255,255,.06)!important;
+    }
+    .import-source__footer .import-source__close{
+      min-width:132px!important;
+      min-height:40px!important;
+      text-align:center!important;
+      color:#b9b2a8!important;
+      font-weight:700!important;
+    }
+    @media(max-width:620px){
+      .import-source__panel.is-batch-intake-picker{
+        min-height:100dvh!important;
+      }
     }
   `;
   document.head.append(style);
@@ -73,100 +112,171 @@ function renameSplitRecognition(root: ParentNode = document): void {
   }
 }
 
-function importDataButton(actions: HTMLElement): HTMLButtonElement | undefined {
-  return actions.querySelector<HTMLButtonElement>('[data-home-action="import-data"]')
-    ?? [...actions.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => ["导入数据", "数据导入"].includes(button.textContent?.trim() ?? ""));
+function sourceOptionTitle(option: Element): string {
+  return option.querySelector<HTMLElement>(".import-source__option-title")?.textContent?.trim() ?? "";
 }
 
-function openCanonicalQrImport(actions: HTMLElement): void {
-  const importButton = importDataButton(actions);
-  if (!importButton) {
-    window.alert("二维码录入入口暂不可用，请使用“数据导入”中的二维码功能。");
-    return;
+function sourceIcon(kind: "split" | "text"): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("import-source__icon");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.6");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("d", kind === "split"
+    ? "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z"
+    : "M5 5h14 M5 9h14 M5 13h14 M5 17h10");
+  svg.append(path);
+  return svg;
+}
+
+function customSourceOption(kind: "split" | "text", title: string, note: string, onClick: () => void): HTMLButtonElement {
+  const control = document.createElement("button");
+  control.type = "button";
+  control.className = "import-source__option";
+  control.dataset.batchIntakeSource = kind;
+  const strong = document.createElement("strong");
+  strong.className = "import-source__option-title";
+  strong.textContent = title;
+  const small = document.createElement("small");
+  small.className = "import-source__option-note";
+  small.textContent = note;
+  control.append(sourceIcon(kind), strong, small);
+  control.addEventListener("click", onClick);
+  return control;
+}
+
+function hiddenSourceAction(selector: string): HTMLButtonElement | undefined {
+  return document.querySelector<HTMLButtonElement>(`.batch-setup__capture-actions ${selector}`) ?? undefined;
+}
+
+function enhanceBatchSourcePicker(panel: HTMLElement): void {
+  const grid = panel.querySelector<HTMLElement>(".import-source__grid");
+  if (!grid) return;
+  const existing = [...grid.querySelectorAll<HTMLButtonElement>(".import-source__option")];
+  const photo = existing.find((option) => sourceOptionTitle(option) === "图片");
+  if (!photo) return;
+
+  panel.classList.add("is-batch-intake-picker");
+  const overlay = panel.closest<HTMLElement>(".import-source");
+  const sheet = existing.find((option) => sourceOptionTitle(option) === "表格");
+  const link = existing.find((option) => sourceOptionTitle(option) === "链接");
+  const qr = existing.find((option) => sourceOptionTitle(option) === "二维码");
+
+  let split = grid.querySelector<HTMLButtonElement>('[data-batch-intake-source="split"]');
+  if (!split) {
+    split = customSourceOption("split", "分割识别", "复杂照片先手工框选，再按分区识别", () => {
+      overlay?.remove();
+      const action = hiddenSourceAction('[data-manual-split-photo]');
+      if (action) action.click();
+      else window.alert("分割识别入口暂不可用。");
+    });
   }
 
-  importButton.click();
-  queueMicrotask(() => {
-    const qrOption = [...document.querySelectorAll<HTMLButtonElement>(".import-source__option")]
-      .find((button) => button.querySelector<HTMLElement>(".import-source__option-title")?.textContent?.trim() === "二维码");
-    if (!qrOption) {
-      window.alert("二维码扫描器未能打开，请使用“数据导入”中的二维码功能。");
-      return;
-    }
-    qrOption.click();
-  });
+  let text = grid.querySelector<HTMLButtonElement>('[data-batch-intake-source="text"]');
+  if (!text) {
+    text = customSourceOption("text", "文字录入", "逐行录入或整段粘贴，完成后自动分行识别", () => {
+      overlay?.remove();
+      const action = hiddenSourceAction('[data-home-action="manual-entry"]');
+      if (action) action.click();
+      else window.alert("文字录入入口暂不可用。");
+    });
+  }
+
+  const ordered = [photo, split, text, sheet, link, qr].filter((option): option is HTMLButtonElement => Boolean(option));
+  const current = [...grid.querySelectorAll<HTMLButtonElement>(":scope > .import-source__option")];
+  if (ordered.length === 6 && (current.length !== 6 || current.some((option, index) => option !== ordered[index]))) {
+    grid.replaceChildren(...ordered);
+  }
+
+  const header = panel.querySelector<HTMLElement>(".import-source__header");
+  header?.querySelector<HTMLElement>(".import-source__title")?.remove();
+  let footer = panel.querySelector<HTMLElement>(".import-source__footer");
+  if (!footer) {
+    footer = document.createElement("footer");
+    footer.className = "import-source__footer";
+    panel.append(footer);
+  }
+  const close = panel.querySelector<HTMLButtonElement>(".import-source__close");
+  if (close && close.parentElement !== footer) footer.append(close);
+  if (close) {
+    close.textContent = "关闭";
+    close.setAttribute("aria-label", "关闭");
+  }
+  if (header && !header.children.length) header.remove();
 }
 
-function ensureQrImportAction(actions: HTMLElement): HTMLButtonElement | undefined {
-  const existing = actions.querySelector<HTMLButtonElement>('[data-home-action="qr-import"]');
-  if (existing) return existing;
-  const importButton = importDataButton(actions);
-  if (!importButton) return undefined;
-
+function ensureHiddenQrAction(actions: HTMLElement): void {
+  if (actions.querySelector('[data-home-action="qr-import"]')) return;
+  const importButton = actions.querySelector<HTMLButtonElement>('[data-home-action="import-data"]');
+  if (!importButton) return;
   const control = document.createElement("button");
   control.type = "button";
   control.className = "batch-setup__capture batch-setup__home-capture-action";
   control.dataset.homeAction = "qr-import";
+  control.dataset.aromasenseIntakeHidden = "true";
+  control.hidden = true;
   control.textContent = "二维码录入";
-  control.setAttribute("aria-label", "二维码录入");
-  control.addEventListener("click", () => openCanonicalQrImport(actions));
-  importButton.insertAdjacentElement("afterend", control);
-  return control;
-}
-
-function ensurePhotoRecognitionAction(actions: HTMLElement): HTMLButtonElement | undefined {
-  const existing = actions.querySelector<HTMLButtonElement>('[data-home-action="photo-recognition"]');
-  if (existing) return existing;
-  const legacy = [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")]
-    .find((button) => button.textContent?.trim() === "批量识别");
-  if (!legacy) return undefined;
-  const control = legacy.cloneNode(false) as HTMLButtonElement;
-  control.type = "button";
-  control.dataset.homeAction = "photo-recognition";
-  control.textContent = "拍照识别";
-  control.setAttribute("aria-label", "拍照识别");
   control.addEventListener("click", () => {
-    const root = actions.closest<HTMLElement>(".batch-setup") ?? document.body;
-    const camera = root.querySelector<HTMLInputElement>('input.batch-setup__file-input[accept="image/*"][capture="environment"]');
-    if (!camera) {
-      window.alert("当前拍照入口暂不可用。");
-      return;
-    }
-    camera.click();
+    importButton.click();
+    queueMicrotask(() => {
+      const option = [...document.querySelectorAll<HTMLButtonElement>(".import-source__option")]
+        .find((item) => sourceOptionTitle(item) === "二维码");
+      option?.click();
+    });
   });
-  legacy.replaceWith(control);
-  return control;
+  actions.append(control);
 }
 
-function normalizeActionSizing(actions: HTMLElement): void {
-  for (const control of actions.querySelectorAll<HTMLButtonElement>(":scope > button")) {
-    control.classList.add("batch-setup__home-capture-action");
+function normalizeTwoHomeActions(actions: HTMLElement): void {
+  const buttons = [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")];
+  const batch = buttons.find((button) => button.dataset.homeAction === "batch-recognition")
+    ?? buttons.find((button) => ["批量识别", "批量录入"].includes(button.textContent?.trim() ?? ""));
+  const clear = buttons.find((button) => button.dataset.homeAction === "clear-list")
+    ?? buttons.find((button) => ["清空样品", "清空列表", "清空列"].includes(button.textContent?.trim() ?? ""));
+  const manual = buttons.find((button) => button.dataset.homeAction === "manual-entry")
+    ?? buttons.find((button) => ["手工录入", "文字录入"].includes(button.textContent?.trim() ?? ""));
+  const split = buttons.find((button) => button.hasAttribute("data-manual-split-photo"));
+  const data = buttons.find((button) => button.dataset.homeAction === "import-data");
+
+  if (batch) {
+    batch.textContent = "批量录入";
+    batch.setAttribute("aria-label", "批量录入");
+    batch.classList.add("batch-setup__home-capture-action");
   }
-}
+  if (clear) {
+    clear.textContent = "清空列表";
+    clear.setAttribute("aria-label", "清空列表");
+    clear.classList.add("batch-setup__home-capture-action");
+  }
+  if (manual) {
+    manual.textContent = "文字录入";
+    manual.setAttribute("aria-label", "文字录入");
+  }
+  if (split) {
+    split.textContent = "分割识别";
+    split.setAttribute("aria-label", "分割识别");
+  }
+  if (data) data.textContent = "数据导入";
 
-function normalizeSixActions(actions: HTMLElement): void {
-  const photo = ensurePhotoRecognitionAction(actions);
-  const split = actions.querySelector<HTMLButtonElement>("[data-manual-split-photo]")
-    ?? [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")].find((button) => button.textContent?.trim() === "分割识别");
-  const text = [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")]
-    .find((button) => ["手工录入", "文字录入"].includes(button.textContent?.trim() ?? ""));
-  const qr = ensureQrImportAction(actions);
-  const data = importDataButton(actions);
-  const clear = [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")]
-    .find((button) => ["清空样品", "清空列表", "清空列"].includes(button.textContent?.trim() ?? ""));
-
-  if (photo) photo.textContent = "拍照识别";
-  if (text) { text.textContent = "文字录入"; text.setAttribute("aria-label", "文字录入"); }
-  if (qr) { qr.textContent = "二维码录入"; qr.setAttribute("aria-label", "二维码录入"); }
-  if (data) { data.textContent = "数据导入"; data.setAttribute("aria-label", "数据导入"); }
-  if (clear) { clear.textContent = "清空列"; clear.setAttribute("aria-label", "清空列"); }
-
-  const ordered = [photo, split, text, qr, data, clear].filter((control): control is HTMLButtonElement => Boolean(control));
-  if (ordered.length !== 6) return;
-  const current = [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")];
-  if (current.length === 6 && current.every((control, index) => control === ordered[index])) return;
-  actions.replaceChildren(...ordered);
+  for (const button of [...actions.querySelectorAll<HTMLButtonElement>(":scope > button")]) {
+    const visible = button === batch || button === clear;
+    if (visible) {
+      button.hidden = false;
+      delete button.dataset.aromasenseIntakeHidden;
+      button.removeAttribute("aria-hidden");
+    } else {
+      button.hidden = true;
+      button.dataset.aromasenseIntakeHidden = "true";
+      button.setAttribute("aria-hidden", "true");
+      button.tabIndex = -1;
+    }
+  }
+  ensureHiddenQrAction(actions);
 }
 
 function scan(): void {
@@ -174,10 +284,8 @@ function scan(): void {
   removeCuppingListHeading();
   removeCuppingTypeHeading();
   renameSplitRecognition();
-  for (const actions of document.querySelectorAll<HTMLElement>(".batch-setup__capture-actions")) {
-    normalizeActionSizing(actions);
-    normalizeSixActions(actions);
-  }
+  for (const actions of document.querySelectorAll<HTMLElement>(".batch-setup__capture-actions")) normalizeTwoHomeActions(actions);
+  for (const panel of document.querySelectorAll<HTMLElement>(".import-source__panel")) enhanceBatchSourcePicker(panel);
 }
 
 scan();
