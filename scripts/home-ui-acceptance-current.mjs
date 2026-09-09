@@ -43,13 +43,16 @@ const batchPickerAcceptance = `
       const grid=document.querySelector('.import-source__grid');
       const footer=document.querySelector('.import-source__footer');
       if(!(panel instanceof HTMLElement)||!(grid instanceof HTMLElement)||!(footer instanceof HTMLElement)) return null;
-      const pr=panel.getBoundingClientRect(), gr=grid.getBoundingClientRect();
+      const pr=panel.getBoundingClientRect(), gr=grid.getBoundingClientRect(), fr=footer.getBoundingClientRect();
+      const rows=[...new Set([...grid.querySelectorAll('.import-source__option')].map(n=>Math.round(n.getBoundingClientRect().top)))];
       return {
         titles:[...grid.querySelectorAll('.import-source__option-title')].map(n=>n.textContent?.trim()),
         visibleTitle:[...panel.querySelectorAll('.import-source__title')].some(n=>getComputedStyle(n).display!=='none' && n.textContent?.trim()==='选择识别来源'),
         header:Boolean(panel.querySelector('.import-source__header')),
         close:footer.querySelector('.import-source__close')?.textContent?.trim() || '',
         footerAfterGrid:Boolean(grid.compareDocumentPosition(footer)&Node.DOCUMENT_POSITION_FOLLOWING),
+        footerBelowGrid:fr.top>gr.bottom,
+        rows:rows.length,
         horizontalError:Math.abs((gr.left+gr.right)/2-(pr.left+pr.right)/2),
         verticalError:Math.abs((gr.top+gr.bottom)/2-(pr.top+pr.bottom)/2),
         panelHeight:pr.height
@@ -57,8 +60,9 @@ const batchPickerAcceptance = `
     })()\`);
     requireCondition(JSON.stringify(intakePicker?.titles) === JSON.stringify(["图片","分割识别","文字录入","表格","链接","二维码"]), \`Wrong six-source picker order: \${JSON.stringify(intakePicker)}\`);
     requireCondition(intakePicker?.visibleTitle === false && intakePicker?.header === false, \`Batch intake picker must not show source title/header: \${JSON.stringify(intakePicker)}\`);
-    requireCondition(intakePicker?.close === "关闭" && intakePicker?.footerAfterGrid === true, \`Close action is not isolated at the bottom: \${JSON.stringify(intakePicker)}\`);
-    requireCondition((intakePicker?.horizontalError ?? 999) <= 2 && (intakePicker?.verticalError ?? 999) <= (intakePicker?.panelHeight ?? 0) * 0.20, \`Six intake sources are not centered in the panel: \${JSON.stringify(intakePicker)}\`);
+    requireCondition(intakePicker?.close === "关闭" && intakePicker?.footerAfterGrid === true && intakePicker?.footerBelowGrid === true, \`Close action is not isolated at the bottom: \${JSON.stringify(intakePicker)}\`);
+    requireCondition(intakePicker?.rows === 3, \`Six intake sources must form a 2x3 grid: \${JSON.stringify(intakePicker)}\`);
+    requireCondition((intakePicker?.horizontalError ?? 999) <= 2 && (intakePicker?.verticalError ?? 999) <= 12, \`Six intake sources are not geometrically centered in the panel: \${JSON.stringify(intakePicker)}\`);
     await cdp.evaluate(\`document.querySelector('.import-source__footer .import-source__close')?.click()\`);
 `;
 source = source.replace(marker, `${marker}${batchPickerAcceptance}`);
