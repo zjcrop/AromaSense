@@ -31,24 +31,24 @@ function installModeSelectStyles(): void {
   style.textContent = `
     .batch-setup__target-direct{display:none!important}
     .batch-setup__target-help{display:none!important}
-    .batch-setup__cupping-type{display:grid;gap:6px;width:100%;padding:2px 0 0}
-    .batch-setup__cupping-type-label{color:#918d86;font-size:11px;letter-spacing:.06em}
+    .batch-setup__cupping-type{display:block;width:100%;padding:2px 0 0}
     .batch-setup__cupping-type-select{
-      width:100%;min-height:45px;box-sizing:border-box;margin:0;padding:8px 28px 8px 2px;
+      width:100%;min-height:45px;box-sizing:border-box;margin:0;padding:8px 28px;
       border:0;border-bottom:1px solid rgba(214,173,99,.24);border-radius:0;
       background:#151515;color:#f4f1eb;font:inherit;font-size:15px;outline:none;cursor:pointer;
+      text-align:center;text-align-last:center;
     }
     .batch-setup__cupping-type-select:focus{border-bottom-color:#d6ad63}
-    .batch-setup__cupping-type-select option{background:#171717;color:#f4f1eb}
+    .batch-setup__cupping-type-select option{background:#171717;color:#f4f1eb;text-align:center}
   `;
   document.head.append(style);
 }
 
 /**
  * Thin compatibility layer over the existing home renderer. The old home UI is
- * preserved intact; only its three direct mode buttons are replaced by the new
- * four-mode `杯测类型` select. The nested base renderer remains the single
- * source of truth for draft persistence and blind/semi-blind flow switching.
+ * preserved intact; only its three direct mode buttons are replaced by one
+ * four-mode select. The nested base renderer remains the single source of truth
+ * for draft persistence and blind/semi-blind flow switching.
  */
 export class BatchSetupRenderer {
   private readonly home: HomeBatchSetupRenderer;
@@ -93,9 +93,6 @@ export class BatchSetupRenderer {
 
     const wrapper = document.createElement("label");
     wrapper.className = "batch-setup__cupping-type";
-    const caption = document.createElement("span");
-    caption.className = "batch-setup__cupping-type-label";
-    caption.textContent = "杯测类型";
     const select = document.createElement("select");
     select.className = "batch-setup__cupping-type-select";
     select.dataset.cuppingType = "true";
@@ -114,7 +111,7 @@ export class BatchSetupRenderer {
       host.setCuppingMode(mode, true);
       select.value = mode;
     });
-    wrapper.append(caption, select);
+    wrapper.append(select);
     shell.prepend(wrapper);
 
     this.modeObserver = new MutationObserver(() => syncFromHost());
