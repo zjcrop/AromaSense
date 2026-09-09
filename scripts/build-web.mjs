@@ -51,57 +51,15 @@ const requiredBrowserOcrMarkers = [
   "roiWorkerOnly"
 ];
 
-async function installDelayedOnnxPredictRecoveryBeforeBundle() {
-  const sourcePath = resolve(root, "node_modules/luckybean-static-app/src/recognition-paddle-ocr.js");
-  let source = await readFile(sourcePath, "utf8");
-  if (source.includes("predict-runtime-recovery-success")) {
-    console.log("Pinned Foundation already contains predict-time ONNX recovery; source hotfix skipped");
-    return;
+async function verifyPinnedOnnxPredictRecoveryBeforeBundle() {
+  const sourcePath = resolve(root, "node_modules/luckybean-static-app/src/recognition-paddle-ocr-fast.js");
+  const source = await readFile(sourcePath, "utf8");
+  for (const marker of ["predict-runtime-recovery-success", "forceCompatibility = true", "workerSha256", "disposePolicy:'capture-session'"]) {
+    if (!source.includes(marker)) {
+      throw new Error(`Pinned Foundation fast provider is missing required runtime protection: ${marker}`);
+    }
   }
-  if (!source.includes("const VERSION = '0.4.12';")) {
-    throw new Error("Pinned Foundation changed without native predict-time ONNX recovery; refusing an unverified OCR source");
-  }
-  const oldBlock = `async function predict(images) {
-  const ocr = await ensureEngine(); const blocks = [], groups = [];
-  for (let index = 0; index < images.length; index += 1) {
-    const image = images[index]; emit(\`PP-OCRv5 正在识别第 \${index + 1}/\${images.length} 张图片\`, 20 + Math.round(index / Math.max(1, images.length) * 70));
-    const diagnosticStarted = diagnosticNow();
-    const prediction = ocr.predict(image.blob, { textDetLimitSideLen:currentLimitSide(), textDetLimitType:'min', textDetMaxSideLimit:currentMaxSide(), textDetThresh:0.22, textDetBoxThresh:0.35, textDetUnclipRatio:1.55, textRecScoreThresh:0.28 });
-    const results = await withTimeout(prediction, PREDICT_TIMEOUT_MS, \`PP-OCRv5 第 \${index + 1} 张图片识别超时，已退出本次任务\`, detachEngine);`;
-  const newBlock = `async function predict(images) {
-  let ocr = await ensureEngine(); const blocks = [], groups = [];
-  for (let index = 0; index < images.length; index += 1) {
-    const image = images[index]; emit(\`PP-OCRv5 正在识别第 \${index + 1}/\${images.length} 张图片\`, 20 + Math.round(index / Math.max(1, images.length) * 70));
-    const diagnosticStarted = diagnosticNow();
-    const predictOptions = { textDetLimitSideLen:currentLimitSide(), textDetLimitType:'min', textDetMaxSideLimit:currentMaxSide(), textDetThresh:0.22, textDetBoxThresh:0.35, textDetUnclipRatio:1.55, textRecScoreThresh:0.28 };
-    let results;
-    try {
-      const prediction = ocr.predict(image.blob, predictOptions);
-      results = await withTimeout(prediction, PREDICT_TIMEOUT_MS, \`PP-OCRv5 第 \${index + 1} 张图片识别超时，已退出本次任务\`, detachEngine);
-    } catch (predictError) {
-      const onnxFailure = isOnnxSessionCreationFailure(predictError);
-      const memoryFailure = isWasmMemoryAllocationFailure(predictError);
-      if (!onnxFailure && !memoryFailure) throw predictError;
-      recordDiagnostic('predict-runtime-recovery', diagnosticStarted, { reason:String(predictError?.message || predictError), kind:onnxFailure ? 'onnx-session' : 'wasm-memory', imageIndex:index });
-      if (onnxFailure) rememberRuntimeCompatibilityConstraint();
-      if (memoryFailure) rememberMemoryConstraint();
-      detachEngine();
-      emit(onnxFailure ? '预测阶段 ONNX session 创建失败，正在切换同一 PP-OCRv5 无 SIMD WASM 兼容模式' : '预测阶段 WASM 内存不足，正在切换同一 PP-OCRv5 低内存模式', 12);
-      await delay(80);
-      ocr = await ensureEngine();
-      const retryPrediction = ocr.predict(image.blob, predictOptions);
-      results = await withTimeout(retryPrediction, PREDICT_TIMEOUT_MS, \`PP-OCRv5 第 \${index + 1} 张图片兼容模式重试超时，已退出本次任务\`, detachEngine);
-      recordDiagnostic('predict-runtime-recovery-success', diagnosticStarted, { kind:onnxFailure ? 'onnx-session' : 'wasm-memory', imageIndex:index, mode:engineMode });
-    }`;
-  const occurrences = source.split(oldBlock).length - 1;
-  if (occurrences !== 1) throw new Error(`Foundation predict() source anchor mismatch: ${occurrences}`);
-  source = source.replace(oldBlock, newBlock);
-  await writeFile(sourcePath, source, "utf8");
-  const verified = await readFile(sourcePath, "utf8");
-  if (!verified.includes("predict-runtime-recovery-success") || !verified.includes("retryPrediction = ocr.predict(image.blob, predictOptions)")) {
-    throw new Error("Predict-time ONNX recovery source hotfix did not materialize");
-  }
-  console.log("Pinned Foundation 0.4.12 source hotfix: predict-time ONNX recovery installed before bundling");
+  console.log("Pinned Foundation provider: native predict recovery, Worker integrity and add-session lifecycle verified");
 }
 
 async function pinnedRecognitionPipelineVersion() {
@@ -430,6 +388,6 @@ async function buildTarget(out, { android = false } = {}) {
   await writeFile(resolve(out, ".nojekyll"), "", "utf8");
 }
 
-await installDelayedOnnxPredictRecoveryBeforeBundle();
+await verifyPinnedOnnxPredictRecoveryBeforeBundle();
 await buildTarget(androidOut, { android: true });
 await buildTarget(pagesOut, { android: false });

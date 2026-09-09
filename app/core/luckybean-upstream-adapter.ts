@@ -157,6 +157,9 @@ export interface LuckyBeanRecognitionCore {
   ): Promise<LuckyBeanRegionRecognitionResult>;
   normalizeRecognitionRegion?(region: LuckyBeanRecognitionRegion): LuckyBeanRecognitionRegion;
   getRecognitionCapabilities?(): LuckyBeanRecognitionCapabilities;
+  beginOcrSession?(reason?: string): Promise<unknown>;
+  endOcrSession?(reason?: string): Promise<void>;
+  warmOcr?(): Promise<unknown>;
   createRecognitionDocument(input: {
     images?: readonly { id?: string; role?: string; roleLabel?: string }[];
     blocks?: readonly LuckyBeanCoreBlock[];

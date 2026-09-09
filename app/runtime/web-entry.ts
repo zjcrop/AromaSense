@@ -10,7 +10,9 @@ import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
+import "../ui/dom/manual-split-photo-mode";
 import { AromaSenseDomApp } from "./dom-app";
+import "./recognition-session-lifecycle";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
@@ -82,7 +84,7 @@ async function main(): Promise<void> {
   });
   yingxiang.start();
 
-  startup.setStatus("recognition", "ready", "图像识别按需加载；首次识别时初始化");
+  startup.setStatus("recognition", "ready", "图像识别按需加载；进入录入流程时预热，退出录入页面后释放");
   startup.allowEnter();
 
   startup.setStatus("account", "loading", "正在读取本地账户状态…");

@@ -80,15 +80,19 @@ async function configurePagesRuntime() {
   }
 }
 
+// Legacy pinned Foundation 0.4.12 needed a downstream predict-time ONNX recovery
+// patch. The restored 0.5.x session fast path carries that recovery natively, so
+// this remains only as a compatibility guard while the immutable package pin is
+// still used to supply model/runtime assets.
 async function patchDelayedOnnxSessionRecovery() {
   const corePath = resolve(pagesOut, "luckybean-recognition-core.js");
   let source = await readFile(corePath, "utf8");
   if (source.includes("predict-runtime-recovery-success")) {
-    console.log("Foundation already contains predict-time ONNX session recovery; downstream hotfix skipped");
+    console.log("Recognition bundle already contains predict-time runtime recovery; downstream hotfix skipped");
     return;
   }
   if (!source.includes("const VERSION = '0.4.12';")) {
-    throw new Error("Pinned Foundation changed without native predict-time ONNX recovery; refusing an unverified OCR bundle");
+    throw new Error("Recognition provider changed without native predict-time runtime recovery; refusing an unverified OCR bundle");
   }
 
   const oldBlock = `async function predict(images) {
@@ -135,7 +139,7 @@ async function patchDelayedOnnxSessionRecovery() {
   if (!verified.includes("predict-runtime-recovery-success") || !verified.includes("rememberRuntimeCompatibilityConstraint()")) {
     throw new Error("AromaSense predict-time ONNX recovery hotfix did not materialize in the production bundle");
   }
-  console.log("AromaSense downstream hotfix: predict-time ONNX session recovery installed for pinned Foundation 0.4.12");
+  console.log("AromaSense downstream hotfix: predict-time ONNX session recovery installed for legacy pinned Foundation 0.4.12");
 }
 
 function createRuntimeContext() {
@@ -158,9 +162,7 @@ function createRuntimeContext() {
     CustomEvent: class CustomEvent {
       constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
     },
-    Worker: class Worker {
-      terminate() {}
-    },
+    Worker: class Worker { terminate() {} },
     Image: class Image {},
     HTMLCanvasElement: class HTMLCanvasElement {},
     OffscreenCanvas: class OffscreenCanvas {},
@@ -187,10 +189,7 @@ async function executeRecognitionCoreSmoke() {
   const corePath = resolve(pagesOut, "luckybean-recognition-core.js");
   const source = await readFile(corePath, "utf8");
   const context = createRuntimeContext();
-  vm.runInNewContext(source, context, {
-    filename: "luckybean-recognition-core.js",
-    timeout: 5000
-  });
+  vm.runInNewContext(source, context, { filename: "luckybean-recognition-core.js", timeout: 5000 });
 
   const core = context.LuckyBeanRecognitionCore;
   for (const method of [
@@ -199,7 +198,9 @@ async function executeRecognitionCoreSmoke() {
     "recognizeImageRegion",
     "normalizeRecognitionRegion",
     "createRecognitionDocument",
-    "analyzeRecognitionDocument"
+    "analyzeRecognitionDocument",
+    "beginOcrSession",
+    "endOcrSession"
   ]) {
     if (typeof core?.[method] !== "function") {
       throw new Error(`Formal LuckyBean recognition core failed runtime smoke: ${method} is unavailable`);
@@ -212,6 +213,11 @@ async function executeRecognitionCoreSmoke() {
 
   const paddle = context.LuckyBeanPaddleOCR;
   const safePrimaryIsolation = paddle?.primaryIsolation === "module-worker" || paddle?.primaryIsolation === "webkit-direct-wasm-no-simd";
+  const acceptedFallback = [
+    "direct-module-worker-wasm-no-simd-low-memory->direct-wasm-no-simd-last-resort",
+    "worker-simd-fastpath->worker-no-simd-on-real-failure",
+    "webkit-direct-wasm-no-simd"
+  ].includes(paddle?.memoryFallback);
   if (
     paddle?.browserSafe !== true ||
     paddle?.workerOnly !== false ||
@@ -219,11 +225,13 @@ async function executeRecognitionCoreSmoke() {
     paddle?.autoPreload !== false ||
     paddle?.roiWorkerOnly !== true ||
     paddle?.regionRecognition !== "recognition-roi/1.0" ||
-    paddle?.memoryFallback !== "direct-module-worker-wasm-no-simd-low-memory->direct-wasm-no-simd-last-resort" ||
+    !acceptedFallback ||
     typeof paddle?.recognizeRegion !== "function" ||
-    typeof paddle?.runtimeBase !== "function"
+    typeof paddle?.runtimeBase !== "function" ||
+    (String(paddle?.version || "").includes("fastpath") && paddle?.disposePolicy !== "capture-session") ||
+    (String(paddle?.version || "").includes("fastpath") && !String(paddle?.inputPolicy || "").endsWith("/2200"))
   ) {
-    throw new Error("Foundation PP-OCR browser-safe provider/ROI/memory-fallback contract failed runtime smoke");
+    throw new Error("Foundation PP-OCR browser-safe provider/ROI/session-fastpath contract failed runtime smoke");
   }
   const actualBase = paddle.runtimeBase();
   const expectedBase = "https://example.test/AromaSense/vendor/paddleocr/";
@@ -231,8 +239,10 @@ async function executeRecognitionCoreSmoke() {
     throw new Error(`Foundation OCR runtime base mismatch: ${actualBase} != ${expectedBase}`);
   }
 
-  if (!source.includes("predict-runtime-recovery-success") || !source.includes("rememberRuntimeCompatibilityConstraint()")) {
-    throw new Error("Production recognition core is missing predict-time ONNX session recovery");
+  const hasNativeRecovery = source.includes("predict-runtime-recovery-success") && source.includes("forceCompatibility = true");
+  const hasLegacyRecovery = source.includes("predict-runtime-recovery-success") && source.includes("rememberRuntimeCompatibilityConstraint()");
+  if (!hasNativeRecovery && !hasLegacyRecovery) {
+    throw new Error("Production recognition core is missing predict-time runtime recovery");
   }
 }
 
@@ -240,4 +250,4 @@ await installPagesRuntime();
 await configurePagesRuntime();
 await patchDelayedOnnxSessionRecovery();
 await executeRecognitionCoreSmoke();
-console.log("Foundation recognition runtime: executable core + predict-time ONNX recovery + browser-safe PP-OCR + worker-first low-memory fallback + same-origin ROI Worker assets verified");
+console.log("Foundation recognition runtime: session-scoped fast path + native predict recovery + 2200px detector budget + same-origin ROI Worker assets verified");

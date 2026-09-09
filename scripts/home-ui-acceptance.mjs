@@ -161,14 +161,14 @@ async function runAcceptance(appUrl) {
       };
     })()`);
 
-    requireCondition(JSON.stringify(home?.capture) === JSON.stringify(["批量识别","手工录入","清空列表","导入数据"]), `Wrong homepage actions: ${JSON.stringify(home)}`);
+    requireCondition(JSON.stringify(home?.capture) === JSON.stringify(["批量识别","手工切分拍照","手工录入","清空列表","导入数据"]), `Wrong homepage actions: ${JSON.stringify(home)}`);
     requireCondition(JSON.stringify(home?.footer) === JSON.stringify(["开始杯测","记录"]), `Wrong footer actions: ${JSON.stringify(home)}`);
     requireCondition(JSON.stringify(home?.header) === JSON.stringify(["迎香","账户"]), `Header must preserve distinct Yingxiang and account actions: ${JSON.stringify(home)}`);
     requireCondition(home?.hasPhoto === false, `拍摄录入 still visible: ${JSON.stringify(home)}`);
     requireCondition(home?.hasDirectHistory === false, `History still rendered directly on homepage: ${JSON.stringify(home)}`);
     requireCondition(home?.startFont >= 20 && home?.startHeight >= 60, `Start action is not visually dominant: ${JSON.stringify(home)}`);
     const styleKeys = (home?.captureStyles ?? []).map((item) => JSON.stringify({className:item.className,background:item.background,border:item.border,color:item.color,height:item.height}));
-    requireCondition(styleKeys.length === 4 && new Set(styleKeys).size === 1, `Four home intake actions are not visually identical: ${JSON.stringify(home?.captureStyles)}`);
+    requireCondition(styleKeys.length === 5 && new Set(styleKeys).size === 1, `Five home intake actions are not visually identical: ${JSON.stringify(home?.captureStyles)}`);
     requireCondition(home?.brandGeometry?.logoTag?.toLowerCase() === "svg" && home?.brandGeometry?.logoWidth >= 80 && home?.brandGeometry?.logoHeight >= 65, `AromaSense logo is missing or too small: ${JSON.stringify(home?.brandGeometry)}`);
     requireCondition(JSON.stringify(home?.brandGeometry?.chineseGlyphs) === JSON.stringify(["香","迹"]), `Chinese brand is not split into stable centered glyphs: ${JSON.stringify(home?.brandGeometry)}`);
     requireCondition(home?.brandGeometry?.accountLayerPosition === "absolute", `Account action still participates in brand centering flow: ${JSON.stringify(home?.brandGeometry)}`);
