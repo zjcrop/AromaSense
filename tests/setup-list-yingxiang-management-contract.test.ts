@@ -44,6 +44,17 @@ test("recognized setup rows are accepted by default and only expose delete", () 
   assert.match(text, /batch-setup__manual-mark/u);
 });
 
+test("setup list DOM normalization is idempotent and MutationObserver cannot self-trigger forever", () => {
+  const text = source("app/ui/dom/setup-list-ux-enhancements.ts");
+  assert.match(text, /const current = status\.textContent \?\? ""/u);
+  assert.match(text, /if \(current !== next\) status\.textContent = next/u);
+  assert.match(text, /let scanScheduled = false/u);
+  assert.match(text, /function scheduleScan\(\): void/u);
+  assert.match(text, /queueMicrotask\(\(\) =>/u);
+  assert.match(text, /new MutationObserver\(scheduleScan\)/u);
+  assert.doesNotMatch(text, /new MutationObserver\(scan\)/u);
+});
+
 test("text entry previews physical rows and recognition starts on completion", () => {
   const text = source("app/ui/dom/manual-text-import-dialog.ts");
   assert.match(text, /manualTextRows/u);
