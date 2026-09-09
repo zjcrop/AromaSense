@@ -119,8 +119,8 @@ try {
     const ocr = await cdp.evaluate(`(async () => {
       const api = globalThis.LuckyBeanPaddleOCR;
       const core = globalThis.LuckyBeanRecognitionCore;
-      if (api?.version !== '0.4.12') throw new Error('Expected PP-OCRv5 0.4.12 Region ONNX-session-compatible provider');
-      if (api?.sessionFallback !== 'onnx-session->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort') throw new Error('Expected PP-OCRv5 ONNX session compatibility fallback contract');
+      if (api?.version !== '0.5.2-fastpath') throw new Error('Expected pinned PP-OCRv5 0.5.2-fastpath provider');
+      if (api?.disposePolicy !== 'capture-session' || api?.predictRuntimeRecovery !== true) throw new Error('Expected add-session lifecycle and native runtime recovery');
       if (typeof core?.recognizeCoffeeBag !== 'function') throw new Error('Expected AromaSense bounded recognition core');
       if (typeof core?.preparePackageImage !== 'function' || typeof core?.recognizeImageRegion !== 'function') throw new Error('Expected production Region OCR core');
 
@@ -136,13 +136,18 @@ try {
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
       canvas.width = 1; canvas.height = 1;
       try {
-        // Region-first is intentional: this is the same cold-start order as the
-        // post-segmentation browser flow reported by users. Do not warm whole-image OCR first.
+        // Entering any add route owns one warmed engine until batch setup exits.
+        const sessionEngine = await core.beginOcrSession('live-release-check');
+        if (!sessionEngine) throw new Error('Live add-session warmup failed');
         const prepared = await core.preparePackageImage(blob);
         const source = { id: 'live-region-source', role: 'front', blob: prepared.blob, nativeSource: Boolean(prepared.nativeSource), fileName: 'live-region.jpg' };
         const region1 = await core.recognizeImageRegion(source, { x: 0.03, y: 0.14, width: 0.78, height: 0.24, coordinateSpace: 'normalized' }, { locale: 'zh-CN', maxEdge: 1280 });
+        await api.dispose();
+        const reusedEngine = await api.warmForRecognition() === sessionEngine;
         const region2 = await core.recognizeImageRegion(source, { x: 0.03, y: 0.35, width: 0.78, height: 0.24, coordinateSpace: 'normalized' }, { locale: 'zh-CN', maxEdge: 1280 });
         const result = await core.recognizeCoffeeBag([{ id: 'live-high-res-ocr-check', role: 'front', blob }], { locale: 'zh-CN' });
+        const activeDepth = api.sessionDepth;
+        await core.endOcrSession('live-release-check-exit');
         return {
           text: result.fullText,
           blocks: result.blocks.length,
@@ -155,23 +160,27 @@ try {
           version: api.version,
           workerBootstrap: api.workerBootstrap,
           memoryFallback: api.memoryFallback,
-          sessionFallback: api.sessionFallback,
-          runtimeCompatibility: api.runtimeCompatibility,
+          compatibilityFallback: api.compatibilityFallback,
+          predictRuntimeRecovery: api.predictRuntimeRecovery,
+          reusedEngine,
+          activeDepth,
+          closedDepth: api.sessionDepth,
           batchMode: result.batch?.mode || '',
           maxEdge: result.batch?.maxEdge || 0,
           inputBytes: blob.size
         };
-      } finally { await api.dispose(); }
+      } finally { await core.endOcrSession('live-release-check-cleanup'); await api.dispose(); }
     })()`);
     requireCondition(/ETHIOPIA/i.test(ocr?.region1Text), `Live Region 1 OCR mismatch: ${JSON.stringify(ocr)}`);
     requireCondition(/WASHED/i.test(ocr?.region2Text), `Live Region 2 OCR mismatch: ${JSON.stringify(ocr)}`);
     requireCondition(ocr?.region1Protocol === 'recognition-roi/1.0' && ocr?.region2Protocol === 'recognition-roi/1.0', `Live Region OCR protocol mismatch: ${JSON.stringify(ocr)}`);
     requireCondition(/ETHIOPIA/i.test(ocr?.text) && /WASHED/i.test(ocr?.text), `Live OCR text mismatch: ${JSON.stringify(ocr)}`);
-    requireCondition(ocr.batchMode === 'worker-bounded-full-frame', `Live OCR did not use bounded full-frame preprocessing: ${JSON.stringify(ocr)}`);
-    requireCondition(Number(ocr.maxEdge) > 0 && Number(ocr.maxEdge) <= 1280, `Live OCR max edge is not bounded: ${JSON.stringify(ocr)}`);
+    requireCondition(ocr.batchMode === 'worker-full-detector-budget', `Live OCR did not use full-frame Worker preprocessing: ${JSON.stringify(ocr)}`);
+    requireCondition(Number(ocr.maxEdge) === 2200, `Live OCR must preserve the 2200px detector budget: ${JSON.stringify(ocr)}`);
     requireCondition(ocr.workerBootstrap === 'preloaded-blob-module', 'Live OCR must use the verified Worker');
-    requireCondition(ocr.memoryFallback === 'direct-module-worker-wasm-no-simd-low-memory->direct-wasm-no-simd-last-resort', 'Live OCR must expose the worker-first low-memory fallback');
-    requireCondition(ocr.sessionFallback === 'onnx-session->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort', 'Live OCR must expose the ONNX session compatibility fallback');
+    requireCondition(ocr.memoryFallback === 'worker-simd-fastpath->worker-no-simd-on-real-failure', 'Live OCR must retain same-engine fallback after a real failure');
+    requireCondition(ocr.compatibilityFallback === 'module-worker-no-simd-on-real-failure' && ocr.predictRuntimeRecovery === true, 'Live OCR must expose native prediction-time recovery');
+    requireCondition(ocr.reusedEngine === true && ocr.activeDepth === 1 && ocr.closedDepth === 0, 'Live OCR must reuse the add-session engine and release session ownership on exit');
     console.log("AromaSense live high-resolution OCR recognition: PASS", JSON.stringify({ build: actualBuild, ...ocr }));
   }
   console.log(diagnostics(cdp).join("\n"));
