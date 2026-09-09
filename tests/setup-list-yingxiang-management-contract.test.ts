@@ -18,8 +18,18 @@ test("setup home exposes only batch intake and clear list while batch intake own
   assert.match(text, /const ordered = \[photo, split, text, sheet, link, qr\]/u);
   assert.match(text, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/u);
   assert.match(text, /import-source__footer/u);
+  assert.match(text, /position:absolute!important/u);
   assert.match(text, /import-source__title/u);
   assert.match(text, /\.remove\(\)/u);
+});
+
+test("split recognition uses the final wording throughout its own flow", () => {
+  const text = source("app/ui/dom/manual-split-photo-mode.ts");
+  assert.match(text, /aria-label="分割识别"/u);
+  assert.match(text, />分割识别<\/h2>/u);
+  assert.match(text, /control\.textContent = "分割识别"/u);
+  assert.match(text, /window\.alert\(`分割识别失败/u);
+  assert.doesNotMatch(text, />手工切分拍照<\/h2>/u);
 });
 
 test("recognized setup rows are accepted by default and only expose delete", () => {
