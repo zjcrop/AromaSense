@@ -13,6 +13,23 @@ function installHomeActionStyles(): void {
       min-width:0!important;
       box-sizing:border-box!important;
     }
+    .batch-setup__session-meta-input{
+      text-align:center!important;
+      text-align-last:center!important;
+    }
+    .batch-setup__session-meta-input::-webkit-date-and-time-value,
+    .batch-setup__session-meta-input::-webkit-datetime-edit{
+      text-align:center!important;
+    }
+    .batch-setup__target-direct{
+      text-align:center!important;
+    }
+    .batch-setup__target-choice{
+      display:flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+      text-align:center!important;
+    }
   `;
   document.head.append(style);
 }
@@ -25,6 +42,18 @@ function removeCuppingListHeading(root: ParentNode = document): void {
       section.removeAttribute("aria-labelledby");
       section.setAttribute("aria-label", "杯测样品");
     }
+    title.remove();
+  }
+}
+
+function removeCuppingTypeHeading(root: ParentNode = document): void {
+  const candidates = root.querySelectorAll<HTMLElement>(
+    ".batch-setup__session-meta h1,.batch-setup__session-meta h2,.batch-setup__session-meta h3,.batch-setup__session-meta h4,.batch-setup__session-meta legend,.batch-setup__session-meta-title,.batch-setup__session-meta-label"
+  );
+  for (const title of candidates) {
+    if (title.textContent?.trim() !== "杯测类型") continue;
+    const section = title.closest<HTMLElement>(".batch-setup__session-meta");
+    if (section && !section.getAttribute("aria-label")) section.setAttribute("aria-label", "杯测信息");
     title.remove();
   }
 }
@@ -91,6 +120,7 @@ function normalizeActionSizing(actions: HTMLElement): void {
 function scan(): void {
   installHomeActionStyles();
   removeCuppingListHeading();
+  removeCuppingTypeHeading();
   renameSplitRecognition();
   for (const actions of document.querySelectorAll<HTMLElement>(".batch-setup__capture-actions")) {
     ensureQrImportAction(actions);
