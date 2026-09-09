@@ -108,6 +108,7 @@ async function openManualSplitDialog(source: File): Promise<void> {
   let activePointer: number | undefined;
   let start: Point | undefined;
   let current: OCRBox | undefined;
+  const resizeController = new AbortController();
 
   const point = (event: PointerEvent): Point => {
     const rect = image.getBoundingClientRect();
@@ -135,6 +136,7 @@ async function openManualSplitDialog(source: File): Promise<void> {
       : "拖动框选第 1 个区域。";
   };
   const close = (): void => {
+    resizeController.abort();
     URL.revokeObjectURL(previewUrl);
     overlay.remove();
   };
@@ -171,7 +173,7 @@ async function openManualSplitDialog(source: File): Promise<void> {
   };
   stage.addEventListener("pointerup", finishPointer);
   stage.addEventListener("pointercancel", finishPointer);
-  window.addEventListener("resize", render, { signal: AbortSignal.timeout(60_000) });
+  window.addEventListener("resize", render, { signal: resizeController.signal });
 
   overlay.querySelector<HTMLButtonElement>("[data-full]")!.onclick = () => {
     regions.splice(0, regions.length, { id: `manual-${Date.now().toString(36)}-full`, box: boxFromPoints({ x: 0, y: 0 }, { x: 1, y: 1 }) });
