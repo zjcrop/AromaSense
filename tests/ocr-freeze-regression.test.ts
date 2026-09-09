@@ -6,29 +6,28 @@ const packageJson = readFileSync("package.json", "utf8");
 const parsedPackage = JSON.parse(packageJson) as { dependencies?: Record<string, string> };
 const luckyBeanDependency = parsedPackage.dependencies?.["luckybean-static-app"] ?? "";
 const commonEntry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
-const fastPaddleOcrSource = readFileSync("app/vendor/recognition-paddle-ocr-fast.js", "utf8");
+const fastPaddleOcrSource = readFileSync("node_modules/luckybean-static-app/src/recognition-paddle-ocr-fast.js", "utf8");
 const recognitionService = readFileSync("app/core/sample-recognition-service.ts", "utf8");
 const buildScript = readFileSync("scripts/build-web.mjs", "utf8");
 const runtimeHardener = readFileSync("scripts/harden-recognition-runtime.mjs", "utf8");
 const roiRefinement = readFileSync("app/core/sample-roi-refinement.ts", "utf8");
 const roiWorkerSource = readFileSync("node_modules/luckybean-static-app/src/recognition-roi-worker.js", "utf8");
-const paddleOcrSource = readFileSync("node_modules/luckybean-static-app/src/recognition-paddle-ocr.js", "utf8");
 const preview = readFileSync("app/ui/dom/image-preview-data.ts", "utf8");
 const mobileCss = readFileSync("app/ui/dom/mobile-ocr-emergency.css", "utf8");
 const template = readFileSync("web/index.template.html", "utf8");
 
-const P3_OFFICIAL_PRODUCER_SHA = "fc12bcf01a8366734a681d7e33694920b52e99bd";
-const FASTPATH_AUDITED_PRODUCER_SHA = "8d088f4c30772ec4d5c1316abd5c84985dba55cb";
+const P3_OFFICIAL_PRODUCER_SHA = "f5a357c13f266eb95fe325c24e9df73f9cc4b78c";
 const executableImageWork = /createImageBitmap\s*\(|createElement\s*\(\s*['"]canvas['"]|\.toDataURL\s*\(|getImageData\s*\(|new\s+FileReader\s*\(/;
 const executableTesseractFallback = /TESSERACT_VERSION|TESSERACT_URL|ensureTesseract|createWorker\s*\(\s*\[?['"]chi_sim|cdn\.jsdelivr\.net\/npm\/tesseract/iu;
 
-test("AromaSense keeps the exact immutable Recognition core/runtime producer and overlays one audited Foundation fast provider", () => {
+test("AromaSense consumes its OCR provider and runtime from the same immutable Foundation producer", () => {
   assert.match(luckyBeanDependency, /^github:zjcrop\/luckybean#[0-9a-f]{40}$/u);
   assert.equal(luckyBeanDependency, `github:zjcrop/luckybean#${P3_OFFICIAL_PRODUCER_SHA}`);
   assert.doesNotMatch(luckyBeanDependency, /9bbf1060bee69fce417470d0fb2c5b68403fa3b8/u);
-  assert.match(commonEntry, /recognition-paddle-ocr-fast\.js/);
-  assert.match(fastPaddleOcrSource, new RegExp(FASTPATH_AUDITED_PRODUCER_SHA));
-  assert.match(fastPaddleOcrSource, /const VERSION = '0\.5\.1-fastpath'/u);
+  assert.match(commonEntry, /import 'luckybean-static-app\/src\/recognition-paddle-ocr-fast\.js'/);
+  assert.match(fastPaddleOcrSource, /const VERSION = '0\.5\.2-fastpath'/u);
+  assert.match(fastPaddleOcrSource, /workerSha256/);
+  assert.match(fastPaddleOcrSource, /preloaded-blob-module/);
   assert.match(commonEntry, /recognizeImageRegion/);
   assert.match(commonEntry, /normalizeRecognitionRegion/);
   assert.match(commonEntry, /RECOGNITION_RECORD_HYPOTHESIS_SCHEMA/);
@@ -55,20 +54,15 @@ test("AromaSense keeps the exact immutable Recognition core/runtime producer and
   assert.match(runtimeHardener, /Formal LuckyBean recognition core failed runtime smoke/);
 });
 
-test("pinned Foundation runtime assets handle ONNX session initialization failure without switching OCR engines", () => {
-  assert.match(paddleOcrSource, /const VERSION = '0\.4\.12'/u);
-  assert.match(paddleOcrSource, /function isOnnxSessionCreationFailure\(error\)/u);
-  assert.match(paddleOcrSource, /Failed to create ONNX session/u);
-  assert.match(paddleOcrSource, /startSessionCompatibilityEngine/u);
-  assert.match(paddleOcrSource, /async function startWebKitEngine\(\)/u);
-  assert.match(paddleOcrSource, /WEBKIT \? startWebKitEngine\(\)/u);
-  assert.match(paddleOcrSource, /return startSessionCompatibilityEngine\(generation, error\)/u);
-  assert.match(paddleOcrSource, /webkit-direct-wasm-no-simd->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort/u);
-  assert.match(paddleOcrSource, /direct-module-no-simd-session-retry/u);
-  assert.match(paddleOcrSource, /direct-wasm-no-simd-session-last-resort/u);
-  assert.match(paddleOcrSource, /COMPATIBILITY_FALLBACK_SESSION_KEY/u);
-  assert.match(paddleOcrSource, /sessionFallback:'onnx-session->direct-module-worker-wasm-no-simd->direct-wasm-no-simd-last-resort'/u);
-  assert.doesNotMatch(paddleOcrSource, executableTesseractFallback);
+test("pinned Foundation handles real ONNX failures with one same-engine compatibility retry", () => {
+  assert.match(fastPaddleOcrSource, /function looksLikeCompatibilityFailure\(error\)/u);
+  assert.match(fastPaddleOcrSource, /InferenceSession\|ONNX session/u);
+  assert.match(fastPaddleOcrSource, /async function predictWithRuntimeRecovery/u);
+  assert.match(fastPaddleOcrSource, /if \(WEBKIT \|\| forceCompatibility \|\| !looksLikeCompatibilityFailure\(error\)\) throw error/u);
+  assert.match(fastPaddleOcrSource, /forceCompatibility = true/u);
+  assert.match(fastPaddleOcrSource, /predict-runtime-recovery-success/u);
+  assert.match(fastPaddleOcrSource, /worker-no-simd-on-real-failure/u);
+  assert.doesNotMatch(fastPaddleOcrSource, executableTesseractFallback);
 });
 
 test("recognition path never decodes or re-encodes full images on the UI thread", () => {

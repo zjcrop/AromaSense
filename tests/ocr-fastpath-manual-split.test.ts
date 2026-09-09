@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const provider = readFileSync("app/vendor/recognition-paddle-ocr-fast.js", "utf8");
+const provider = readFileSync("node_modules/luckybean-static-app/src/recognition-paddle-ocr-fast.js", "utf8");
 const entry = readFileSync("app/vendor/luckybean-recognition-entry.js", "utf8");
 const lifecycle = readFileSync("app/runtime/recognition-session-lifecycle.ts", "utf8");
 const split = readFileSync("app/ui/dom/manual-split-photo-mode.ts", "utf8");

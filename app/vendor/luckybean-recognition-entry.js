@@ -1,8 +1,5 @@
-// AromaSense consumes the audited Foundation PP-OCR fast-path snapshot below.
-// The snapshot is pinned to the producer commit recorded in recognition-paddle-ocr-fast.js;
-// the existing LuckyBean package continues to provide recognition-core and runtime assets
-// until producer CI passes and the immutable package pin is advanced.
-import './recognition-paddle-ocr-fast.js';
+// The immutable LuckyBean dependency supplies both the OCR provider and its runtime.
+import 'luckybean-static-app/src/recognition-paddle-ocr-fast.js';
 
 import {
   RECOGNITION_DOCUMENT_SCHEMA,
