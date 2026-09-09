@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("setup replaces direct mode buttons with one four-mode cupping type select", () => {
+test("setup replaces direct mode buttons with one centered four-mode cupping type select and no visible caption", () => {
   const source = readFileSync("app/ui/dom/batch-setup-renderer.ts", "utf8");
-  assert.match(source, /caption\.textContent = "杯测类型"/);
+  assert.doesNotMatch(source, /caption\.textContent = "杯测类型"/);
+  assert.doesNotMatch(source, /batch-setup__cupping-type-label/);
+  assert.match(source, /select\.setAttribute\("aria-label", "杯测类型"\)/);
+  assert.match(source, /text-align:center;text-align-last:center/);
   assert.match(source, /for \(const mode of CUPPING_MODES\)/);
   assert.match(source, /\.batch-setup__target-direct"\)\?\.remove\(\)/);
   assert.match(source, /\.batch-setup__target-help"\)\?\.remove\(\)/);
   assert.doesNotMatch(source, /公开杯测为默认；盲测无需录入/);
+
+  const homeEnhancements = readFileSync("app/ui/dom/home-action-enhancements.ts", "utf8");
+  assert.match(homeEnhancements, /\.batch-setup__session-meta-input\{[\s\S]*?text-align:center!important;[\s\S]*?text-align-last:center!important;/);
 });
 
 test("free runtime uses one effective rail scroll layer and reviewed production OCR additions", () => {
