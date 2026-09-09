@@ -71,9 +71,9 @@ function scheduleActiveCardCenter(sampleId: string): void {
       return;
     }
 
-    // The active card grows and the rail can change width while its activation
-    // animation is running. Recalculate once the layout has settled so the
-    // final position remains geometrically centred instead of merely close.
+    // The selected card and rail can change geometry while activation or
+    // compact/expanded transitions are running. Recalculate after the layout
+    // settles so the final viewport follows the new geometry, not the old one.
     settleTimer = setTimeout(() => {
       if (generation === focusGeneration) centerActiveCard(sampleId, "auto");
     }, CENTER_SETTLE_DELAY_MS);
@@ -92,6 +92,11 @@ function currentActiveSampleId(): string | undefined {
   return railRoot()?.dataset.activeSampleId || undefined;
 }
 
+function scheduleCurrentActiveSample(): void {
+  const activeSampleId = currentActiveSampleId();
+  if (activeSampleId) scheduleActiveCardCenter(activeSampleId);
+}
+
 function handleCuppingRailClick(event: MouseEvent): void {
   if (!(event.target instanceof Element)) return;
 
@@ -101,12 +106,22 @@ function handleCuppingRailClick(event: MouseEvent): void {
     return;
   }
 
-  if (event.target.closest("[data-rail-toggle]")) {
-    const activeSampleId = currentActiveSampleId();
-    if (activeSampleId) scheduleActiveCardCenter(activeSampleId);
-  }
+  if (event.target.closest("[data-rail-toggle]")) scheduleCurrentActiveSample();
+}
+
+function handleMainPointerDown(event: PointerEvent): void {
+  if (!(event.target instanceof Element)) return;
+  const layout = event.target.closest<HTMLElement>(".cupping-layout");
+  if (!layout || layout.classList.contains("is-rail-compact")) return;
+  if (!event.target.closest(".cupping-layout__main")) return;
+
+  // The product collapses an expanded rail when the user taps the main area.
+  // Schedule against the current active id now; the delayed geometry pass runs
+  // after that collapse render and keeps the same card centred in compact mode.
+  scheduleCurrentActiveSample();
 }
 
 if (typeof document !== "undefined") {
   document.addEventListener("click", handleCuppingRailClick, true);
+  document.addEventListener("pointerdown", handleMainPointerDown, true);
 }
