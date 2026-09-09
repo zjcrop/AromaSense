@@ -44,9 +44,12 @@ function normalizeRow(row: HTMLElement): void {
 
   const status = row.querySelector<HTMLElement>(".batch-setup__recognition-status");
   if (status) {
-    const next = cleanStatusText(status.textContent ?? "");
+    const current = status.textContent ?? "";
+    const next = cleanStatusText(current);
     if (next) {
-      status.textContent = next;
+      // MutationObserver watches childList. Reassigning identical textContent would replace
+      // the text node and recursively trigger scan() forever. Only mutate when content changed.
+      if (current !== next) status.textContent = next;
       status.classList.remove("is-confirmed", "is-review");
     } else {
       status.remove();
@@ -171,6 +174,16 @@ function scan(): void {
   renameRuntimeListEditor();
 }
 
+let scanScheduled = false;
+function scheduleScan(): void {
+  if (scanScheduled) return;
+  scanScheduled = true;
+  queueMicrotask(() => {
+    scanScheduled = false;
+    scan();
+  });
+}
+
 installPrototypeBridge();
 scan();
-new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
