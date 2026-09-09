@@ -3,6 +3,9 @@ function installBatchIntakePickerLayout(): void {
   const style = document.createElement("style");
   style.dataset.aromasenseBatchIntakeLayout = "true";
   style.textContent = `
+    .import-source__panel.is-batch-intake-picker{
+      overflow:hidden!important;
+    }
     .import-source__panel.is-batch-intake-picker .import-source__grid{
       position:absolute!important;
       left:50%!important;
@@ -11,9 +14,19 @@ function installBatchIntakePickerLayout(): void {
       width:min(620px,calc(100% - 44px))!important;
       margin:0!important;
     }
+    .import-source__panel.is-batch-intake-picker .import-source__footer{
+      bottom:0!important;
+      padding-top:4px!important;
+    }
+    .import-source__panel.is-batch-intake-picker .import-source__footer .import-source__close{
+      min-height:40px!important;
+    }
     @media(max-width:620px){
       .import-source__panel.is-batch-intake-picker .import-source__grid{
         width:calc(100% - 32px)!important;
+      }
+      .import-source__panel.is-batch-intake-picker .import-source__footer{
+        bottom:max(0px,env(safe-area-inset-bottom))!important;
       }
     }
   `;
