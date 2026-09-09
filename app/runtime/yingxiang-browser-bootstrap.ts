@@ -5,6 +5,7 @@ import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import type { SQLiteDriver } from "../storage/local-cupping-repository";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { YingxiangConsoleRenderer } from "../ui/dom/yingxiang-console-renderer";
+import "../ui/dom/yingxiang-management-enhancements";
 import type { YingxiangDeliveryService } from "../core/yingxiang-delivery-service";
 import { YingxiangHostLoginRenderer } from "../ui/dom/yingxiang-host-login-renderer";
 import { YingxiangJoinRenderer } from "../ui/dom/yingxiang-join-renderer";

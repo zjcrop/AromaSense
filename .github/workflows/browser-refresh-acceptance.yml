@@ -69,7 +69,7 @@ jobs:
         run: |
           set -o pipefail
           set +e
-          node scripts/home-ui-acceptance.mjs 2>&1 | tee /tmp/aromasense-home-ui.log
+          node scripts/home-ui-acceptance-current.mjs 2>&1 | tee /tmp/aromasense-home-ui.log
           status=${PIPESTATUS[0]}
           set -e
           if grep -Fq 'AromaSense home UI acceptance: PASS' /tmp/aromasense-home-ui.log; then

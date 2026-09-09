@@ -62,8 +62,8 @@ function toReviewRegions(regions: readonly ManualRegion[]): SegmentationReviewRe
 
 async function cropAndDispatch(source: File, regions: readonly ManualRegion[]): Promise<void> {
   const gallery = existingGalleryInput();
-  if (!gallery) throw new Error("当前批量识别入口不可用");
-  if (typeof DataTransfer !== "function") throw new Error("当前浏览器不支持将手工分区安全交给现有批量识别流程");
+  if (!gallery) throw new Error("当前批量录入入口不可用");
+  if (typeof DataTransfer !== "function") throw new Error("当前浏览器不支持将手工分区安全交给现有批量录入流程");
   const crops = await createReviewedRegionCropBatch(source, toReviewRegions(regions));
   if (!crops?.length || crops.length !== regions.length) throw new Error("手工分区 Worker 未能生成完整裁切结果");
   const stem = String(source.name || "capture").replace(/\.[^.]+$/, "");
@@ -87,8 +87,8 @@ async function openManualSplitDialog(source: File): Promise<void> {
   const overlay = document.createElement("div");
   overlay.className = "manual-split-photo";
   overlay.innerHTML = `
-    <section class="manual-split-photo__panel" role="dialog" aria-modal="true" aria-label="手工切分拍照">
-      <h2 class="manual-split-photo__title">手工切分拍照</h2>
+    <section class="manual-split-photo__panel" role="dialog" aria-modal="true" aria-label="分割识别">
+      <h2 class="manual-split-photo__title">分割识别</h2>
       <p class="manual-split-photo__help">在一张内容复杂的照片上依次框选真正需要识别的区域。每个框会作为一张独立 OCR 输入，原图不会在主线程做全尺寸解码。</p>
       <div class="manual-split-photo__stage"><img class="manual-split-photo__image" alt="待切分照片"><div class="manual-split-photo__draft" hidden></div></div>
       <p class="manual-split-photo__summary">拖动框选第 1 个区域。</p>
@@ -108,6 +108,7 @@ async function openManualSplitDialog(source: File): Promise<void> {
   let activePointer: number | undefined;
   let start: Point | undefined;
   let current: OCRBox | undefined;
+  const resizeController = new AbortController();
 
   const point = (event: PointerEvent): Point => {
     const rect = image.getBoundingClientRect();
@@ -135,6 +136,7 @@ async function openManualSplitDialog(source: File): Promise<void> {
       : "拖动框选第 1 个区域。";
   };
   const close = (): void => {
+    resizeController.abort();
     URL.revokeObjectURL(previewUrl);
     overlay.remove();
   };
@@ -171,7 +173,7 @@ async function openManualSplitDialog(source: File): Promise<void> {
   };
   stage.addEventListener("pointerup", finishPointer);
   stage.addEventListener("pointercancel", finishPointer);
-  window.addEventListener("resize", render, { signal: AbortSignal.timeout(60_000) });
+  window.addEventListener("resize", render, { signal: resizeController.signal });
 
   overlay.querySelector<HTMLButtonElement>("[data-full]")!.onclick = () => {
     regions.splice(0, regions.length, { id: `manual-${Date.now().toString(36)}-full`, box: boxFromPoints({ x: 0, y: 0 }, { x: 1, y: 1 }) });
@@ -219,9 +221,10 @@ function installButton(actions: HTMLElement): void {
   control.type = "button";
   control.className = "batch-setup__capture batch-setup__home-capture-action";
   control.dataset.manualSplitPhoto = "true";
-  control.textContent = "手工切分拍照";
+  control.textContent = "分割识别";
+  control.setAttribute("aria-label", "分割识别");
   control.addEventListener("click", () => void captureForManualSplit().catch((error) => {
-    window.alert(`手工切分拍照失败：${error instanceof Error ? error.message : String(error)}`);
+    window.alert(`分割识别失败：${error instanceof Error ? error.message : String(error)}`);
   }));
   const second = actions.children.item(1);
   if (second) actions.insertBefore(control, second);

@@ -78,7 +78,7 @@ async function cancelEvent(db: D1Database, eventId: string, userId: string, stat
 }
 
 async function deleteEvent(db: D1Database, eventId: string, userId: string, status: string): Promise<Response> {
-  if (!['draft','cancelled'].includes(status)) return json({ok:false,error:"YINGXIANG_EVENT_DELETE_REQUIRES_CANCEL"},409);
+  if (!['draft','cancelled','completed'].includes(status)) return json({ok:false,error:"YINGXIANG_EVENT_DELETE_REQUIRES_CANCEL"},409);
   await db.batch([
     db.prepare("DELETE FROM yingxiang_submissions WHERE participant_id IN (SELECT participant_id FROM yingxiang_participants WHERE event_id=?1)").bind(eventId),
     db.prepare("DELETE FROM yingxiang_progress WHERE participant_id IN (SELECT participant_id FROM yingxiang_participants WHERE event_id=?1)").bind(eventId),

@@ -29,8 +29,9 @@ test("OCR runtime is acquired for the add flow and released when batch setup exi
   assert.match(webEntry, /recognition-session-lifecycle/);
 });
 
-test("manual split photo mode crops before OCR and reuses the existing multi-image recognition input", () => {
-  assert.match(split, /手工切分拍照/);
+test("split recognition crops before OCR and reuses the existing multi-image recognition input", () => {
+  assert.match(split, /分割识别/);
+  assert.doesNotMatch(split, />手工切分拍照<\/h2>/);
   assert.match(split, /createSegmentationImagePreview/);
   assert.match(split, /createReviewedRegionCropBatch/);
   assert.match(split, /regions\.push/);

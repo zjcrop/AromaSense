@@ -60,6 +60,33 @@ async function run(appUrl){
     await waitExpression(cdp,`document.querySelectorAll('.sample-rail__item').length===30`,"30 rail items");
     const compact=await cdp.evaluate(`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===true`); if(compact) await click(cdp,"[data-rail-toggle]");
     await waitExpression(cdp,`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===false`,"expanded rail");
+
+    const expandedControls=await cdp.evaluate(`(()=>{
+      const actions=document.querySelector('.cupping-rail-footer__actions');
+      const legend=document.querySelector('.cupping-progress-legend');
+      return {
+        actionsVisible:actions instanceof HTMLElement&&getComputedStyle(actions).display!=='none',
+        legendVisible:legend instanceof HTMLElement&&getComputedStyle(legend).display!=='none',
+        actionsText:actions?.textContent?.trim()||'',
+        legendText:legend?.textContent?.trim()||''
+      };
+    })()`);
+    requireCondition(expandedControls?.actionsVisible&&expandedControls?.legendVisible&&expandedControls.actionsText.includes('退出')&&expandedControls.actionsText.includes('完成'),`Expanded rail controls missing: ${JSON.stringify(expandedControls)}`);
+    const collapsedByMain=await cdp.evaluate(`(()=>{const main=document.querySelector('.cupping-layout__main');if(!(main instanceof HTMLElement))return false;main.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:1,clientX:main.getBoundingClientRect().right-16,clientY:main.getBoundingClientRect().top+80}));return true;})()`);
+    requireCondition(collapsedByMain===true,"Unable to dispatch blank-area pointerdown");
+    await waitExpression(cdp,`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===true`,"blank-area compact collapse");
+    const collapsedControls=await cdp.evaluate(`(()=>{
+      const actions=document.querySelector('.cupping-rail-footer__actions');
+      const legend=document.querySelector('.cupping-progress-legend');
+      return {
+        actionsDisplay:actions instanceof HTMLElement?getComputedStyle(actions).display:'missing',
+        legendDisplay:legend instanceof HTMLElement?getComputedStyle(legend).display:'missing'
+      };
+    })()`);
+    requireCondition(collapsedControls?.actionsDisplay==='none'&&collapsedControls?.legendDisplay==='none',`Compact rail left footer controls visible: ${JSON.stringify(collapsedControls)}`);
+    await click(cdp,"[data-rail-toggle]");
+    await waitExpression(cdp,`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===false`,"re-expanded rail after collapse test");
+
     await click(cdp,".sample-rail__select");
     await waitExpression(cdp,`(()=>{const m=document.querySelector('.cupping-rail-active-float');return m instanceof HTMLElement&&getComputedStyle(m).opacity==='1';})()`,"floating active marker");
 
@@ -101,7 +128,7 @@ async function run(appUrl){
     const after=await cdp.evaluate(`(()=>{const n=document.querySelector('.cupping-layout__rail-list.sample-rail');const m=document.querySelector('.cupping-rail-active-float');return n instanceof HTMLElement&&m instanceof HTMLElement?{scrollTop:n.scrollTop,max:n.scrollHeight-n.clientHeight,markerOpacity:getComputedStyle(m).opacity}:null;})()`);
     requireCondition(after?.scrollTop>0&&after.scrollTop<=after.max+1,`Rail scrolling is out of range: ${JSON.stringify(after)}`);
     requireCondition(after?.markerOpacity==="0",`Marker should hide when active item scrolls out of viewport: ${JSON.stringify(after)}`);
-    console.log("AromaSense cupping rail scroll + floating marker acceptance: PASS",JSON.stringify({before,smallMove,followed,after}));
+    console.log("AromaSense cupping rail scroll + collapse + floating marker acceptance: PASS",JSON.stringify({expandedControls,collapsedControls,before,smallMove,followed,after}));
   } finally {
     cdp?.close();
     if (chrome.exitCode === null) {
