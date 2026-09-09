@@ -126,7 +126,7 @@ async function runAcceptance(appUrl) {
     const home = await cdp.evaluate(`(() => {
       const actionNodes=[...document.querySelectorAll('.batch-setup__capture-actions button')];
       const capture=actionNodes.map(n=>n.textContent?.trim());
-      const captureStyles=actionNodes.map(n=>{const s=getComputedStyle(n);return {text:n.textContent?.trim(),className:n.className,background:s.backgroundColor,border:s.border,color:s.color,height:n.getBoundingClientRect().height}});
+      const captureStyles=actionNodes.map(n=>{const s=getComputedStyle(n);const r=n.getBoundingClientRect();return {text:n.textContent?.trim(),className:n.className,background:s.backgroundColor,border:s.border,color:s.color,height:r.height,width:r.width,left:r.left,top:r.top}});
       const footer=[...document.querySelectorAll('.batch-setup__footer-section > button')].map(n=>n.textContent?.trim());
       const header=[...document.querySelectorAll('.batch-setup__header-actions button')].map(n=>n.textContent?.trim());
       const start=document.querySelector('[data-home-action="start-cupping"]');
@@ -141,6 +141,8 @@ async function runAcceptance(appUrl) {
       return {
         capture, captureStyles, footer, header,
         hasPhoto:capture.includes('拍摄录入'),
+        hasCuppingListHeading:[...document.querySelectorAll('.batch-setup__home-section-title')].some(n=>n.textContent?.trim()==='杯测列表'),
+        samplesAriaLabel:document.querySelector('.batch-setup__samples-section')?.getAttribute('aria-label') || '',
         hasDirectHistory:Boolean(document.querySelector('.batch-setup__history,.batch-setup__recent')),
         startFont:start ? parseFloat(getComputedStyle(start).fontSize) : 0,
         startHeight:start ? start.getBoundingClientRect().height : 0,
@@ -161,18 +163,43 @@ async function runAcceptance(appUrl) {
       };
     })()`);
 
-    requireCondition(JSON.stringify(home?.capture) === JSON.stringify(["批量识别","手工切分拍照","手工录入","清空列表","导入数据"]), `Wrong homepage actions: ${JSON.stringify(home)}`);
+    requireCondition(JSON.stringify(home?.capture) === JSON.stringify(["批量识别","分割识别","手工录入","清空列表","导入数据","二维码导入"]), `Wrong homepage actions: ${JSON.stringify(home)}`);
     requireCondition(JSON.stringify(home?.footer) === JSON.stringify(["开始杯测","记录"]), `Wrong footer actions: ${JSON.stringify(home)}`);
     requireCondition(JSON.stringify(home?.header) === JSON.stringify(["迎香","账户"]), `Header must preserve distinct Yingxiang and account actions: ${JSON.stringify(home)}`);
     requireCondition(home?.hasPhoto === false, `拍摄录入 still visible: ${JSON.stringify(home)}`);
+    requireCondition(home?.hasCuppingListHeading === false && home?.samplesAriaLabel === "杯测样品", `杯测列表 heading was not removed cleanly: ${JSON.stringify(home)}`);
     requireCondition(home?.hasDirectHistory === false, `History still rendered directly on homepage: ${JSON.stringify(home)}`);
     requireCondition(home?.startFont >= 20 && home?.startHeight >= 60, `Start action is not visually dominant: ${JSON.stringify(home)}`);
-    const styleKeys = (home?.captureStyles ?? []).map((item) => JSON.stringify({className:item.className,background:item.background,border:item.border,color:item.color,height:item.height}));
-    requireCondition(styleKeys.length === 5 && new Set(styleKeys).size === 1, `Five home intake actions are not visually identical: ${JSON.stringify(home?.captureStyles)}`);
+    const styleKeys = (home?.captureStyles ?? []).map((item) => JSON.stringify({className:item.className,background:item.background,border:item.border,color:item.color,height:item.height,width:item.width}));
+    requireCondition(styleKeys.length === 6 && new Set(styleKeys).size === 1, `Six home intake actions are not visually identical: ${JSON.stringify(home?.captureStyles)}`);
+    const rowTops=[...new Set((home?.captureStyles ?? []).map((item)=>Math.round(item.top)))];
+    requireCondition(rowTops.length === 3, `Six home intake actions must form three balanced rows: ${JSON.stringify(home?.captureStyles)}`);
     requireCondition(home?.brandGeometry?.logoTag?.toLowerCase() === "svg" && home?.brandGeometry?.logoWidth >= 80 && home?.brandGeometry?.logoHeight >= 65, `AromaSense logo is missing or too small: ${JSON.stringify(home?.brandGeometry)}`);
     requireCondition(JSON.stringify(home?.brandGeometry?.chineseGlyphs) === JSON.stringify(["香","迹"]), `Chinese brand is not split into stable centered glyphs: ${JSON.stringify(home?.brandGeometry)}`);
     requireCondition(home?.brandGeometry?.accountLayerPosition === "absolute", `Account action still participates in brand centering flow: ${JSON.stringify(home?.brandGeometry)}`);
     requireCondition(home?.brandGeometry?.brandError <= 1.5 && home?.brandGeometry?.chineseError <= 1.5 && home?.brandGeometry?.englishError <= 1.5, `Homepage brand is not geometrically centered: ${JSON.stringify(home?.brandGeometry)}`);
+
+    await cdp.evaluate(`(() => {
+      window.__aromasenseQrFallbackClicked=false;
+      const original=HTMLInputElement.prototype.click;
+      if(!window.__aromasenseOriginalInputClick) window.__aromasenseOriginalInputClick=original;
+      HTMLInputElement.prototype.click=function(){
+        if(this instanceof HTMLInputElement && this.dataset.importQr==='true'){
+          window.__aromasenseQrFallbackClicked=true;
+          return;
+        }
+        return window.__aromasenseOriginalInputClick.call(this);
+      };
+      document.querySelector('[data-home-action="qr-import"]')?.click();
+    })()`);
+    await waitUntil(async () => Boolean(await cdp.evaluate(`window.__aromasenseQrFallbackClicked===true || Boolean(document.querySelector('.qr-scanner'))`)), "direct QR import route");
+    const qrRoute = await cdp.evaluate(`(() => ({
+      fallbackClicked:window.__aromasenseQrFallbackClicked===true,
+      scannerVisible:Boolean(document.querySelector('.qr-scanner')),
+      importChooserVisible:Boolean(document.querySelector('.import-source'))
+    }))()`);
+    requireCondition((qrRoute?.fallbackClicked || qrRoute?.scannerVisible) && qrRoute?.importChooserVisible === false, `Direct QR import did not route into canonical scanner/fallback: ${JSON.stringify(qrRoute)}`);
+    await cdp.evaluate(`(() => { document.querySelector('.qr-scanner__actions button:last-child')?.click(); if(window.__aromasenseOriginalInputClick) HTMLInputElement.prototype.click=window.__aromasenseOriginalInputClick; })()`);
 
     const opened = await cdp.evaluate(`(() => { const n=document.querySelector('[data-home-action="records"]'); if(!(n instanceof HTMLElement)) return false; n.click(); return true; })()`);
     requireCondition(opened === true, "Unable to expand records from footer");
@@ -261,7 +288,7 @@ async function runAcceptance(appUrl) {
     const relevantErrors = cdp.errors.filter((entry) => !/favicon|Failed to load resource.*404|onnxruntime/i.test(entry));
     requireCondition(relevantErrors.length === 0, `Browser errors:\n${relevantErrors.join("\n")}`);
     console.log("AromaSense home UI acceptance: PASS");
-    console.log(JSON.stringify({ home, expanded, completed, unfinished, yingxiangLogin }, null, 2));
+    console.log(JSON.stringify({ home, qrRoute, expanded, completed, unfinished, yingxiangLogin }, null, 2));
   } finally {
     cdp?.close();
     chrome.kill("SIGTERM");
