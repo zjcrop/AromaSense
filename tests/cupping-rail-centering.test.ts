@@ -15,10 +15,12 @@ test("active rail item clamps to bottom for late samples", () => {
   assert.equal(centeredRailScrollTop(650, 300, 1000, 260, 40), 700);
 });
 
-test("rail centering is event driven and does not add another MutationObserver", () => {
+test("rail centering follows explicit user transitions without adding another MutationObserver", () => {
   const source = readFileSync("app/ui/dom/cupping-rail-centering.ts", "utf8");
   assert.match(source, /\.sample-rail__select/u);
   assert.match(source, /\[data-rail-toggle\]/u);
+  assert.match(source, /\.cupping-layout__main/u);
+  assert.match(source, /document\.addEventListener\("pointerdown", handleMainPointerDown, true\)/u);
   assert.match(source, /CENTER_SETTLE_DELAY_MS/u);
   assert.match(source, /list\.scrollTo\(\{ top: target, behavior \}\)/u);
   assert.doesNotMatch(source, /MutationObserver/u);
