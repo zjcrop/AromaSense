@@ -36,10 +36,12 @@ function installHomeActionStyles(): void {
       text-align:center!important;
     }
     .import-source__panel.is-batch-intake-picker{
+      position:relative!important;
       display:flex!important;
       flex-direction:column!important;
       justify-content:center!important;
       min-height:min(680px,88vh)!important;
+      padding-bottom:82px!important;
     }
     .import-source__panel.is-batch-intake-picker .import-source__grid{
       width:min(620px,100%)!important;
@@ -51,12 +53,15 @@ function installHomeActionStyles(): void {
       margin:auto!important;
     }
     .import-source__footer{
+      position:absolute!important;
+      left:22px!important;
+      right:22px!important;
+      bottom:18px!important;
       display:flex!important;
       justify-content:center!important;
       align-items:center!important;
-      width:100%!important;
-      margin-top:auto!important;
-      padding-top:18px!important;
+      margin:0!important;
+      padding-top:12px!important;
       border-top:1px solid rgba(255,255,255,.06)!important;
     }
     .import-source__footer .import-source__close{
@@ -69,6 +74,12 @@ function installHomeActionStyles(): void {
     @media(max-width:620px){
       .import-source__panel.is-batch-intake-picker{
         min-height:100dvh!important;
+        padding-bottom:max(82px,calc(64px + env(safe-area-inset-bottom)))!important;
+      }
+      .import-source__footer{
+        left:16px!important;
+        right:16px!important;
+        bottom:max(14px,env(safe-area-inset-bottom))!important;
       }
     }
   `;
