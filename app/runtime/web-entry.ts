@@ -12,6 +12,7 @@ import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import "../ui/dom/manual-split-photo-mode";
 import "../ui/dom/home-action-enhancements";
+import "../ui/dom/batch-intake-picker-layout";
 import "../ui/dom/cupping-rail-centering";
 import { AromaSenseDomApp } from "./dom-app";
 import "./recognition-session-lifecycle";
