@@ -28,7 +28,8 @@ function prefersReducedMotion(): boolean {
 
 function railRoot(): HTMLElement | undefined {
   return document.querySelector<HTMLElement>(".cupping-layout__rail-list.sample-rail")
-    ?? document.querySelector<HTMLElement>(".cupping-layout__rail-list");
+    ?? document.querySelector<HTMLElement>(".cupping-layout__rail-list")
+    ?? undefined;
 }
 
 function activeCard(list: HTMLElement, sampleId: string): HTMLElement | undefined {
