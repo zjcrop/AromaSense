@@ -83,8 +83,21 @@ export class CuppingScreenController {
     const sample = state.samples.find((item) => item.sampleId === sampleId);
     if (!sample) throw new Error(`UNKNOWN_SAMPLE_ID:${sampleId}`);
     if (state.sessionStatus === "completed" || state.sessionStatus === "archived") throw new Error("COMPLETED_SESSION_IS_READ_ONLY");
+
+    // Navigation is a page-local operation. editor.open() loads exactly the
+    // requested sample + stage slice, so re-reading the session, every stage
+    // progress row and every observation here only adds latency. Those global
+    // snapshots are refreshed by actual writes/completion/roster mutations.
     const active = await this.editor.open({ sessionId: state.sessionId, sampleId, stageId }, now);
-    return this.refreshState(active);
+    this.state = {
+      ...state,
+      rail: buildSampleRailViewState(state.samples, state.progress, active.context.sampleId, {
+        metadata: state.sessionMetadata,
+        status: state.sessionStatus
+      }),
+      active
+    };
+    return this.state;
   }
 
   async saveField(fieldKey: string, value: unknown, now: string): Promise<CuppingScreenState> {
