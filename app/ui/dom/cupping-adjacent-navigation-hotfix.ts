@@ -1,8 +1,10 @@
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v3");
-const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation-v3";
+const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v4");
+const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation-v4";
 const railScrollSyncInstalled = new WeakSet<HTMLElement>();
+const instantScrollInstalled = new WeakSet<HTMLElement>();
+const markerAnimationGuardInstalled = new WeakSet<HTMLElement>();
 
 interface RendererInternals {
   root: HTMLElement;
@@ -86,6 +88,30 @@ function installStaticRailStyles(): void {
       transition-property:none!important;
       animation-name:none!important;
     }
+
+    /* Dry/wet aroma cards are equal-height columns. Their numeric calibration axes
+       are anchored to the card bottom, so either card may grow without lifting its axis. */
+    .aroma-dual-entry__targets .aroma-target{
+      display:flex!important;
+      flex-direction:column!important;
+    }
+    .aroma-dual-entry__targets .aroma-target > .sensory-field[data-field-key="dry_fragrance_intensity"],
+    .aroma-dual-entry__targets .aroma-target > .sensory-field[data-field-key="wet_aroma_intensity"]{
+      margin-top:auto!important;
+      flex:0 0 auto!important;
+    }
+
+    /* A selected flavor tag has exactly one right-side dot: the real drag handle.
+       release-0.1c.css used a second separator dot on every item except the last. */
+    .selected-tag-stack__item::after{
+      content:none!important;
+      display:none!important;
+    }
+    .selected-tag-stack__drag::before,
+    .selected-tag-stack__drag::after{
+      content:none!important;
+      display:none!important;
+    }
   `;
   document.head.append(style);
 }
@@ -98,9 +124,56 @@ function cancelRailTransitionArtifacts(rail: HTMLElement): void {
   }
 }
 
+function disableActiveMarkerAnimation(rail: HTMLElement): void {
+  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
+  if (!tab || markerAnimationGuardInstalled.has(tab)) return;
+  markerAnimationGuardInstalled.add(tab);
+
+  // sample-rail-renderer historically calls Element.animate() to interpolate the
+  // fixed gold tab from its previous geometry. The final geometry is written to
+  // inline styles before that call, so suppressing only that WAAPI animation leaves
+  // the tab directly at its correct destination without an intermediate top frame.
+  const nativeAnimate = tab.animate.bind(tab);
+  Object.defineProperty(tab, "animate", {
+    configurable: true,
+    value: () => {
+      const animation = nativeAnimate([{}, {}], { duration: 0 });
+      animation.cancel();
+      return animation;
+    }
+  });
+}
+
+function ensureInstantRailScroll(rail: HTMLElement): void {
+  if (instantScrollInstalled.has(rail)) return;
+  instantScrollInstalled.add(rail);
+  const nativeScrollTo = rail.scrollTo.bind(rail);
+  Object.defineProperty(rail, "scrollTo", {
+    configurable: true,
+    value: (first: ScrollToOptions | number, second?: number): void => {
+      if (typeof first === "number") {
+        nativeScrollTo(first, second ?? 0);
+        return;
+      }
+      nativeScrollTo({
+        left: first.left,
+        top: first.top,
+        behavior: "auto"
+      });
+    }
+  });
+}
+
+function prepareRailForAtomicPlacement(rail: HTMLElement): void {
+  ensureInstantRailScroll(rail);
+  disableActiveMarkerAnimation(rail);
+  cancelRailTransitionArtifacts(rail);
+}
+
 function hideActiveMarker(rail: HTMLElement): void {
   const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
   if (!tab) return;
+  disableActiveMarkerAnimation(rail);
   tab.getAnimations().forEach((animation) => animation.cancel());
   tab.style.transition = "none";
   tab.style.visibility = "hidden";
@@ -129,6 +202,7 @@ function syncActiveMarkerGeometry(rail: HTMLElement): void {
     return;
   }
 
+  disableActiveMarkerAnimation(rail);
   const cardRect = card.getBoundingClientRect();
   const numberRect = number.getBoundingClientRect();
   const copyRect = copy?.getBoundingClientRect();
@@ -160,8 +234,8 @@ function ensureRailScrollSync(rail: HTMLElement): void {
 }
 
 function settleRailVisualState(rail: HTMLElement): void {
+  prepareRailForAtomicPlacement(rail);
   ensureRailScrollSync(rail);
-  cancelRailTransitionArtifacts(rail);
   syncActiveMarkerGeometry(rail);
 }
 
@@ -170,7 +244,7 @@ function restoreRailWithoutTopFlash(
   previousScrollTop: number,
   previousActiveSampleId: string | undefined
 ): void {
-  cancelRailTransitionArtifacts(rail);
+  prepareRailForAtomicPlacement(rail);
 
   const nextActiveSampleId = rail.dataset.activeSampleId || undefined;
   if (!nextActiveSampleId || nextActiveSampleId === previousActiveSampleId) {
@@ -202,6 +276,7 @@ function installPrePaintAnimationGuard(): void {
       if (record.type !== "attributes" || record.attributeName !== "data-active-sample-id") continue;
       const rail = record.target;
       if (!(rail instanceof HTMLElement) || !rail.classList.contains("cupping-layout__rail-list")) continue;
+      prepareRailForAtomicPlacement(rail);
       hideActiveMarker(rail);
       settleRailVisualState(rail);
     }
@@ -227,12 +302,18 @@ function installPatch(): void {
       const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
       const previousScrollTop = beforeRail?.scrollTop ?? 0;
       const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
-      if (beforeRail) hideActiveMarker(beforeRail);
+      if (beforeRail) {
+        prepareRailForAtomicPlacement(beforeRail);
+        hideActiveMarker(beforeRail);
+      }
 
       originalRenderRail.call(this, state);
 
       const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
-      if (rail) restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
+      if (rail) {
+        prepareRailForAtomicPlacement(rail);
+        restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
+      }
     };
   }
 
@@ -241,12 +322,18 @@ function installPatch(): void {
     const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
     const previousScrollTop = beforeRail?.scrollTop ?? 0;
     const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
-    if (beforeRail) hideActiveMarker(beforeRail);
+    if (beforeRail) {
+      prepareRailForAtomicPlacement(beforeRail);
+      hideActiveMarker(beforeRail);
+    }
 
     await originalRender.call(this);
 
     const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
-    if (rail) restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
+    if (rail) {
+      prepareRailForAtomicPlacement(rail);
+      restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
+    }
     wireAdjacentNodeNavigation(this.root);
   };
 }
