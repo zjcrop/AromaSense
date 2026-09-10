@@ -36,7 +36,11 @@ test("normal cupping browsing does not start the wall clock and the first sensor
     const createdAt = "2026-08-24T20:39:00+08:00";
     const enteredAt = "2026-08-24T20:40:00+08:00";
     const firstWriteAt = "2026-08-24T20:40:20+08:00";
-    const session = createSession({ sessionId: "screen-session", now: createdAt, metadata: { cuppingMode: "formal" } });
+    const session = createSession({
+      sessionId: "screen-session",
+      now: createdAt,
+      metadata: { date: "2026-08-24", time: "20:39", organizer: "tester", cuppingMode: "formal" }
+    });
     const samples = buildSampleBatch(session.sessionId, [{ label: "A" }], createdAt, () => "sample-1");
     await repository.createSessionWithSamples(session, samples);
     const screen = buildScreen(db, repository);
