@@ -1,11 +1,19 @@
-export type CanonicalCuppingMode = "free" | "timed" | "blind" | "semi_blind";
+export type CanonicalCuppingMode = "formal" | "free" | "competition" | "timed" | "blind" | "semi_blind";
 /** Legacy `open` is accepted only while old stored/UI code is being normalized. */
 export type CuppingMode = CanonicalCuppingMode | "open";
 
 /** Legacy storage compatibility only. New code should use canonical CuppingMode values. */
 export type BlindMode = "open" | "semi_blind" | "full_blind";
+export type CuppingProtocol = "sca_cva" | "aromasense_custom";
 
-export const CUPPING_MODES: readonly CanonicalCuppingMode[] = ["free", "timed", "blind", "semi_blind"] as const;
+export const CUPPING_MODES: readonly CanonicalCuppingMode[] = [
+  "formal",
+  "free",
+  "competition",
+  "blind",
+  "semi_blind",
+  "timed"
+] as const;
 export const BLIND_MODES: readonly BlindMode[] = ["open", "semi_blind", "full_blind"] as const;
 export const DEFAULT_SEMI_BLIND_VISIBLE_FIELDS = ["country", "region", "process", "roast"] as const;
 
@@ -13,6 +21,9 @@ export interface CuppingModePolicy {
   timerEnabled: boolean;
   runtimeRosterMutable: boolean;
   runtimeIdentityEditable: boolean;
+  competition: boolean;
+  completionLocks: boolean;
+  protocol: CuppingProtocol;
 }
 
 export interface CuppingSessionMetadata {
@@ -31,11 +42,24 @@ export interface CuppingSessionMetadata {
   eventId?: string;
   eventRevision?: number;
   lowPrecisionLocation?: { latitude: number; longitude: number; accuracyKm: number };
+  /** Competition state lives in metadata so older local schemas remain readable without a destructive migration. */
+  competitionStartedAt?: string;
+  competitionLockedAt?: string;
+  competitionSubmittedAt?: string;
+  /** Ordinary/formal/free sessions may be marked complete while remaining editable. */
+  completedEditableAt?: string;
+  /** Optional organizer-defined time limit. Elapsed time still derives from the persisted start anchor. */
+  competitionTimeLimitSeconds?: number;
 }
 
 function normalizeOptional(value: unknown): string | undefined {
   const normalized = String(value ?? "").trim();
   return normalized || undefined;
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
 }
 
 function normalizeFieldList(value: unknown): readonly string[] | undefined {
@@ -68,7 +92,9 @@ export function normalizeCuppingMode(value: unknown, legacyBlindMode?: unknown):
   if (CUPPING_MODES.includes(value as CanonicalCuppingMode)) return value as CanonicalCuppingMode;
   // Historical metadata stored `open`; preserve its old timed behavior after upgrade.
   if (value === "open") return "timed";
-  return cuppingModeFromBlindMode(legacyBlindMode);
+  if (legacyBlindMode !== undefined) return cuppingModeFromBlindMode(legacyBlindMode);
+  // New sessions default to the SCA formal route. Free cupping must be an explicit choice.
+  return "formal";
 }
 
 export function legacyBlindModeFromCuppingMode(mode: CuppingMode): BlindMode {
@@ -83,22 +109,44 @@ export function cuppingModeFromMetadata(metadata: Partial<CuppingSessionMetadata
   return normalizeCuppingMode(metadata.cuppingMode, metadata.blindMode);
 }
 
-export function cuppingModeLabel(mode: CuppingMode): string {
+export function isCompetitionCupping(mode: CuppingMode): boolean {
   const canonical = normalizeCuppingMode(mode);
-  if (canonical === "free") return "自由杯测";
-  if (canonical === "timed") return "计时杯测";
-  if (canonical === "blind") return "盲测";
-  return "半盲测";
+  return canonical === "competition" || canonical === "timed" || canonical === "blind" || canonical === "semi_blind";
 }
 
-/** Central runtime contract so timer and edit permissions cannot drift between renderers/controllers. */
+export function competitionStarted(metadata: Partial<CuppingSessionMetadata>): boolean {
+  return Boolean(normalizeOptional(metadata.competitionStartedAt));
+}
+
+export function competitionLocked(metadata: Partial<CuppingSessionMetadata>): boolean {
+  return Boolean(normalizeOptional(metadata.competitionLockedAt));
+}
+
+export function cuppingProtocolFromMode(mode: CuppingMode): CuppingProtocol {
+  return normalizeCuppingMode(mode) === "free" ? "aromasense_custom" : "sca_cva";
+}
+
+export function cuppingModeLabel(mode: CuppingMode): string {
+  const canonical = normalizeCuppingMode(mode);
+  if (canonical === "formal") return "正式杯测";
+  if (canonical === "free") return "自由杯测";
+  if (canonical === "competition") return "杯测赛";
+  if (canonical === "timed") return "计时赛";
+  if (canonical === "blind") return "盲测赛";
+  return "半盲测赛";
+}
+
+/** Central runtime contract so timer, lock and edit permissions cannot drift between renderers/controllers. */
 export function cuppingModePolicy(mode: CuppingMode): CuppingModePolicy {
   const canonical = normalizeCuppingMode(mode);
+  const competition = isCompetitionCupping(canonical);
   return {
-    timerEnabled: canonical !== "free",
-    runtimeRosterMutable: canonical === "free",
-    // Blind/semi-blind retain their existing late identity-entry workflow; timed public cupping is locked.
-    runtimeIdentityEditable: canonical === "free" || canonical === "blind" || canonical === "semi_blind"
+    timerEnabled: competition,
+    runtimeRosterMutable: canonical === "free" || canonical === "formal",
+    runtimeIdentityEditable: canonical === "free" || canonical === "formal",
+    competition,
+    completionLocks: competition,
+    protocol: cuppingProtocolFromMode(canonical)
   };
 }
 
@@ -121,7 +169,12 @@ export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>)
     revealedAt: normalizeOptional(value.revealedAt),
     eventId: normalizeOptional(value.eventId),
     eventRevision: Number.isInteger(value.eventRevision) && Number(value.eventRevision) > 0 ? Number(value.eventRevision) : undefined,
-    lowPrecisionLocation: normalizeLocation(value.lowPrecisionLocation)
+    lowPrecisionLocation: normalizeLocation(value.lowPrecisionLocation),
+    competitionStartedAt: normalizeOptional(value.competitionStartedAt),
+    competitionLockedAt: normalizeOptional(value.competitionLockedAt),
+    competitionSubmittedAt: normalizeOptional(value.competitionSubmittedAt),
+    completedEditableAt: normalizeOptional(value.completedEditableAt),
+    competitionTimeLimitSeconds: normalizePositiveInteger(value.competitionTimeLimitSeconds)
   };
 }
 
@@ -132,7 +185,7 @@ export function defaultSessionMetadata(now: string): CuppingSessionMetadata {
     date: localDate.slice(0, 10),
     time: localDate.slice(11, 16),
     organizer: "",
-    cuppingMode: "free"
+    cuppingMode: "formal"
   };
 }
 
