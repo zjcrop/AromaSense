@@ -4,7 +4,6 @@ const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v6"
 const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation-v6";
 const railScrollSyncInstalled = new WeakSet<HTMLElement>();
 const instantScrollInstalled = new WeakSet<HTMLElement>();
-const revealTokens = new WeakMap<HTMLElement, number>();
 
 interface RendererInternals {
   root: HTMLElement;
@@ -90,11 +89,6 @@ function installStaticRailStyles(): void {
       will-change:transform,opacity!important;
       transform-origin:left center!important;
     }
-    .cupping-layout__rail-list .sample-rail__active-tab[data-reveal-pending="true"],
-    .cupping-layout__rail-list .sample-rail__number[data-reveal-pending="true"]{
-      opacity:0!important;
-      visibility:hidden!important;
-    }
 
     .aroma-dual-entry__targets .aroma-target{
       display:flex!important;
@@ -120,7 +114,9 @@ function cancelSourceRailAnimations(rail: HTMLElement): void {
   for (const node of rail.querySelectorAll<HTMLElement>(
     ".sample-rail__item,.sample-rail__number,.sample-rail__active-copy,.sample-rail__active-tab"
   )) {
-    node.getAnimations().forEach((animation) => animation.cancel());
+    node.getAnimations().forEach((animation) => {
+      if (animation.id !== "aromasense-active-label-reveal") animation.cancel();
+    });
   }
 }
 
@@ -224,64 +220,6 @@ function restoreRailPosition(
   syncActiveMarkerGeometry(rail);
 }
 
-function playHorizontalReveal(rail: HTMLElement): void {
-  cancelSourceRailAnimations(rail);
-  syncActiveMarkerGeometry(rail);
-
-  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
-  const number = activeCard(rail)?.querySelector<HTMLElement>(".sample-rail__number");
-  if (!tab || !number || tab.style.visibility === "hidden") return;
-
-  delete tab.dataset.revealPending;
-  delete number.dataset.revealPending;
-
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) return;
-
-  // Final top/left/width/height are already locked. These keyframes change only X-axis
-  // transform and opacity, so the gold marker cannot travel vertically.
-  tab.animate(
-    [
-      { transform: "translate3d(-100%,0,0) scaleX(.06)", opacity: 0 },
-      { transform: "translate3d(-10%,0,0) scaleX(.92)", opacity: .82, offset: .72 },
-      { transform: "translate3d(0,0,0) scaleX(1)", opacity: 1 }
-    ],
-    { duration: 360, easing: "cubic-bezier(.18,.78,.2,1)", fill: "none" }
-  );
-
-  number.animate(
-    [
-      { transform: "translate3d(-24px,0,0) scale(.9)", opacity: 0 },
-      { transform: "translate3d(2px,0,0) scale(1.04)", opacity: .9, offset: .78 },
-      { transform: "translate3d(0,0,0) scale(1)", opacity: 1 }
-    ],
-    { duration: 300, delay: 70, easing: "cubic-bezier(.18,.78,.2,1)", fill: "none" }
-  );
-}
-
-function queueHorizontalReveal(rail: HTMLElement, previousActiveSampleId: string | undefined): void {
-  const nextActiveSampleId = rail.dataset.activeSampleId || undefined;
-  if (!nextActiveSampleId || nextActiveSampleId === previousActiveSampleId) return;
-
-  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
-  const number = activeCard(rail)?.querySelector<HTMLElement>(".sample-rail__number");
-  if (!tab || !number) return;
-
-  for (const node of rail.querySelectorAll<HTMLElement>(".sample-rail__number[data-reveal-pending]")) {
-    delete node.dataset.revealPending;
-  }
-  const token = (revealTokens.get(rail) ?? 0) + 1;
-  revealTokens.set(rail, token);
-  tab.dataset.revealPending = "true";
-  number.dataset.revealPending = "true";
-
-  // Wait until the target sample has been scrolled into its final position and all
-  // ResizeObserver callbacks from that layout have settled. No intermediate frame is visible.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (revealTokens.get(rail) !== token) return;
-    playHorizontalReveal(rail);
-  }));
-}
-
 function installPatch(): void {
   installStaticRailStyles();
 
@@ -301,7 +239,6 @@ function installPatch(): void {
       const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
       if (!rail) return;
       restoreRailPosition(rail, previousScrollTop, previousActiveSampleId);
-      queueHorizontalReveal(rail, previousActiveSampleId);
     };
   }
 

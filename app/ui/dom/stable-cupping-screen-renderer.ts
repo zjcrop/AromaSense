@@ -119,7 +119,9 @@ function installRailInteractionFixStyles(): void {
     .cupping-main__editor,.batch-review__panel,.free-cupping-manager__panel{scrollbar-width:none!important;-ms-overflow-style:none!important}
     .sample-rail__active-tab{display:none!important}
     .sample-rail__item.is-active::before{content:none!important;display:none!important}
-    .cupping-rail-active-float{position:absolute;z-index:1;left:3px;top:0;box-sizing:border-box;border:1px solid rgba(214,173,99,.42);border-radius:14px 999px 999px 14px;background:linear-gradient(90deg,rgba(82,64,37,.92),rgba(128,95,45,.96));box-shadow:0 5px 18px rgba(0,0,0,.30),inset 0 0 0 1px rgba(255,255,255,.055);opacity:0;pointer-events:none;will-change:top,width,height,opacity;transition:top .22s cubic-bezier(.2,.7,.2,1),width .22s cubic-bezier(.2,.7,.2,1),height .22s cubic-bezier(.2,.7,.2,1),opacity .12s ease}
+    .cupping-rail-active-float{position:absolute;z-index:1;left:3px;top:0;box-sizing:border-box;border:1px solid rgba(214,173,99,.42);border-radius:14px 999px 999px 14px;background:linear-gradient(90deg,rgba(82,64,37,.92),rgba(128,95,45,.96));box-shadow:0 5px 18px rgba(0,0,0,.30),inset 0 0 0 1px rgba(255,255,255,.055);opacity:0;pointer-events:none;will-change:transform,opacity;transition:none}
+    .cupping-rail-active-float[data-reveal-pending="true"],
+    .sample-rail__number[data-reveal-pending="true"]{opacity:0!important;visibility:hidden!important}
     .sample-rail__item.is-active{z-index:4!important;overflow:visible!important}
     .sample-rail__item.is-active .sample-rail__select,.sample-rail__item.is-active .sample-rail__number,.sample-rail__item.is-active .sample-rail__active-copy{position:relative;z-index:5!important}
     .sample-rail__item.is-active .sample-rail__sample-name{position:relative;z-index:6!important;font-size:clamp(20px,2vw,23px)!important;font-weight:760!important;text-shadow:0 1px 9px rgba(0,0,0,.32)}
@@ -141,6 +143,10 @@ export class CuppingScreenRenderer {
   private railScrollTarget?: HTMLElement;
   private railScrollHandler?: () => void;
   private railResizeHandler?: () => void;
+  private railActiveSampleId?: string;
+  private railRevealFrame?: number;
+  private railRevealNumber?: HTMLElement;
+  private railRevealAnimations: Animation[] = [];
   private readonly runtimeRecognizer: SegmentationReviewRecognitionService;
 
   constructor(
@@ -175,9 +181,11 @@ export class CuppingScreenRenderer {
     this.managerOverlay = undefined;
     if (this.railScrollTarget && this.railScrollHandler) this.railScrollTarget.removeEventListener("scroll", this.railScrollHandler);
     if (this.railResizeHandler) window.removeEventListener("resize", this.railResizeHandler);
+    this.cancelRailReveal();
     this.railFloat?.remove();
     this.railFloat = undefined;
     this.railScrollTarget = undefined;
+    this.railActiveSampleId = undefined;
     this.root.querySelector(".free-cupping-return")?.remove();
     this.base.dispose();
   }
@@ -196,12 +204,16 @@ export class CuppingScreenRenderer {
     const host = this.root.querySelector<HTMLElement>(".cupping-layout__rail");
     const list = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list.sample-rail");
     if (!host || !list) {
+      this.cancelRailReveal();
       this.railFloat?.remove();
       this.railFloat = undefined;
+      this.railActiveSampleId = undefined;
       return;
     }
     if (!this.railFloat || this.railFloat.parentElement !== host) {
+      this.cancelRailReveal();
       this.railFloat?.remove();
+      this.railActiveSampleId = undefined;
       const marker = document.createElement("div");
       marker.className = "cupping-rail-active-float";
       marker.setAttribute("aria-hidden", "true");
@@ -218,7 +230,86 @@ export class CuppingScreenRenderer {
       this.railResizeHandler = () => this.positionRailFloat();
       window.addEventListener("resize", this.railResizeHandler, { passive: true });
     }
+    const sampleId = list.dataset.activeSampleId;
+    if (sampleId !== this.railActiveSampleId) {
+      this.railActiveSampleId = sampleId;
+      this.queueRailReveal();
+    }
     this.positionRailFloat();
+  }
+
+  private cancelRailReveal(): void {
+    if (this.railRevealFrame !== undefined) cancelAnimationFrame(this.railRevealFrame);
+    this.railRevealFrame = undefined;
+    for (const animation of this.railRevealAnimations) animation.cancel();
+    this.railRevealAnimations = [];
+    if (this.railRevealNumber) delete this.railRevealNumber.dataset.revealPending;
+    this.railRevealNumber = undefined;
+    if (this.railFloat) delete this.railFloat.dataset.revealPending;
+  }
+
+  private queueRailReveal(): void {
+    this.cancelRailReveal();
+    const marker = this.railFloat;
+    const list = this.railScrollTarget;
+    const active = list?.querySelector<HTMLElement>(".sample-rail__item.is-active");
+    const number = active?.querySelector<HTMLElement>(".sample-rail__number");
+    if (!marker || !list || !active || !number) return;
+
+    // This is the visible rail-level float. The legacy .sample-rail__active-tab
+    // is hidden by the stable renderer and must not own the activation effect.
+    marker.dataset.revealPending = "true";
+    number.dataset.revealPending = "true";
+    this.railRevealNumber = number;
+    const sampleId = this.railActiveSampleId;
+    const started = performance.now();
+    let stableSince = started;
+    let previousGeometry: number[] = [];
+    const settle = (now: number): void => {
+      this.railRevealFrame = undefined;
+      if (!marker.isConnected || !active.isConnected || sampleId !== this.railActiveSampleId) {
+        this.cancelRailReveal();
+        return;
+      }
+      this.positionRailFloat();
+      const cardRect = active.getBoundingClientRect();
+      const listRect = list.getBoundingClientRect();
+      const geometry = [list.scrollTop, cardRect.top, cardRect.height, listRect.top, listRect.height, listRect.width];
+      if (!previousGeometry.length || geometry.some((value, index) => Math.abs(value - previousGeometry[index]!) > .5)) {
+        stableSince = now;
+      }
+      previousGeometry = geometry;
+      // Native scrolling and deferred centering can outlive two animation frames.
+      // Keep both layers hidden until the actual on-screen geometry stops moving.
+      if (now - started >= 120 && now - stableSince >= 90) {
+        this.playRailReveal(marker, number);
+        return;
+      }
+      this.railRevealFrame = requestAnimationFrame(settle);
+    };
+    this.railRevealFrame = requestAnimationFrame(settle);
+  }
+
+  private playRailReveal(marker: HTMLElement, number: HTMLElement): void {
+    this.cancelRailReveal();
+    if (marker.style.opacity !== "1" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) return;
+
+    // Both layers start outside the viewport and share one horizontal motion.
+    // Their final vertical positions are set before either becomes visible.
+    const offset = -Math.ceil(Math.max(marker.getBoundingClientRect().right, number.getBoundingClientRect().right) + 16);
+    const keyframes = [
+      { transform: `translate3d(${offset}px,0,0)`, opacity: 0 },
+      { transform: "translate3d(0,0,0)", opacity: 1 }
+    ];
+    const timing: KeyframeAnimationOptions = { duration: 400, easing: "cubic-bezier(.16,.8,.22,1)", fill: "both" };
+    const animations = [marker.animate(keyframes, timing), number.animate(keyframes, timing)];
+    for (const animation of animations) animation.id = "aromasense-active-label-reveal";
+    this.railRevealAnimations = animations;
+    void Promise.all(animations.map((animation) => animation.finished)).then(() => {
+      if (this.railRevealAnimations !== animations) return;
+      this.railRevealAnimations = [];
+      for (const animation of animations) animation.cancel();
+    }).catch(() => undefined);
   }
 
   private positionRailFloat(): void {
@@ -236,11 +327,17 @@ export class CuppingScreenRenderer {
     const visible = activeRect.bottom > listRect.top && activeRect.top < listRect.bottom;
     const height = Math.max(42, Math.round(activeRect.height - 4));
     const top = Math.round(activeRect.top - hostRect.top + activeRect.height / 2 - height / 2);
+    if (this.railRevealAnimations.length && marker.style.top !== `${top}px`) {
+      // A user scroll or resize during entry must not carry a visible marker up
+      // or down. Hide it and reveal again after the new position settles.
+      this.queueRailReveal();
+    }
     marker.style.top = `${top}px`;
     marker.style.left = "3px";
     marker.style.width = "calc(100% + 13px)";
     marker.style.height = `${height}px`;
     marker.style.opacity = visible ? "1" : "0";
+    marker.style.visibility = visible ? "visible" : "hidden";
   }
 
   private stopInnerTimer(): void {
