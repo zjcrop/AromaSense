@@ -46,9 +46,9 @@ function installModeSelectStyles(): void {
 
 /**
  * Thin compatibility layer over the existing home renderer. The old home UI is
- * preserved intact; only its three direct mode buttons are replaced by one
- * four-mode select. The nested base renderer remains the single source of truth
- * for draft persistence and blind/semi-blind flow switching.
+ * preserved intact; only its direct mode buttons are replaced by one canonical
+ * selector. Formal SCA is the new default, while free cupping explicitly enters
+ * AromaSense's richer custom capture route.
  */
 export class BatchSetupRenderer {
   private readonly home: HomeBatchSetupRenderer;
@@ -88,8 +88,7 @@ export class BatchSetupRenderer {
     shell.querySelector<HTMLElement>(".batch-setup__target-direct")?.remove();
 
     const host = this.modeHost();
-    // The preserved legacy renderer initializes a fresh form as `open`; the new product default is free.
-    if (host.cuppingMode === "open") host.setCuppingMode("free", false);
+    if (host.cuppingMode === "open") host.setCuppingMode("formal", false);
 
     const wrapper = document.createElement("label");
     wrapper.className = "batch-setup__cupping-type";
@@ -100,8 +99,7 @@ export class BatchSetupRenderer {
     for (const mode of CUPPING_MODES) select.append(new Option(cuppingModeLabel(mode), mode));
 
     const syncFromHost = (): void => {
-      // If legacy import/reset code later writes `open`, it represents historical timed behavior.
-      if (host.cuppingMode === "open") host.setCuppingMode("timed", false);
+      if (host.cuppingMode === "open") host.setCuppingMode("formal", false);
       const mode = normalizeCuppingMode(host.cuppingMode);
       if (select.value !== mode) select.value = mode;
     };

@@ -15,7 +15,8 @@ const REQUIRED_FIELDS: Partial<Record<StageId, readonly string[]>> = {
   low_temp: ["flavor_tags", "acidity_intensity", "sweetness_intensity", "bitterness_intensity", "mouthfeel_intensity", "finish_intensity"],
   flavor: ["flavor_tags"],
   overall: QUALITY_KEYS,
-  scoring: ["score_confirmed"]
+  // Scoring is a derived/read-only result page. It never requires a second user confirmation.
+  scoring: []
 };
 
 function meaningful(value: unknown): boolean {
@@ -27,29 +28,37 @@ function meaningful(value: unknown): boolean {
 }
 
 export function completionForStage(stageId: StageId, observations: readonly SensoryObservation[]): CompletionResult {
-  const values = new Map(observations.filter((item) => meaningful(item.value)).map((item) => [item.fieldKey, item.value] as const));
+  const meaningfulObservations = observations.filter((item) => meaningful(item.value));
+  const values = new Map(meaningfulObservations.map((item) => [item.fieldKey, item.value] as const));
   if (stageId === "aroma") {
-    // sensory-dictionary/1.3 separates pre-infusion dry fragrance from the wet
-    // aroma released after infusion/break. Historical records used one shared
-    // flavor_tags field; keep those records complete without rewriting them.
-    const classifiedCapture = values.has("dry_fragrance_tags")
-      || values.has("wet_aroma_tags")
-      || observations.some((item) => item.dictionaryVersion === "sensory-dictionary/1.3"
-        && ["dry_fragrance_intensity", "wet_aroma_intensity"].includes(item.fieldKey));
+    // New free-cupping records may keep dry/wet descriptors separately. Formal
+    // SCA CVA uses one shared Fragrance/Aroma CATA list while preserving the two
+    // intensity observations. Old records remain readable without migration.
+    const classifiedCapture = values.has("dry_fragrance_tags") || values.has("wet_aroma_tags");
+    const modernSharedCapture = !classifiedCapture && meaningfulObservations.some((item) =>
+      item.dictionaryVersion === "sensory-dictionary/1.3"
+      && ["dry_fragrance_intensity", "wet_aroma_intensity"].includes(item.fieldKey)
+    );
     const required = classifiedCapture
       ? ["dry_fragrance_intensity", "dry_fragrance_tags", "wet_aroma_intensity", "wet_aroma_tags"] as const
-      : ["wet_aroma_intensity", "flavor_tags"] as const;
+      : modernSharedCapture
+        ? ["dry_fragrance_intensity", "wet_aroma_intensity", "flavor_tags"] as const
+        : ["wet_aroma_intensity", "flavor_tags"] as const;
     const missing = required.filter((key) => key === "wet_aroma_tags"
       ? !values.has("wet_aroma_tags") && !values.has("flavor_tags")
       : !values.has(key));
     return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
   }
   if (stageId === "final") {
-    const required = ["final_score_confirmed"] as const;
-    const missing = required.filter((key) => values.get(key) !== true);
-    return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
+    // Runtime completion now derives from flavor/overall/score sub-phases and
+    // never writes final_score_confirmed. Keep historical confirmed records
+    // complete so existing sessions are not silently downgraded after upgrade.
+    if (values.get("final_score_confirmed") === true) {
+      return { complete: true, observed: 1, required: 1, missing: [] };
+    }
+    return { complete: false, observed: 0, required: 0, missing: [] };
   }
   const required = REQUIRED_FIELDS[stageId] ?? [];
-  const missing = required.filter((key) => key === "score_confirmed" ? values.get(key) !== true : !values.has(key));
+  const missing = required.filter((key) => !values.has(key));
   return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
 }

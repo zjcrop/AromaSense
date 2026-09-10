@@ -63,12 +63,25 @@ test("legacy aroma observations remain complete without rewriting historical tag
   assert.equal(partiallyClassified.required, 4);
 });
 
-test("new dictionary intensity writes enter classified completion before either tag is selected", () => {
+test("new dictionary intensity writes use shared formal Fragrance/Aroma CATA until classified tags appear", () => {
   const result = completionForStage("aroma", observations("aroma", {
     dry_fragrance_intensity: 7,
     wet_aroma_intensity: 6
   }, "sensory-dictionary/1.3"));
   assert.equal(result.complete, false);
-  assert.deepEqual(result.missing, ["dry_fragrance_tags", "wet_aroma_tags"]);
-  assert.equal(result.required, 4);
+  assert.deepEqual(result.missing, ["flavor_tags"]);
+  assert.equal(result.required, 3);
+
+  const complete = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    wet_aroma_intensity: 6,
+    flavor_tags: ["floral"]
+  }, "sensory-dictionary/1.3"));
+  assert.equal(complete.complete, true);
+});
+
+test("legacy final score confirmations remain readable without restoring the old runtime gate", () => {
+  const result = completionForStage("final", observations("final", { final_score_confirmed: true }, "sensory-0.1C"));
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.missing, []);
 });

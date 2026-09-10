@@ -3,18 +3,23 @@ import test from "node:test";
 import { scoreProfileForMetadata, scoreProfileForMode } from "../app/core/cupping-score-profile";
 
 test("each canonical cupping mode resolves to its own score profile", () => {
+  assert.equal(scoreProfileForMode("formal").id, "formal");
   assert.equal(scoreProfileForMode("free").id, "free");
+  assert.equal(scoreProfileForMode("competition").id, "competition");
   assert.equal(scoreProfileForMode("timed").id, "timed");
   assert.equal(scoreProfileForMode("blind").id, "blind");
   assert.equal(scoreProfileForMode("semi_blind").id, "semi_blind");
+  assert.equal(scoreProfileForMode("formal").metadataPolicy, "visible");
   assert.equal(scoreProfileForMode("free").metadataPolicy, "visible");
+  assert.equal(scoreProfileForMode("competition").metadataPolicy, "visible");
   assert.equal(scoreProfileForMode("timed").metadataPolicy, "visible");
   assert.equal(scoreProfileForMode("blind").metadataPolicy, "hidden");
   assert.equal(scoreProfileForMode("semi_blind").metadataPolicy, "semi_hidden");
 });
 
-test("all four modes use the same current SCA calculator", () => {
-  const versions = ["free", "timed", "blind", "semi_blind"].map((mode) => scoreProfileForMode(mode as "free" | "timed" | "blind" | "semi_blind").calculatorVersion);
+test("all canonical modes use the same current SCA calculator for any displayed SCA score", () => {
+  const modes = ["formal", "free", "competition", "timed", "blind", "semi_blind"] as const;
+  const versions = modes.map((mode) => scoreProfileForMode(mode).calculatorVersion);
   assert.equal(new Set(versions).size, 1);
 });
 

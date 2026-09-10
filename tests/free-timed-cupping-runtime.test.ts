@@ -78,40 +78,47 @@ test("free cupping can pause, add, edit and delete samples without fabricating a
   }
 });
 
-test("timed cupping rejects runtime roster and public sample identity changes", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "aromasense-timed-cupping-"));
-  const db = NodeSQLiteDriver.open(join(dir, "timed.sqlite"));
+test("competition roster and identity are editable only during preflight and lock immediately after start", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aromasense-competition-cupping-"));
+  const db = NodeSQLiteDriver.open(join(dir, "competition.sqlite"));
   applySchema(db);
   try {
     const repository = new LocalCuppingRepository(db);
     const now = "2026-09-06T20:10:00+08:00";
     const session = createSession({
-      sessionId: "timed-session",
+      sessionId: "competition-session",
       now,
-      metadata: { date: "2026-09-06", time: "20:10", organizer: "tester", cuppingMode: "timed" }
+      metadata: { date: "2026-09-06", time: "20:10", organizer: "tester", cuppingMode: "competition" }
     });
-    const initial = buildSampleBatch(session.sessionId, [{ label: "A" }, { label: "B" }], now, (_inputIndex) => `timed-sample-${_inputIndex + 1}`);
+    const initial = buildSampleBatch(session.sessionId, [{ label: "A" }, { label: "B" }], now, (index) => `competition-sample-${index + 1}`);
     await repository.createSessionWithSamples(session, initial);
     const screen = buildScreen(db, repository);
     await screen.initialize(session.sessionId, now);
 
+    await screen.saveSampleIdentity("competition-sample-1", "A-preflight", { country: "Ethiopia" }, "2026-09-06T20:10:10+08:00");
+    await screen.reorderSampleIds(["competition-sample-2", "competition-sample-1"], "2026-09-06T20:10:20+08:00");
+    await screen.addSample("competition-sample-3", { label: "C", metadata: {} }, "2026-09-06T20:10:30+08:00");
+    await screen.deleteSample("competition-sample-3", "2026-09-06T20:10:40+08:00");
+    assert.equal(screen.current()?.samples.length, 2);
+
+    await screen.startCompetition("2026-09-06T20:11:00+08:00");
     await assert.rejects(
-      () => screen.addSample("timed-sample-3", { metadata: {} }, "2026-09-06T20:11:00+08:00"),
+      () => screen.addSample("competition-sample-3", { metadata: {} }, "2026-09-06T20:11:01+08:00"),
       /CUPPING_ROSTER_LOCKED/
     );
     await assert.rejects(
-      () => screen.deleteSample("timed-sample-1", "2026-09-06T20:11:00+08:00"),
+      () => screen.deleteSample("competition-sample-1", "2026-09-06T20:11:02+08:00"),
       /CUPPING_ROSTER_LOCKED/
     );
     await assert.rejects(
-      () => screen.reorderSampleIds(["timed-sample-2", "timed-sample-1"], "2026-09-06T20:11:00+08:00"),
+      () => screen.reorderSampleIds(["competition-sample-1", "competition-sample-2"], "2026-09-06T20:11:03+08:00"),
       /CUPPING_ROSTER_LOCKED/
     );
     await assert.rejects(
-      () => screen.saveSampleIdentity("timed-sample-1", "changed", {}, "2026-09-06T20:11:00+08:00"),
-      /TIMED_CUPPING_SAMPLE_IDENTITY_LOCKED/
+      () => screen.saveSampleIdentity("competition-sample-1", "changed", {}, "2026-09-06T20:11:04+08:00"),
+      /CUPPING_SAMPLE_IDENTITY_LOCKED/
     );
-    await assert.rejects(() => screen.pauseEditing(), /CUPPING_ROSTER_LOCKED/);
+    await screen.pauseEditing();
     assert.equal((await repository.listSamples(session.sessionId)).length, 2);
   } finally {
     db.close();

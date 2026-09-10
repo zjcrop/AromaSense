@@ -58,6 +58,9 @@ async function run(appUrl){
     await click(cdp,".cupping-count-dialog__confirm");
     await waitExpression(cdp,`document.querySelector('#app')?.dataset.screen==='cupping'`,"cupping screen");
     await waitExpression(cdp,`document.querySelectorAll('.sample-rail__item').length===30`,"30 rail items");
+    await waitExpression(cdp,`Boolean(document.querySelector('.competition-preflight__start'))`,"blind competition preflight");
+    await click(cdp,".competition-preflight__start");
+    await waitExpression(cdp,`Boolean(document.querySelector('[data-stage-id="aroma"]'))&&!document.querySelector('.competition-preflight__start')`,"started blind competition");
     const compact=await cdp.evaluate(`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===true`); if(compact) await click(cdp,"[data-rail-toggle]");
     await waitExpression(cdp,`document.querySelector('.cupping-layout')?.classList.contains('is-rail-compact')===false`,"expanded rail");
 
