@@ -6,22 +6,26 @@ import {
   resolveCuppingTarget
 } from "../app/core/cupping-target";
 
-test("cupping target exposes free, timed, blind and semi-blind choices", () => {
+test("cupping target exposes formal, free and competition variants with final labels", () => {
+  assert.deepEqual(resolveCuppingTarget("formal"), { choice: "formal", cuppingMode: "formal", label: "正式杯测" });
   assert.deepEqual(resolveCuppingTarget("free"), { choice: "free", cuppingMode: "free", label: "自由杯测" });
-  assert.deepEqual(resolveCuppingTarget("timed"), { choice: "timed", cuppingMode: "timed", label: "计时杯测" });
-  assert.deepEqual(resolveCuppingTarget("blind"), { choice: "blind", cuppingMode: "blind", label: "盲测" });
-  assert.deepEqual(resolveCuppingTarget("semi_blind"), { choice: "semi_blind", cuppingMode: "semi_blind", label: "半盲测" });
+  assert.deepEqual(resolveCuppingTarget("competition"), { choice: "competition", cuppingMode: "competition", label: "杯测赛" });
+  assert.deepEqual(resolveCuppingTarget("timed"), { choice: "timed", cuppingMode: "timed", label: "计时赛" });
+  assert.deepEqual(resolveCuppingTarget("blind"), { choice: "blind", cuppingMode: "blind", label: "盲测赛" });
+  assert.deepEqual(resolveCuppingTarget("semi_blind"), { choice: "semi_blind", cuppingMode: "semi_blind", label: "半盲测赛" });
 });
 
-test("legacy open target keeps historical timed behavior", () => {
-  assert.deepEqual(resolveCuppingTarget("open"), { choice: "open", cuppingMode: "timed", label: "计时杯测" });
+test("legacy open target keeps historical timed behavior under the current timed label", () => {
+  assert.deepEqual(resolveCuppingTarget("open"), { choice: "open", cuppingMode: "timed", label: "计时赛" });
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "open" }), "timed");
   assert.equal(cuppingTargetChoiceFromMetadata({ target: "公开杯测" }), "timed");
   assert.equal(cuppingTargetChoiceFromMetadata({ blindMode: "open" }), "timed");
 });
 
 test("target choice restores all canonical modes from session metadata", () => {
+  assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "formal" }), "formal");
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "free" }), "free");
+  assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "competition" }), "competition");
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "timed" }), "timed");
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "blind" }), "blind");
   assert.equal(cuppingTargetChoiceFromMetadata({ cuppingMode: "semi_blind" }), "semi_blind");
