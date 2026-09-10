@@ -79,18 +79,25 @@ async function selectDisplayNumber(cdp, displayNumber) {
         const ms=getComputedStyle(marker),ns=getComputedStyle(number);
         const mr=marker.getBoundingClientRect(),nr=number.getBoundingClientRect(),cr=active.getBoundingClientRect();
         const mt=new DOMMatrixReadOnly(ms.transform),nt=new DOMMatrixReadOnly(ns.transform);
+        const entryStart=node=>{
+          const first=node.getAnimations().flatMap(animation=>animation.effect?.getKeyframes()??[]).find(frame=>frame.transform&&Number(frame.opacity)===0);
+          return first?new DOMMatrixReadOnly(first.transform).m41:null;
+        };
         frames.push({opacity:Number(ms.opacity),numberOpacity:Number(ns.opacity),visible:ms.visibility==='visible',
           x:mt.m41,y:mt.m42,numberX:nt.m41,numberY:nt.m42,top:mr.top,numberTop:nr.top,scrollTop:list.scrollTop,
           markerRight:mr.right,numberRight:nr.right,rowError:Math.abs(mr.top+mr.height/2-cr.top-cr.height/2),
+          markerStartX:entryStart(marker),numberStartX:entryStart(number),
           numberColor:ns.color,numberWeight:Number(ns.fontWeight),transition:ms.transitionProperty});
       }
-      if(performance.now()-started<1000)requestAnimationFrame(capture);else resolve(frames);
+      if(performance.now()-started<1600)requestAnimationFrame(capture);else resolve(frames);
     };
     requestAnimationFrame(capture);
   })`);
   requireCondition(frames.length>5,`Sample ${displayNumber} did not activate`);
   requireCondition(frames.some(f=>f.opacity===0&&f.numberOpacity===0),`Sample ${displayNumber} appeared before settling`);
-  requireCondition(frames.some(f=>f.opacity===0&&f.markerRight<=0&&f.numberRight<=0),`Sample ${displayNumber} did not start outside the left viewport`);
+  // rAF sampling can run just before entry is created, then observe its next
+  // nonzero frame. Read the actual browser effect's initial transform as well.
+  requireCondition(frames.some(f=>f.markerStartX!==null&&f.numberStartX!==null&&f.markerRight-f.x+f.markerStartX<=0&&f.numberRight-f.numberX+f.numberStartX<=0),`Sample ${displayNumber} did not start outside the left viewport`);
   const entering=frames.filter(f=>f.visible&&f.opacity>.01&&f.opacity<.99);
   requireCondition(entering.length>=3,`Sample ${displayNumber} has no visible fade-in: ${JSON.stringify(frames)}`);
   requireCondition(entering.every(f=>f.x<0&&Math.abs(f.x-f.numberX)<.5&&f.y===0&&f.numberY===0),`Marker and number did not move horizontally together: ${JSON.stringify(entering)}`);
