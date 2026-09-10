@@ -157,6 +157,13 @@ export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("CUPPING_DATE_REQUIRED");
   if (!/^\d{2}:\d{2}$/.test(time)) throw new Error("CUPPING_TIME_REQUIRED");
   if (!organizer) throw new Error("CUPPING_ORGANIZER_REQUIRED");
+  // Records created before canonical cuppingMode existed have neither mode
+  // field. Their historical behavior was the public timed route; preserve that
+  // on read. New setup flows call defaultSessionMetadata(), which explicitly
+  // writes `formal`, so this compatibility branch cannot change new defaults.
+  const cuppingMode = value.cuppingMode === undefined && value.blindMode === undefined
+    ? "timed"
+    : normalizeCuppingMode(value.cuppingMode, value.blindMode);
   return {
     date,
     time,
@@ -164,7 +171,7 @@ export function normalizeSessionMetadata(value: Partial<CuppingSessionMetadata>)
     participants: normalizeOptional(value.participants),
     target: normalizeOptional(value.target),
     eventName: normalizeOptional(value.eventName),
-    cuppingMode: normalizeCuppingMode(value.cuppingMode, value.blindMode),
+    cuppingMode,
     semiBlindVisibleFields: normalizeFieldList(value.semiBlindVisibleFields),
     revealedAt: normalizeOptional(value.revealedAt),
     eventId: normalizeOptional(value.eventId),
