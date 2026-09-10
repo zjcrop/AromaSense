@@ -129,7 +129,7 @@ async function setValue(cdp, selector, value) {
 }
 async function setRangeByLabel(cdp, label, value) {
   const result = await cdp.evaluate(`(() => {
-    const field=[...document.querySelectorAll('.sensory-field')].find((node)=>node.querySelector('.sensory-field__label')?.textContent?.trim()===${js(label)});
+    const field=[...document.querySelectorAll('.sensory-field')].find((node)=>node.querySelector('.sensory-field__label')?.textContent?.trim().startsWith(${js(label)}));
     const input=field?.querySelector('.sensory-range__input');
     if(!(input instanceof HTMLInputElement)) return false;
     input.value=${js(String(value))};
@@ -165,50 +165,61 @@ async function runAcceptance(appUrl) {
     await Promise.all([cdp.send("Page.enable"), cdp.send("Runtime.enable"), cdp.send("Log.enable")]);
 
     await waitExpression(cdp, `document.querySelector('#app')?.dataset.screen==='setup'`, "setup screen");
-
-    await click(cdp, '[data-home-action="manual-entry"]');
-    const manual = await cdp.evaluate(`(() => ({
-      textarea: Boolean(document.querySelector('.manual-import__textarea')),
-      hint: document.querySelector('.manual-import__hint')?.textContent?.trim() || ''
-    }))()`);
-    requireCondition(manual?.textarea === true && /每个豆子一行/.test(manual?.hint || ""), `Manual intake contract not visible: ${JSON.stringify(manual)}`);
-    await click(cdp, ".manual-import__close");
-
     await setValue(cdp, '[data-session-field="组织方"] input', "AromaSense UI Acceptance");
     await setValue(cdp, '[data-session-field="杯测会名称"] input', "Current Round Visible UI");
-    await setValue(cdp, '[data-cupping-type="true"]', "blind");
-    await waitExpression(cdp, `document.querySelector('[data-cupping-type="true"]')?.value==='blind'`, "blind cupping type selection");
+    await setValue(cdp, '[data-cupping-type="true"]', "competition");
+    await waitExpression(cdp, `document.querySelector('[data-cupping-type="true"]')?.value==='competition'`, "competition cupping type selection");
     await click(cdp, ".batch-setup__start");
-    await waitExpression(cdp, `Boolean(document.querySelector('.cupping-count-dialog__input'))`, "blind sample dialog");
+    await waitExpression(cdp, `Boolean(document.querySelector('.cupping-count-dialog__input'))`, "competition sample dialog");
     await setValue(cdp, ".cupping-count-dialog__input", "1");
     await click(cdp, ".cupping-count-dialog__confirm");
     await waitExpression(cdp, `document.querySelector('#app')?.dataset.screen==='cupping'`, "cupping screen");
-    await click(cdp, ".sample-rail__select");
-    await waitExpression(cdp, `Boolean(document.querySelector('[data-stage-id="aroma"]'))`, "formal stage strip");
+    await waitExpression(cdp, `Boolean(document.querySelector('.competition-preflight__start'))`, "competition preflight");
+
+    const preflight = await cdp.evaluate(`(() => ({
+      count: document.querySelector('.competition-preflight__count')?.textContent?.trim() || '',
+      notice: document.querySelector('.competition-preflight__notice')?.textContent?.trim() || '',
+      timerVisible: getComputedStyle(document.querySelector('[data-cupping-timer]')).visibility
+    }))()`);
+    requireCondition(/共\s*1\s*只/.test(preflight?.count || "") && /电话、切后台或重新进入 App/.test(preflight?.notice || ""), `Competition preflight contract missing: ${JSON.stringify(preflight)}`);
+    requireCondition(preflight?.timerVisible === "hidden", `Competition timer must stay hidden before start: ${JSON.stringify(preflight)}`);
+
+    await click(cdp, ".competition-preflight__start");
+    await waitExpression(cdp, `Boolean(document.querySelector('[data-stage-id="aroma"]')) && !document.querySelector('.competition-preflight__start')`, "started competition stage strip");
 
     const initial = await cdp.evaluate(`(() => {
       const steps=[...document.querySelectorAll('.cupping-stage-step')];
       const current=document.querySelector('.cupping-stage-step[aria-current="step"]');
       const timer=document.querySelector('[data-cupping-timer]');
+      const previous=document.querySelector('.cupping-nav--previous');
+      const next=document.querySelector('.cupping-nav--next');
       return {
-        ids: steps.map(n=>n.dataset.stageId), labels: steps.map(n=>n.textContent?.trim()),
+        ids: steps.map(n=>n.dataset.stageId),
+        labels: steps.map(n=>n.querySelector('.cupping-stage-step__label')?.textContent?.trim()),
+        indexes: steps.map(n=>n.querySelector('.cupping-stage-step__index')?.textContent?.trim()),
+        indexBackgrounds: steps.map(n=>getComputedStyle(n.querySelector('.cupping-stage-step__index')).backgroundColor),
         currentId: current?.dataset.stageId, currentClass: current?.className,
         currentHint: current ? getComputedStyle(current,'::after').content : '',
         currentBorder: current ? getComputedStyle(current).borderBottomColor : '',
-        timer: timer?.textContent?.replace(/\\s+/g,' ').trim() || '',
-        compactTimerLines: timer?.querySelectorAll('.cupping-rail-timer__compact-line').length || 0
+        timer: timer?.textContent?.replace(/\s+/g,' ').trim() || '',
+        compactTimerLines: timer?.querySelectorAll('.cupping-rail-timer__compact-line').length || 0,
+        previous: previous?.textContent?.trim() || '', next: next?.textContent?.trim() || '',
+        previousAria: previous?.getAttribute('aria-label') || '', nextAria: next?.getAttribute('aria-label') || ''
       };
     })()`);
     requireCondition(JSON.stringify(initial?.ids) === JSON.stringify(["aroma","high_temp","mid_temp","low_temp","flavor","overall","scoring"]), `Wrong formal stages: ${JSON.stringify(initial)}`);
     requireCondition(JSON.stringify(initial?.labels) === JSON.stringify(["香气","高温","中温","低温","风味","综评","评分"]), `Wrong visible stage labels: ${JSON.stringify(initial)}`);
+    requireCondition(JSON.stringify(initial?.indexes) === JSON.stringify(["1","2","3","4","5","6","7"]), `Stage index circles missing: ${JSON.stringify(initial)}`);
     requireCondition(initial?.currentId === "aroma" && /is-not_started/.test(initial?.currentClass || ""), `Browsing incorrectly started aroma: ${JSON.stringify(initial)}`);
     requireCondition(/未开始/.test(initial?.currentHint || "") && /完成标准/.test(initial?.currentHint || ""), `Current completion criterion is not visibly rendered: ${JSON.stringify(initial)}`);
     requireCondition(/杯测计时/.test(initial?.timer || "") && initial?.compactTimerLines === 2, `Cupping timer/compact two-line contract missing: ${JSON.stringify(initial)}`);
+    requireCondition(initial?.previous === "←" && initial?.next === "→" && initial?.previousAria === "上一步" && initial?.nextAria === "下一步", `Bottom arrow navigation not finalized: ${JSON.stringify(initial)}`);
+    requireCondition(initial?.indexBackgrounds?.[0] !== initial?.indexBackgrounds?.[1], `Current index circle must be filled while inactive indexes stay hollow: ${JSON.stringify(initial)}`);
 
     await click(cdp, "[data-rail-toggle]");
     const legend = await waitExpression(cdp, `(() => {
       const node=document.querySelector('.cupping-progress-legend');
-      return node ? node.textContent?.replace(/\\s+/g,' ').trim() : false;
+      return node ? node.textContent?.replace(/\s+/g,' ').trim() : false;
     })()`, "three-state legend");
     requireCondition(/灰色\s*未开始/.test(legend) && /浅蓝\s*已开始/.test(legend) && /绿色\s*已完成/.test(legend), `Progress legend incomplete: ${legend}`);
 
@@ -241,67 +252,52 @@ async function runAcceptance(appUrl) {
     const activeBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(activeBorder !== initial?.currentBorder, `Started state did not visibly change progress color: ${activeBorder}`);
 
-    const dryGroupTitle = await cdp.evaluate(`document.querySelector('[data-aroma-phase="dry"] .flavor-group__title')?.getAttribute('aria-expanded')`);
-    if (dryGroupTitle !== "true") {
-      await click(cdp, '[data-aroma-phase="dry"] .flavor-group__title');
-      await waitExpression(cdp, `Boolean(document.querySelector('[data-aroma-phase="dry"] .flavor-tag'))`, "expanded dry fragrance group");
-    }
-    await click(cdp, '[data-aroma-phase="dry"] .flavor-tag');
-    await waitExpression(cdp, `document.querySelector('[data-aroma-phase="dry"] .selected-tag-stack__item') && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "dry fragrance tag persisted");
-
     await setRangeByLabel(cdp, "湿香强度", "7");
-    const wetGroupTitle = await cdp.evaluate(`document.querySelector('[data-aroma-phase="wet"] .flavor-group__title')?.getAttribute('aria-expanded')`);
-    if (wetGroupTitle !== "true") {
-      await click(cdp, '[data-aroma-phase="wet"] .flavor-group__title');
-      await waitExpression(cdp, `Boolean(document.querySelector('[data-aroma-phase="wet"] .flavor-tag'))`, "expanded wet aroma group");
+    const sharedGroupTitle = await cdp.evaluate(`document.querySelector('[data-aroma-phase="shared"] .flavor-group__title')?.getAttribute('aria-expanded')`);
+    if (sharedGroupTitle !== "true") {
+      await click(cdp, '[data-aroma-phase="shared"] .flavor-group__title');
+      await waitExpression(cdp, `Boolean(document.querySelector('[data-aroma-phase="shared"] .flavor-tag'))`, "expanded shared Fragrance/Aroma group");
     }
-    await click(cdp, '[data-aroma-phase="wet"] .flavor-tag');
+    await click(cdp, '[data-aroma-phase="shared"] .flavor-tag');
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-completed')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma completed state");
-    const completedBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
-    requireCondition(completedBorder !== activeBorder, `Completed state did not visibly change progress color: ${completedBorder}`);
-    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\\s+/g,' ').trim() || ''`);
+    const completedState = await cdp.evaluate(`(() => {
+      const step=document.querySelector('[data-stage-id="aroma"]');
+      const dot=step?.querySelector('.cupping-stage-step__status-dot');
+      return {
+        border: step ? getComputedStyle(step).borderBottomColor : '',
+        animationName: dot ? getComputedStyle(dot).animationName : '',
+        animationDuration: dot ? getComputedStyle(dot).animationDuration : ''
+      };
+    })()`);
+    requireCondition(completedState?.border !== activeBorder, `Completed state did not visibly change progress color: ${JSON.stringify(completedState)}`);
+    requireCondition(/aromasense-stage-completion-triple-flash/.test(completedState?.animationName || "") && completedState?.animationDuration === "2.1s", `Latest triple-flash animation not active: ${JSON.stringify(completedState)}`);
+    const aromaStamp = await cdp.evaluate(`document.querySelector('[data-stage-completion="aroma"]')?.textContent?.replace(/\s+/g,' ').trim() || ''`);
     requireCondition(/本进程完成/.test(aromaStamp) && /分\s*\d{2}秒/.test(aromaStamp) && /\d{2}:\d{2}/.test(aromaStamp), `Aroma completion timestamp missing: ${aromaStamp}`);
 
     await click(cdp, '[data-stage-id="scoring"]');
     await waitExpression(cdp, `document.querySelector('[data-stage-id="scoring"]')?.getAttribute('aria-current')==='step'`, "scoring selection");
     const scoring = await cdp.evaluate(`(() => {
       const editor=document.querySelector('.cupping-main__editor');
-      const confirm=editor?.querySelector('.final-assessment__score-confirm');
-      const style=confirm ? getComputedStyle(confirm) : null;
       return {
         body: editor?.textContent || '',
-        label: confirm?.textContent?.trim() || '',
-        fontSize: style?.fontSize || '',
-        fontWeight: style?.fontWeight || '',
-        textAlign: style?.textAlign || '',
         score: editor?.querySelector('.final-assessment__score-value')?.textContent?.trim() || '',
+        hasConfirm: Boolean(editor?.querySelector('.final-assessment__score-confirm')),
+        hasLockBanner: Boolean(document.querySelector('.cupping-main__lock-status')),
+        readonly: editor?.getAttribute('aria-readonly') || '',
         hasRadar: Boolean(editor?.querySelector('[aria-label*="结构雷达图"]')),
         hasEvolution: Boolean(editor?.querySelector('.temperature-flavor-profile__canvas'))
       };
     })()`);
-    requireCondition(/确认 SCA 得分/.test(scoring?.label || ""), `Scoring step does not expose explicit SCA score confirmation: ${JSON.stringify(scoring)}`);
     requireCondition(scoring?.score === "79.00", `SCA score was not preserved into scoring: ${JSON.stringify(scoring)}`);
-    requireCondition(/确认后锁定本样品/.test(scoring?.body || ""), `Score lock warning is missing: ${JSON.stringify(scoring)}`);
+    requireCondition(scoring?.hasConfirm === false && scoring?.hasLockBanner === false && scoring?.readonly !== "true", `Scoring must stay live/editable until whole-session competition completion: ${JSON.stringify(scoring)}`);
     requireCondition(/填充色仅表达风味倾向，不表示温度、质量或得分/.test(scoring?.body || ""), `Flavor-color semantics are missing: ${JSON.stringify(scoring)}`);
     requireCondition(scoring?.hasRadar === true && scoring?.hasEvolution === true, `Sensory conclusion charts are missing: ${JSON.stringify(scoring)}`);
-    requireCondition(parseFloat(scoring?.fontSize || "0") >= 18 && Number(scoring?.fontWeight || 0) >= 700 && scoring?.textAlign === "center", `Score confirmation is not large/bold/centered: ${JSON.stringify(scoring)}`);
-
-    await click(cdp, ".final-assessment__score-confirm");
-    await waitExpression(cdp, `document.querySelector('.cupping-main__lock-status')?.textContent?.includes('已锁定为只读')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "score-confirmed sample lock");
-    const locked = await cdp.evaluate(`(() => ({
-      banner: document.querySelector('.cupping-main__lock-status')?.textContent?.trim() || '',
-      confirm: document.querySelector('.final-assessment__score-confirm')?.textContent?.trim() || '',
-      stamp: document.querySelector('.cupping-completion-stamp')?.textContent?.replace(/\\s+/g,' ').trim() || '',
-      readonly: document.querySelector('.cupping-main__editor')?.getAttribute('aria-readonly') || ''
-    }))()`);
-    requireCondition(/得分已确认/.test(locked?.confirm || "") && locked?.readonly === "true", `Score confirmation did not lock the sample: ${JSON.stringify(locked)}`);
-    requireCondition(/本分支完成/.test(locked?.stamp || "") && /\d{2}:\d{2}/.test(locked?.stamp || ""), `Score branch completion timestamp missing: ${JSON.stringify(locked)}`);
 
     const relevantErrors = cdp.errors.filter((entry) => !/favicon|Failed to load resource.*404|onnxruntime/i.test(entry));
     requireCondition(relevantErrors.length === 0, `Browser errors:\n${relevantErrors.join("\n")}`);
 
     console.log("AromaSense current-round visible UI acceptance: PASS");
-    console.log(JSON.stringify({ initial, legend, overallClass: overall.cls, activeBorder, completedBorder, aromaStamp, scoring, locked }, null, 2));
+    console.log(JSON.stringify({ preflight, initial, legend, overallClass: overall.cls, activeBorder, completedState, aromaStamp, scoring }, null, 2));
   } finally {
     cdp?.close();
     chrome.kill("SIGTERM");
