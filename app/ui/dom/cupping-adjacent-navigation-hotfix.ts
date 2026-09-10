@@ -1,10 +1,9 @@
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v4");
-const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation-v4";
+const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v5");
+const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation-v5";
 const railScrollSyncInstalled = new WeakSet<HTMLElement>();
 const instantScrollInstalled = new WeakSet<HTMLElement>();
-const markerAnimationGuardInstalled = new WeakSet<HTMLElement>();
 
 interface RendererInternals {
   root: HTMLElement;
@@ -87,10 +86,10 @@ function installStaticRailStyles(): void {
     .cupping-layout__rail-list .sample-rail__active-tab{
       transition-property:none!important;
       animation-name:none!important;
+      will-change:transform,opacity!important;
+      transform-origin:left center!important;
     }
 
-    /* Dry/wet aroma cards are equal-height columns. Their numeric calibration axes
-       are anchored to the card bottom, so either card may grow without lifting its axis. */
     .aroma-dual-entry__targets .aroma-target{
       display:flex!important;
       flex-direction:column!important;
@@ -101,12 +100,7 @@ function installStaticRailStyles(): void {
       flex:0 0 auto!important;
     }
 
-    /* A selected flavor tag has exactly one right-side dot: the real drag handle.
-       release-0.1c.css used a second separator dot on every item except the last. */
-    .selected-tag-stack__item::after{
-      content:none!important;
-      display:none!important;
-    }
+    .selected-tag-stack__item::after,
     .selected-tag-stack__drag::before,
     .selected-tag-stack__drag::after{
       content:none!important;
@@ -116,32 +110,12 @@ function installStaticRailStyles(): void {
   document.head.append(style);
 }
 
-function cancelRailTransitionArtifacts(rail: HTMLElement): void {
+function cancelSourceRailAnimations(rail: HTMLElement): void {
   for (const node of rail.querySelectorAll<HTMLElement>(
     ".sample-rail__item,.sample-rail__number,.sample-rail__active-copy,.sample-rail__active-tab"
   )) {
     node.getAnimations().forEach((animation) => animation.cancel());
   }
-}
-
-function disableActiveMarkerAnimation(rail: HTMLElement): void {
-  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
-  if (!tab || markerAnimationGuardInstalled.has(tab)) return;
-  markerAnimationGuardInstalled.add(tab);
-
-  // sample-rail-renderer historically calls Element.animate() to interpolate the
-  // fixed gold tab from its previous geometry. The final geometry is written to
-  // inline styles before that call, so suppressing only that WAAPI animation leaves
-  // the tab directly at its correct destination without an intermediate top frame.
-  const nativeAnimate = tab.animate.bind(tab);
-  Object.defineProperty(tab, "animate", {
-    configurable: true,
-    value: () => {
-      const animation = nativeAnimate([{}, {}], { duration: 0 });
-      animation.cancel();
-      return animation;
-    }
-  });
 }
 
 function ensureInstantRailScroll(rail: HTMLElement): void {
@@ -155,29 +129,9 @@ function ensureInstantRailScroll(rail: HTMLElement): void {
         nativeScrollTo(first, second ?? 0);
         return;
       }
-      nativeScrollTo({
-        left: first.left,
-        top: first.top,
-        behavior: "auto"
-      });
+      nativeScrollTo({ left: first.left, top: first.top, behavior: "auto" });
     }
   });
-}
-
-function prepareRailForAtomicPlacement(rail: HTMLElement): void {
-  ensureInstantRailScroll(rail);
-  disableActiveMarkerAnimation(rail);
-  cancelRailTransitionArtifacts(rail);
-}
-
-function hideActiveMarker(rail: HTMLElement): void {
-  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
-  if (!tab) return;
-  disableActiveMarkerAnimation(rail);
-  tab.getAnimations().forEach((animation) => animation.cancel());
-  tab.style.transition = "none";
-  tab.style.visibility = "hidden";
-  tab.style.opacity = "0";
 }
 
 function activeCard(rail: HTMLElement): HTMLElement | undefined {
@@ -202,7 +156,6 @@ function syncActiveMarkerGeometry(rail: HTMLElement): void {
     return;
   }
 
-  disableActiveMarkerAnimation(rail);
   const cardRect = card.getBoundingClientRect();
   const numberRect = number.getBoundingClientRect();
   const copyRect = copy?.getBoundingClientRect();
@@ -216,13 +169,11 @@ function syncActiveMarkerGeometry(rail: HTMLElement): void {
 
   tab.getAnimations().forEach((animation) => animation.cancel());
   tab.style.transition = "none";
-  tab.style.visibility = "hidden";
-  tab.style.opacity = "0";
+  tab.style.transform = "translate3d(0,0,0) scaleX(1)";
   tab.style.left = `${left}px`;
   tab.style.top = `${Math.round(cardRect.top + cardRect.height / 2 - height / 2)}px`;
   tab.style.width = `${Math.max(compact ? 40 : 54, Math.round(railRect.right + protrusion - left))}px`;
   tab.style.height = `${height}px`;
-  tab.getAnimations().forEach((animation) => animation.cancel());
   tab.style.opacity = visible ? "1" : "0";
   tab.style.visibility = visible ? "visible" : "hidden";
 }
@@ -233,64 +184,72 @@ function ensureRailScrollSync(rail: HTMLElement): void {
   rail.addEventListener("scroll", () => syncActiveMarkerGeometry(rail), { passive: true });
 }
 
-function settleRailVisualState(rail: HTMLElement): void {
-  prepareRailForAtomicPlacement(rail);
-  ensureRailScrollSync(rail);
-  syncActiveMarkerGeometry(rail);
-}
-
-function restoreRailWithoutTopFlash(
+function restoreRailPosition(
   rail: HTMLElement,
   previousScrollTop: number,
   previousActiveSampleId: string | undefined
 ): void {
-  prepareRailForAtomicPlacement(rail);
+  ensureInstantRailScroll(rail);
+  cancelSourceRailAnimations(rail);
 
   const nextActiveSampleId = rail.dataset.activeSampleId || undefined;
   if (!nextActiveSampleId || nextActiveSampleId === previousActiveSampleId) {
     rail.scrollTop = Math.max(0, Math.min(previousScrollTop, Math.max(0, rail.scrollHeight - rail.clientHeight)));
-    settleRailVisualState(rail);
+    ensureRailScrollSync(rail);
+    syncActiveMarkerGeometry(rail);
     return;
   }
 
   const card = activeCard(rail);
   if (!card || rail.clientHeight <= 0) {
     rail.scrollTop = Math.max(0, Math.min(previousScrollTop, Math.max(0, rail.scrollHeight - rail.clientHeight)));
-    settleRailVisualState(rail);
-    return;
+  } else {
+    const maxScrollTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
+    rail.scrollTop = Math.max(0, Math.min(
+      maxScrollTop,
+      card.offsetTop + card.offsetHeight / 2 - rail.clientHeight / 2
+    ));
   }
-
-  const maxScrollTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
-  const target = Math.max(0, Math.min(
-    maxScrollTop,
-    card.offsetTop + card.offsetHeight / 2 - rail.clientHeight / 2
-  ));
-  rail.scrollTop = target;
-  settleRailVisualState(rail);
+  ensureRailScrollSync(rail);
+  syncActiveMarkerGeometry(rail);
 }
 
-function installPrePaintAnimationGuard(): void {
-  if (typeof MutationObserver === "undefined") return;
-  const observer = new MutationObserver((records) => {
-    for (const record of records) {
-      if (record.type !== "attributes" || record.attributeName !== "data-active-sample-id") continue;
-      const rail = record.target;
-      if (!(rail instanceof HTMLElement) || !rail.classList.contains("cupping-layout__rail-list")) continue;
-      prepareRailForAtomicPlacement(rail);
-      hideActiveMarker(rail);
-      settleRailVisualState(rail);
-    }
-  });
-  observer.observe(document.documentElement, {
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["data-active-sample-id"]
-  });
+function revealActiveSelection(rail: HTMLElement, previousActiveSampleId: string | undefined): void {
+  const nextActiveSampleId = rail.dataset.activeSampleId || undefined;
+  if (!nextActiveSampleId || nextActiveSampleId === previousActiveSampleId) return;
+
+  cancelSourceRailAnimations(rail);
+  syncActiveMarkerGeometry(rail);
+
+  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
+  const number = activeCard(rail)?.querySelector<HTMLElement>(".sample-rail__number");
+  if (!tab || !number || tab.style.visibility === "hidden") return;
+
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) return;
+
+  // Geometry is already final. The reveal changes only horizontal transform and opacity;
+  // top/left/width/height never participate in the animation, so vertical travel is impossible.
+  tab.animate(
+    [
+      { transform: "translate3d(-100%,0,0) scaleX(.06)", opacity: 0 },
+      { transform: "translate3d(-10%,0,0) scaleX(.92)", opacity: .82, offset: .72 },
+      { transform: "translate3d(0,0,0) scaleX(1)", opacity: 1 }
+    ],
+    { duration: 360, easing: "cubic-bezier(.18,.78,.2,1)", fill: "none" }
+  );
+
+  number.animate(
+    [
+      { transform: "translate3d(-24px,0,0) scale(.9)", opacity: 0 },
+      { transform: "translate3d(2px,0,0) scale(1.04)", opacity: .9, offset: .78 },
+      { transform: "translate3d(0,0,0) scale(1)", opacity: 1 }
+    ],
+    { duration: 300, delay: 70, easing: "cubic-bezier(.18,.78,.2,1)", fill: "none" }
+  );
 }
 
 function installPatch(): void {
   installStaticRailStyles();
-  installPrePaintAnimationGuard();
 
   const prototype = CuppingScreenRenderer.prototype as unknown as RendererPrototype;
   if (prototype[PATCH_FLAG]) return;
@@ -302,38 +261,19 @@ function installPatch(): void {
       const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
       const previousScrollTop = beforeRail?.scrollTop ?? 0;
       const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
-      if (beforeRail) {
-        prepareRailForAtomicPlacement(beforeRail);
-        hideActiveMarker(beforeRail);
-      }
 
       originalRenderRail.call(this, state);
 
       const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
-      if (rail) {
-        prepareRailForAtomicPlacement(rail);
-        restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
-      }
+      if (!rail) return;
+      restoreRailPosition(rail, previousScrollTop, previousActiveSampleId);
+      revealActiveSelection(rail, previousActiveSampleId);
     };
   }
 
   const originalRender = prototype.render;
   prototype.render = async function(): Promise<void> {
-    const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
-    const previousScrollTop = beforeRail?.scrollTop ?? 0;
-    const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
-    if (beforeRail) {
-      prepareRailForAtomicPlacement(beforeRail);
-      hideActiveMarker(beforeRail);
-    }
-
     await originalRender.call(this);
-
-    const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
-    if (rail) {
-      prepareRailForAtomicPlacement(rail);
-      restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
-    }
     wireAdjacentNodeNavigation(this.root);
   };
 }
