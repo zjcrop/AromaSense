@@ -9,6 +9,7 @@ interface RendererInternals {
 interface RendererPrototype {
   [PATCH_FLAG]?: boolean;
   render(this: RendererInternals): Promise<void>;
+  renderRail?(this: RendererInternals, state: unknown): void;
 }
 
 function directStageSteps(root: HTMLElement): HTMLButtonElement[] {
@@ -30,8 +31,8 @@ function replaceNavigationButton(
   const current = root.querySelector<HTMLButtonElement>(`.cupping-main__footer ${selector}`);
   if (!current) return;
 
-  // Clone strips the old goPrevious/goNext listener. Those controller actions are
-  // workflow-gated and therefore are the wrong semantic for the bottom node arrows.
+  // Clone strips the old goPrevious/goNext listener. Those actions are workflow-gated;
+  // the bottom triangle groups are now pure adjacent-node navigation controls.
   const replacement = current.cloneNode(true) as HTMLButtonElement;
   replacement.disabled = false;
   replacement.removeAttribute("title");
@@ -94,18 +95,18 @@ function restoreRailWithoutTopFlash(
 
   const nextActiveSampleId = rail.dataset.activeSampleId || undefined;
   if (!nextActiveSampleId || nextActiveSampleId === previousActiveSampleId) {
-    rail.scrollTop = Math.max(0, Math.min(previousScrollTop, rail.scrollHeight - rail.clientHeight));
+    rail.scrollTop = Math.max(0, Math.min(previousScrollTop, Math.max(0, rail.scrollHeight - rail.clientHeight)));
     return;
   }
 
   const card = activeCard(rail);
   if (!card || rail.clientHeight <= 0) {
-    rail.scrollTop = Math.max(0, Math.min(previousScrollTop, rail.scrollHeight - rail.clientHeight));
+    rail.scrollTop = Math.max(0, Math.min(previousScrollTop, Math.max(0, rail.scrollHeight - rail.clientHeight)));
     return;
   }
 
-  // Position in the same render turn, before the browser paints. This avoids the
-  // previous two-frame sequence where the list could visibly flash at sample 01.
+  // Synchronous centering from the current viewport. No delayed smooth scan and no
+  // frame in which the list is allowed to paint at sample 01 first.
   const maxScrollTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
   const target = Math.max(0, Math.min(
     maxScrollTop,
@@ -118,6 +119,21 @@ function installPatch(): void {
   const prototype = CuppingScreenRenderer.prototype as unknown as RendererPrototype;
   if (prototype[PATCH_FLAG]) return;
   prototype[PATCH_FLAG] = true;
+
+  // renderRail mutates the rail before the rest of render may await async data.
+  // Preserve/position scroll here synchronously so an intermediate browser paint
+  // can never expose the list at scrollTop=0.
+  const originalRenderRail = prototype.renderRail;
+  if (typeof originalRenderRail === "function") {
+    prototype.renderRail = function(state: unknown): void {
+      const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
+      const previousScrollTop = beforeRail?.scrollTop ?? 0;
+      const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
+      originalRenderRail.call(this, state);
+      const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
+      if (rail) restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
+    };
+  }
 
   const originalRender = prototype.render;
   prototype.render = async function(): Promise<void> {
