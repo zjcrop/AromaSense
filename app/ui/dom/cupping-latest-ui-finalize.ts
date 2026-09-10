@@ -18,6 +18,7 @@ function installStyles(): void {
   style.textContent = `
     .cupping-main__stage-strip{
       gap:10px!important;
+      bottom:calc(46px + max(10px, env(safe-area-inset-bottom)))!important;
     }
     .cupping-stage-step{
       position:static!important;
@@ -74,11 +75,13 @@ function installStyles(): void {
     }
     .cupping-main__footer.is-two-action{
       gap:10px!important;
+      padding-top:1px!important;
       transform:translateY(-0.5px)!important;
     }
     .cupping-main__footer.is-two-action .cupping-nav--previous,
     .cupping-main__footer.is-two-action .cupping-nav--next{
       font-size:23px!important;
+      font-weight:900!important;
       line-height:1!important;
       padding-top:0!important;
       padding-bottom:0!important;
