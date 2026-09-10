@@ -39,10 +39,13 @@ test("active sample clamps to the bottom edge for late samples", () => {
   assert.equal(target, 800);
 });
 
-test("rail auto-scroll only reacts to a real active-sample id change", () => {
+test("rail auto-scroll reacts to sample changes and compact/expanded geometry changes", () => {
   const source = readFileSync("app/ui/dom/sample-rail-active-scroll.ts", "utf8");
-  assert.match(source, /attributeFilter:\s*\["data-active-sample-id"\]/);
+  assert.match(source, /attributeFilter:\s*\["data-active-sample-id",\s*"class"\]/);
   assert.match(source, /if \(record\.oldValue === current\) continue/);
+  assert.match(source, /classList\.contains\("cupping-layout"\)/);
+  assert.match(source, /railFromLayout\(target\)/);
   assert.match(source, /classList\.contains\("cupping-layout__rail-list"\)/);
+  assert.match(source, /requestAnimationFrame\(\(\) => \{/);
   assert.doesNotMatch(source, /textContent\s*=/);
 });
