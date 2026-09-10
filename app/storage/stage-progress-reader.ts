@@ -83,12 +83,17 @@ export class StageProgressReader {
 
     const stagesByKey = new Map(stageRows.map((row) => [key(row.sample_id, row.stage_id), row] as const));
     const observationsByKey = new Map<string, SensoryObservation[]>();
+    const observationsBySample = new Map<string, SensoryObservation[]>();
     for (const row of observationRows) {
       const observation = observationFromRow(row);
       const k = key(observation.sampleId, observation.stageId);
       const items = observationsByKey.get(k) ?? [];
       items.push(observation);
       observationsByKey.set(k, items);
+
+      const sampleItems = observationsBySample.get(observation.sampleId) ?? [];
+      sampleItems.push(observation);
+      observationsBySample.set(observation.sampleId, sampleItems);
     }
 
     const keys = new Set([...stagesByKey.keys(), ...observationsByKey.keys()]);
@@ -101,16 +106,25 @@ export class StageProgressReader {
       const stageId = stageRow?.stage_id ?? representative?.stageId;
       if (!sampleId || !stageId) continue;
 
-      const status = deriveStageStatus(stageId, observations);
+      // The scoring page is derived/read-only. Its completion therefore comes
+      // from the sample's SCA source observations rather than a synthetic
+      // score_confirmed write. Include historical final rows for migration and
+      // current overall rows for the seven-stage flow.
+      const statusObservations = stageId === "scoring"
+        ? (observationsBySample.get(sampleId) ?? []).filter((item) =>
+            item.stageId === "overall" || item.stageId === "final" || item.stageId === "scoring"
+          )
+        : observations;
+      const status = deriveStageStatus(stageId, statusObservations);
       progress.push({
         sampleId,
         stageId,
         status,
-        observationCount: meaningfulObservationCount(observations),
+        observationCount: meaningfulObservationCount(statusObservations),
         finalPhases: stageId === "final" ? finalPhaseProgress(observations) : undefined,
-        startedAt: status === "not_started" ? undefined : stageRow?.started_at ?? observations[0]?.updatedAt,
+        startedAt: status === "not_started" ? undefined : stageRow?.started_at ?? statusObservations[0]?.updatedAt,
         completedAt: status === "completed" ? stageRow?.completed_at ?? undefined : undefined,
-        updatedAt: latestTimestamp([stageRow?.updated_at, ...observations.map((observation) => observation.updatedAt)])
+        updatedAt: latestTimestamp([stageRow?.updated_at, ...statusObservations.map((observation) => observation.updatedAt)])
       });
     }
 
