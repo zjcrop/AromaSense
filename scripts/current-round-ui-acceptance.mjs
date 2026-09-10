@@ -249,7 +249,7 @@ async function runAcceptance(appUrl) {
     await waitIdle(cdp, "load all flavor tags");
 
     await click(cdp, '[data-stage-id="overall"]');
-    await waitExpression(cdp, `Boolean(document.querySelector('.cup-comparison'))`, "overall page");
+    await waitExpression(cdp, `Boolean(document.querySelector('.cup-comparison')) && document.querySelectorAll('.cupping-main__editor .final-assessment__sca-scale').length===6`, "settled overall page");
     const overall = await cdp.evaluate(`(() => ({
       legacyPhaseNav:Boolean(document.querySelector('.cupping-main__editor .final-assessment__phase-nav')),
       duplicateAromaInputs:['final_sca_affective_fragrance','final_sca_affective_aroma'].filter(k=>document.querySelector('.cupping-main__editor [data-field-key="'+k+'"]')).length,
