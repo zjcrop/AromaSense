@@ -75,6 +75,7 @@ export class AromaSenseDomApp {
   private homeModalCleanup?: Cleanup;
   private rootBackCleanup?: Cleanup;
   private sessionFlowCleanup?: Cleanup;
+  private sessionGestureCleanup?: Cleanup;
 
   constructor(private readonly root: HTMLElement, private readonly db: SQLiteDriver, private readonly options: AromaSenseDomAppOptions) {
     this.preferences = new UserPreferencesRepository(db);
@@ -133,12 +134,19 @@ export class AromaSenseDomApp {
   }
 
   async openSession(sessionId: string): Promise<void> {
-    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("cupping", () => this.showSetup());
+    this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined;
+    this.setRootMode("cupping", () => {
+      this.root.querySelector<HTMLButtonElement>(".cupping-rail-footer__exit")?.click();
+    });
     const repository = new LocalCuppingRepository(this.db); const editor = new CuppingSessionController(repository, this.options.observationIdFactory); const controller = new CuppingScreenController(repository, new StageProgressReader(this.db), editor, this.revisions); const flavorService = new FlavorGroupPreferenceService(this.preferences);
     this.screen = new CuppingScreenRenderer(this.root, controller, flavorService, new SampleSummaryReader(this.db), {
       now: this.options.now, onExit: async () => { void this.yingxiangDelivery?.sync(); await this.showSetup(); }, onOpenAccount: async (activeSessionId) => { await this.showAccount(activeSessionId); }, onOpenRecords: async () => { await this.showRecords(); }, onSessionFinished: async (activeSessionId) => { void this.syncPending([activeSessionId]); }
     }, this.interaction.overlayManager);
     await this.screen.initialize(sessionId);
+    const swipeTarget = this.root.querySelector<HTMLElement>(".cupping-layout__main");
+    if (swipeTarget) this.sessionGestureCleanup = this.interaction.backGesture.attachEdgeSwipe(swipeTarget, {
+      canStart: () => this.root.getAttribute("aria-busy") !== "true"
+    });
     this.sessionFlowCleanup = this.interaction.flowNavigation.register({ id: `cupping-flow:${sessionId}`, priority: 500,
       canBack: () => { const state = controller.current(); if (!state?.active || state.sessionStatus === "completed" || state.sessionStatus === "archived") return false; if (state.active.context.stageId === "preparation") return false; return Boolean(this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])")); },
       back: () => { this.root.querySelector<HTMLButtonElement>(".cupping-nav--previous:not([disabled])")?.click(); }
@@ -174,7 +182,7 @@ export class AromaSenseDomApp {
     await this.yingxiangDelivery?.sync(); if (!this.syncEngine || !(await this.authClient?.current())) return undefined; if (sessionIds?.length) await this.syncQueue.retrySessions(sessionIds, this.options.now()); return this.syncEngine.runOnce(sessionIds);
   }
   async syncCounts() { return this.syncQueue.counts(); }
-  dispose(): void { this.closeHomeModal(); this.rootBackCleanup?.(); this.rootBackCleanup = undefined; this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined; this.screen?.dispose(); this.screen = undefined; this.setRootMode("empty"); this.interaction.dispose(); }
+  dispose(): void { this.closeHomeModal(); this.rootBackCleanup?.(); this.rootBackCleanup = undefined; this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined; this.sessionGestureCleanup?.(); this.sessionGestureCleanup = undefined; this.screen?.dispose(); this.screen = undefined; this.setRootMode("empty"); this.interaction.dispose(); }
 
   private installHomeModalStyles(): void {
     if (document.head.querySelector("style[data-aromasense-home-modal]")) return;
@@ -222,7 +230,7 @@ export class AromaSenseDomApp {
   private async downloadRecord(snapshot: CuppingRecordSnapshot): Promise<void> { const bundle = await this.submissions.create(snapshot); const prefix = `AromaSense-${snapshot.session.metadata.date}-${snapshot.session.sessionId.slice(0, 8)}`; this.downloadFile(`${prefix}.json`, JSON.stringify(snapshot, null, 2), "application/json;charset=utf-8"); this.downloadFile(`${prefix}.csv`, completeCsv(snapshot, bundle), "text/csv;charset=utf-8"); this.downloadFile(`${prefix}.submission.json`, JSON.stringify(bundle, null, 2), "application/json;charset=utf-8"); }
   private hasCloudAuthConfiguration(): boolean { return Boolean(this.options.cloudBaseUrl && this.options.firebaseApiKey && this.options.firebaseProjectId); }
   private setRootMode(mode: RootMode, back?: () => void | Promise<void>): void {
-    this.rootBackCleanup?.(); this.rootBackCleanup = undefined; this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined; this.root.replaceChildren(); if (mode !== "cupping") delete this.root.dataset.sessionId;
+    this.rootBackCleanup?.(); this.rootBackCleanup = undefined; this.sessionFlowCleanup?.(); this.sessionFlowCleanup = undefined; this.sessionGestureCleanup?.(); this.sessionGestureCleanup = undefined; this.root.replaceChildren(); if (mode !== "cupping") delete this.root.dataset.sessionId;
     this.root.classList.remove("batch-setup", "aromasense-cupping", "account-screen", "startup-screen", "session-records", "record-replay"); if (mode === "setup") this.root.classList.add("batch-setup"); if (mode === "cupping") this.root.classList.add("aromasense-cupping"); if (mode === "account") this.root.classList.add("account-screen"); if (mode === "records") this.root.classList.add("session-records"); if (mode === "replay") this.root.classList.add("record-replay"); this.root.dataset.screen = mode; this.interaction.navigationManager.setActivePage(mode); if (back) this.rootBackCleanup = this.interaction.navigationManager.registerChildBack({ id: `screen:${mode}`, back });
   }
 }

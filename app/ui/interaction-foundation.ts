@@ -533,6 +533,76 @@ export class BackGestureAdapter {
   back(source = "system"): boolean {
     return this.navigation.back({ source });
   }
+
+  attachEdgeSwipe(
+    element: HTMLElement,
+    options: { canStart?: () => boolean; edgeWidth?: number; minDistance?: number; maxDurationMs?: number } = {}
+  ): Cleanup {
+    let start: { pointerId: number; x: number; y: number; at: number; edgeOffset: number } | undefined;
+    const interactive = "input,textarea,select,button,[contenteditable='true'],[data-no-edge-back]";
+
+    const onPointerDown = (event: PointerEvent): void => {
+      start = undefined;
+      if (!event.isPrimary || (event.pointerType && event.pointerType !== "touch" && event.pointerType !== "pen")) return;
+      if (options.canStart?.() === false) return;
+      if (event.target instanceof Element && event.target.closest(interactive)) return;
+      const rect = element.getBoundingClientRect();
+      const edgeOffset = event.clientX - rect.left;
+      if (edgeOffset < 0 || edgeOffset > (options.edgeWidth ?? 32)) return;
+      start = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, at: event.timeStamp, edgeOffset };
+    };
+    const cancel = (): void => { start = undefined; };
+    const onPointerUp = (event: PointerEvent): void => {
+      const origin = start;
+      start = undefined;
+      if (!origin || origin.pointerId !== event.pointerId) return;
+      if (!isEdgeSwipeBackGesture({
+        startEdgeOffset: origin.edgeOffset,
+        deltaX: event.clientX - origin.x,
+        deltaY: event.clientY - origin.y,
+        durationMs: event.timeStamp - origin.at,
+        edgeWidth: options.edgeWidth,
+        minDistance: options.minDistance,
+        maxDurationMs: options.maxDurationMs
+      })) return;
+      event.preventDefault();
+      this.back("edge-swipe");
+    };
+
+    element.addEventListener("pointerdown", onPointerDown);
+    element.addEventListener("pointerup", onPointerUp);
+    element.addEventListener("pointercancel", cancel);
+    return () => {
+      start = undefined;
+      element.removeEventListener("pointerdown", onPointerDown);
+      element.removeEventListener("pointerup", onPointerUp);
+      element.removeEventListener("pointercancel", cancel);
+    };
+  }
+}
+
+export interface EdgeSwipeBackGesture {
+  startEdgeOffset: number;
+  deltaX: number;
+  deltaY: number;
+  durationMs: number;
+  edgeWidth?: number;
+  minDistance?: number;
+  maxDurationMs?: number;
+}
+
+export function isEdgeSwipeBackGesture(gesture: EdgeSwipeBackGesture): boolean {
+  const edgeWidth = gesture.edgeWidth ?? 32;
+  const minDistance = gesture.minDistance ?? 72;
+  const maxDurationMs = gesture.maxDurationMs ?? 800;
+  const vertical = Math.abs(gesture.deltaY);
+  return gesture.startEdgeOffset >= 0
+    && gesture.startEdgeOffset <= edgeWidth
+    && gesture.durationMs >= 0
+    && gesture.durationMs <= maxDurationMs
+    && gesture.deltaX >= minDistance
+    && vertical <= 54
+    && gesture.deltaX >= vertical * 1.35;
 }
 
 export class InteractionFoundation {

@@ -86,6 +86,10 @@ test("score confirmation UI and left-rail timer contracts remain present", () =>
   const screenSource = readFileSync("app/ui/dom/cupping-screen-renderer.ts", "utf8");
   assert.match(screenSource, /data-cupping-timer/u);
   assert.match(screenSource, /cupping-rail-timer__compact-line/u);
+  assert.match(screenSource, /visibilitychange/u);
+  assert.match(screenSource, /pageshow/u);
+  assert.match(screenSource, /syncTimerFromWallClock/u);
+  assert.match(screenSource, /cuppingElapsedSeconds\(state\.sessionStartedAt, end\)/u);
   assert.match(screenSource, /本进程完成/u);
   assert.match(screenSource, /得分已确认 · 本样品杯测记录已锁定为只读/u);
 });

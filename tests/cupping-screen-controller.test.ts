@@ -20,7 +20,10 @@ async function fillRequiredStage(screen: CuppingScreenController, sampleId: stri
   await screen.select(sampleId, stageId, now);
   const fields: Record<StageId, ReadonlyArray<[string, unknown]>> = {
     preparation: [["dry_fragrance_intensity", 6]],
-    aroma: [["wet_aroma_intensity", 7], ["flavor_tags", ["jasmine"]]],
+    aroma: [
+      ["dry_fragrance_intensity", 6], ["dry_fragrance_tags", ["cocoa"]],
+      ["wet_aroma_intensity", 7], ["wet_aroma_tags", ["jasmine"]]
+    ],
     high_temp: [
       ["flavor_tags", ["jasmine"]], ["acidity_intensity", 8], ["sweetness_intensity", 8],
       ["bitterness_intensity", 2], ["mouthfeel_intensity", 7]
@@ -99,7 +102,9 @@ test("entering the cupping screen starts the session clock while browsing alone 
     await screen.saveField("wet_aroma_intensity", 7, "2026-08-24T20:40:30+08:00");
     assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "active");
     await assert.rejects(() => screen.goNext("2026-08-24T20:40:40+08:00"), /STAGE_INCOMPLETE:aroma/);
-    await screen.saveField("flavor_tags", ["jasmine"], "2026-08-24T20:40:50+08:00");
+    await screen.saveField("dry_fragrance_intensity", 6, "2026-08-24T20:40:45+08:00");
+    await screen.saveField("dry_fragrance_tags", ["cocoa"], "2026-08-24T20:40:47+08:00");
+    await screen.saveField("wet_aroma_tags", ["jasmine"], "2026-08-24T20:40:50+08:00");
     const afterNext = await screen.goNext("2026-08-24T20:41:00+08:00");
 
     assert.equal(afterNext.active?.context.stageId, "high_temp");

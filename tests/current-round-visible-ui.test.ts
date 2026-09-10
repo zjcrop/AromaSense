@@ -59,6 +59,34 @@ test("product shell visibly exposes three-state progress and current-step comple
   assert.match(renderer, /stage\.stageId === activeStageId/);
 });
 
+test("aroma page stores dry fragrance and wet aroma as separate classified observations", () => {
+  const dictionary = readFileSync(resolve(root, "app/core/sensory-dictionary-v1.ts"), "utf8");
+  const completion = readFileSync(resolve(root, "app/core/completion-engine.ts"), "utf8");
+  const renderer = readFileSync(resolve(root, "app/ui/dom/sensory-editor-renderer.ts"), "utf8");
+
+  assert.match(dictionary, /sensory-dictionary\/1\.3/);
+  assert.match(dictionary, /key: "dry_fragrance_tags"/);
+  assert.match(dictionary, /key: "wet_aroma_tags"/);
+  assert.match(completion, /classifiedCapture/);
+  assert.match(renderer, /干香 · Fragrance/);
+  assert.match(renderer, /湿香 · Aroma/);
+  assert.match(renderer, /fieldKey !== "flavor_tags"/);
+  assert.match(renderer, /stackList\.dataset\.fieldKey = fieldKey/);
+});
+
+test("newly completed workflow points use the requested 0.3 second two-flash transition", () => {
+  const css = readFileSync(resolve(root, "app/ui/dom/aromasense-cupping.css"), "utf8");
+  const renderer = readFileSync(resolve(root, "app/ui/dom/cupping-screen-renderer.ts"), "utf8");
+
+  assert.match(css, /aromasense-stage-completion-double-flash 300ms linear both/);
+  assert.match(css, /16\.667%[\s\S]*#effff3/);
+  assert.match(css, /50%[\s\S]*#effff3/);
+  assert.match(css, /66\.667%[\s\S]*#9ed8aa/);
+  assert.match(css, /100%[\s\S]*var\(--as-progress-completed\)/);
+  assert.match(renderer, /progressStatusSnapshot/);
+  assert.match(renderer, /is-completion-flash/);
+});
+
 test("sensory conclusion visibly preserves missing values instead of fabricating zero", () => {
   const finalAssessment = readFileSync(resolve(root, "app/ui/dom/final-assessment-renderer.ts"), "utf8");
   const conclusion = readFileSync(resolve(root, "app/ui/dom/sensory-profile-conclusion-renderer.ts"), "utf8");

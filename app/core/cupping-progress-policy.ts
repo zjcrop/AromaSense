@@ -14,7 +14,7 @@ export interface FinalPhaseProgress {
 
 export const STAGE_COMPLETION_HINTS: Readonly<Record<Exclude<StageId, "final">, string>> = {
   preparation: "记录干香强度",
-  aroma: "记录湿香强度并选择至少一个风味描述",
+  aroma: "分别完成注水前干香与注水破渣后湿香的强度和描述",
   high_temp: "完成风味、酸质、甜感、苦味与口感强度",
   mid_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
   low_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",

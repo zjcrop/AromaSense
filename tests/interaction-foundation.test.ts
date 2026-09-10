@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   DraftGuard,
   FlowNavigation,
+  isEdgeSwipeBackGesture,
   NavigationManager,
   OverlayManager,
   RootExitGuard
@@ -157,6 +158,14 @@ test("dirty flow delegates confirmation without DraftGuard navigating by itself"
   assert.deepEqual(calls, ["back"]);
 });
 
+test("edge swipe accepts deliberate rightward gestures and rejects scroll-like motion", () => {
+  assert.equal(isEdgeSwipeBackGesture({ startEdgeOffset: 12, deltaX: 88, deltaY: 18, durationMs: 320 }), true);
+  assert.equal(isEdgeSwipeBackGesture({ startEdgeOffset: 45, deltaX: 92, deltaY: 8, durationMs: 260 }), false);
+  assert.equal(isEdgeSwipeBackGesture({ startEdgeOffset: 10, deltaX: 64, deltaY: 4, durationMs: 260 }), false);
+  assert.equal(isEdgeSwipeBackGesture({ startEdgeOffset: 10, deltaX: 88, deltaY: 72, durationMs: 260 }), false);
+  assert.equal(isEdgeSwipeBackGesture({ startEdgeOffset: 10, deltaX: 88, deltaY: 8, durationMs: 900 }), false);
+});
+
 test("Stage 1 source contracts keep one scrim, semantic navigation and native/recognition bridges separated", () => {
   const foundation = source("app/ui/interaction-foundation.ts");
   const app = source("app/runtime/dom-app.ts");
@@ -173,6 +182,7 @@ test("Stage 1 source contracts keep one scrim, semantic navigation and native/re
   assert.match(foundation, /class NavigationManager/);
   assert.match(foundation, /class FlowNavigation/);
   assert.match(foundation, /class BackGestureAdapter/);
+  assert.match(foundation, /attachEdgeSwipe/);
   assert.match(foundation, /class RootExitGuard/);
   assert.match(foundation, /class DraftGuard/);
   assert.match(foundation, /beforeunload/);
@@ -182,6 +192,8 @@ test("Stage 1 source contracts keep one scrim, semantic navigation and native/re
   assert.match(app, /InteractionFoundation/);
   assert.match(app, /registerChildBack/);
   assert.match(app, /flowNavigation\.register/);
+  assert.match(app, /attachEdgeSwipe/);
+  assert.match(app, /cupping-rail-footer__exit/);
   assert.match(app, /cupping-flow:\$\{sessionId\}/);
   assert.match(app, /stageId === "preparation"\) return false/);
   assert.match(app, /\.cupping-nav--previous:not\(\[disabled\]\)/);

@@ -1,6 +1,6 @@
 import type { StageId } from "../../shared/protocol/aromasense-v1";
 
-export const SENSORY_DICTIONARY_VERSION = "sensory-dictionary/1.2" as const;
+export const SENSORY_DICTIONARY_VERSION = "sensory-dictionary/1.3" as const;
 
 export type SensoryValueKind = "boolean" | "intensity" | "score" | "text" | "tags";
 export type SensoryAssessmentLayer = "descriptive" | "affective" | "process" | "notes";
@@ -50,12 +50,26 @@ export const SENSORY_FIELDS_V1: readonly SensoryFieldDefinition[] = [
     ...DESCRIPTIVE_SCALE
   },
   {
+    key: "dry_fragrance_tags",
+    label: "干香描述",
+    valueKind: "tags",
+    assessmentLayer: "descriptive",
+    stages: ["preparation", "aroma"]
+  },
+  {
     key: "wet_aroma_intensity",
     label: "湿香强度",
     valueKind: "intensity",
     assessmentLayer: "descriptive",
     stages: ["aroma"],
     ...DESCRIPTIVE_SCALE
+  },
+  {
+    key: "wet_aroma_tags",
+    label: "湿香描述",
+    valueKind: "tags",
+    assessmentLayer: "descriptive",
+    stages: ["aroma"]
   },
   {
     key: "flavor_tags",

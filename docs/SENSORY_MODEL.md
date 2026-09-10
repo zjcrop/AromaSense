@@ -1,7 +1,7 @@
 # AromaSense 感官数据模型
 
-Product version: `B0.1.a`
-Dictionary: `sensory-dictionary/1.1`
+Product version: `B0.2.a`
+Dictionary: `sensory-dictionary/1.3`
 
 ## 1. 设计原则
 
@@ -14,16 +14,17 @@ AromaSense 将感官记录至少分为两层，不把“感知强度”和“喜
 
 ## 2. AromaSense 自定义温段工作流
 
-项目把同一支样品拆分为：
+新建杯测把同一支样品拆分为七个正式节点：
 
-- preparation
 - aroma
 - high_temp
 - mid_temp
 - low_temp
-- final
+- flavor
+- overall
+- scoring
 
-其中高温、中温、低温的重复感官记录是 AromaSense 为多样品杯测、温度变化追踪和后续趋势分析设计的工作流扩展。
+`preparation` 和合并式 `final` 仅作为旧记录兼容路径继续读取，不用于新记录。高温、中温、低温的重复感官记录是 AromaSense 为多样品杯测、温度变化追踪和后续趋势分析设计的工作流扩展。
 
 这套温段划分必须在文档、导出和 UI 中与标准来源明确区分，不能标记为“SCA 规定温段”。
 
@@ -40,6 +41,13 @@ AromaSense 将感官记录至少分为两层，不把“感知强度”和“喜
 - 余韵强度
 
 风味词与缺陷属于描述性数据，不进入“质量分”的数学合成。
+
+从 `sensory-dictionary/1.3` 起，香气节点明确区分：
+
+- `dry_fragrance_intensity` + `dry_fragrance_tags`：注水前的干香；
+- `wet_aroma_intensity` + `wet_aroma_tags`：注水及破渣后的湿香。
+
+`sensory-dictionary/1.2` 及更早的香气记录可能把描述词保存在共享的 `flavor_tags`。读取时该值作为湿香描述回显；只有用户实际编辑后才新增 `wet_aroma_tags`，不会静默改写旧 observation。汇总与导出同时识别新旧字段。
 
 雷达图目前只表达描述性强度的跨温段平均趋势，量程同样为 0–15。雷达图是趋势可视化，不是综合质量评分。
 
@@ -70,7 +78,7 @@ Final 阶段使用独立的 1–9 情感评价量表，当前字段为：
 
 每条 observation 保存 `dictionary_version`。词典新增字段或改变语义/量表时必须升级词典版本；旧记录保持原版本，不做静默重解释。
 
-当前版本：`sensory-dictionary/1.1`。
+当前版本：`sensory-dictionary/1.3`。
 
 ## 7. 参考来源
 

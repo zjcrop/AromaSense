@@ -32,8 +32,9 @@ export function buildRadarSummary(observations: readonly SummaryObservation[]): 
 
 export function collectFlavorTags(observations: readonly SummaryObservation[]): readonly string[] {
   const tags = new Set<string>();
+  const flavorTagFields = new Set(["dry_fragrance_tags", "wet_aroma_tags", "flavor_tags"]);
   for (const observation of observations) {
-    if (observation.fieldKey !== "flavor_tags" || !Array.isArray(observation.value)) continue;
+    if (!flavorTagFields.has(observation.fieldKey) || !Array.isArray(observation.value)) continue;
     for (const value of observation.value) {
       if (typeof value === "string") tags.add(value);
     }

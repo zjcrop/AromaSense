@@ -12,6 +12,7 @@ import {
 import { cuppingModeFromMetadata } from "../../core/session-metadata";
 import type { SampleSummaryReader } from "../../storage/sample-summary-reader";
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
+import { previousStage } from "../cupping-view-model";
 import type { FlavorGroupPreferenceService, FlavorGroupPreferences } from "../flavor-group-preferences";
 import { attachDragReorder } from "./drag-reorder";
 import { button, clearElement, element } from "./dom-helpers";
@@ -88,9 +89,12 @@ export class CuppingScreenRenderer {
   private state?: CuppingScreenState;
   private flavorPreferences?: FlavorGroupPreferences;
   private disposeRailDrag?: () => void;
-  private disposeFlavorDrag?: () => void;
-  private disposeSelectedStackDrag?: () => void;
+  private readonly disposeFlavorDrags: Array<() => void> = [];
+  private readonly disposeSelectedStackDrags: Array<() => void> = [];
   private timerId?: number;
+  private timerLifecycleAttached = false;
+  private progressStatusSnapshot?: Map<string, "not_started" | "active" | "completed">;
+  private justCompletedProgressKeys = new Set<string>();
   private railCompact = true;
   private readonly expandedSampleIds = new Set<string>();
   private readonly layoutRoot = element("div", "cupping-layout is-rail-compact");
@@ -126,6 +130,7 @@ export class CuppingScreenRenderer {
     this.flavorPreferences = await this.flavorService.load();
     this.state = await this.controller.initialize(sessionId, this.options.now());
     this.startTimer();
+    this.attachTimerLifecycle();
     await this.render();
   }
 
@@ -133,11 +138,34 @@ export class CuppingScreenRenderer {
     this.disposeDragHandlers();
     if (this.timerId !== undefined) window.clearInterval(this.timerId);
     this.timerId = undefined;
+    this.detachTimerLifecycle();
   }
 
   private startTimer(): void {
     if (this.timerId !== undefined) window.clearInterval(this.timerId);
+    this.updateTimerDom();
     this.timerId = window.setInterval(() => this.updateTimerDom(), 1000);
+  }
+
+  private readonly syncTimerFromWallClock = (): void => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    this.updateTimerDom();
+  };
+
+  private attachTimerLifecycle(): void {
+    if (this.timerLifecycleAttached) return;
+    document.addEventListener("visibilitychange", this.syncTimerFromWallClock);
+    window.addEventListener("pageshow", this.syncTimerFromWallClock);
+    window.addEventListener("focus", this.syncTimerFromWallClock);
+    this.timerLifecycleAttached = true;
+  }
+
+  private detachTimerLifecycle(): void {
+    if (!this.timerLifecycleAttached) return;
+    document.removeEventListener("visibilitychange", this.syncTimerFromWallClock);
+    window.removeEventListener("pageshow", this.syncTimerFromWallClock);
+    window.removeEventListener("focus", this.syncTimerFromWallClock);
+    this.timerLifecycleAttached = false;
   }
 
   private timerSeconds(state: CuppingScreenState): number {
@@ -157,6 +185,7 @@ export class CuppingScreenRenderer {
     if (expanded) expanded.textContent = duration.label;
     if (minutes) minutes.textContent = String(duration.minutes);
     if (seconds) seconds.textContent = String(duration.seconds).padStart(2, "0");
+    timer.setAttribute("aria-label", `${state.sessionCompletedAt ? "本次杯测总用时" : "本次杯测已进行"} ${duration.label}`);
   }
 
   private renderRailTimer(state: CuppingScreenState): HTMLElement {
@@ -205,8 +234,8 @@ export class CuppingScreenRenderer {
 
   private disposeDragHandlers(): void {
     this.disposeRailDrag?.(); this.disposeRailDrag = undefined;
-    this.disposeFlavorDrag?.(); this.disposeFlavorDrag = undefined;
-    this.disposeSelectedStackDrag?.(); this.disposeSelectedStackDrag = undefined;
+    for (const dispose of this.disposeFlavorDrags.splice(0)) dispose();
+    for (const dispose of this.disposeSelectedStackDrags.splice(0)) dispose();
   }
 
   private updateRailToggleLabels(): void {
@@ -331,7 +360,11 @@ export class CuppingScreenRenderer {
         else this.expandedSampleIds.add(sampleId);
         await this.render();
       }
-    }, { compact: this.railCompact, expandedSampleIds: this.expandedSampleIds });
+    }, {
+      compact: this.railCompact,
+      expandedSampleIds: this.expandedSampleIds,
+      justCompletedStageKeys: this.justCompletedProgressKeys
+    });
 
     const controls = element("div", "cupping-rail-footer");
     controls.append(this.railToggleButton("cupping-rail-footer__toggle"));
@@ -367,21 +400,31 @@ export class CuppingScreenRenderer {
     for (const stage of sample.stages) {
       if (stage.stageId !== "final") {
         const active = stage.stageId === activeStageId;
-        const step = button(`cupping-stage-step is-${stage.status}${active ? " is-current" : ""}`, stage.label, () => this.select(sampleId, stage.stageId));
+        const justCompleted = this.justCompletedProgressKeys.has(this.progressKey(sampleId, stage.stageId));
+        const step = button(`cupping-stage-step is-${stage.status}${active ? " is-current" : ""}`, "", () => this.select(sampleId, stage.stageId));
         step.dataset.stageId = stage.stageId;
         step.setAttribute("aria-current", active ? "step" : "false");
         step.title = `${statusLabel(stage.status)}；完成标准：${stage.completionHint}`;
+        step.append(
+          element("span", "cupping-stage-step__label", stage.label),
+          element("i", `cupping-stage-step__status-dot${justCompleted ? " is-completion-flash" : ""}`)
+        );
         this.stageStripRoot.append(step);
         continue;
       }
 
       for (const phase of stage.finalPhases ?? []) {
         const active = activeStageId === "final" && activeFinalPhase === phase.phase;
-        const step = button(`cupping-stage-step cupping-stage-step--final is-${phase.status}${active ? " is-current" : ""}`, phase.label, () => this.selectFinalPhase(sampleId, phase.phase));
+        const justCompleted = this.justCompletedProgressKeys.has(this.progressKey(sampleId, "final", phase.phase));
+        const step = button(`cupping-stage-step cupping-stage-step--final is-${phase.status}${active ? " is-current" : ""}`, "", () => this.selectFinalPhase(sampleId, phase.phase));
         step.dataset.stageId = "final";
         step.dataset.finalPhase = phase.phase;
         step.setAttribute("aria-current", active ? "step" : "false");
         step.title = `${statusLabel(phase.status)}；完成标准：${phase.completionHint}`;
+        step.append(
+          element("span", "cupping-stage-step__label", phase.label),
+          element("i", `cupping-stage-step__status-dot${justCompleted ? " is-completion-flash" : ""}`)
+        );
         this.stageStripRoot.append(step);
       }
     }
@@ -402,17 +445,44 @@ export class CuppingScreenRenderer {
     return banner;
   }
 
-  private attachTagStackDrag(): void {
-    const stack = this.editorRoot.querySelector<HTMLElement>(".selected-tag-stack");
-    if (!stack || !stack.querySelector(".selected-tag-stack__item")) return;
-    this.disposeSelectedStackDrag = attachDragReorder(stack, {
-      itemSelector: ".selected-tag-stack__item",
-      itemIdAttribute: "data-selected-id",
-      onReorder: async (ids) => {
-        this.collapseRailForEditing();
-        await this.run(async () => { this.state = await this.controller.saveField("flavor_tags", ids, this.options.now()); });
+  private attachTagStackDrags(): void {
+    for (const stack of this.editorRoot.querySelectorAll<HTMLElement>(".selected-tag-stack")) {
+      const fieldKey = stack.dataset.fieldKey?.trim();
+      if (!fieldKey || !stack.querySelector(".selected-tag-stack__item")) continue;
+      this.disposeSelectedStackDrags.push(attachDragReorder(stack, {
+        itemSelector: ".selected-tag-stack__item",
+        itemIdAttribute: "data-selected-id",
+        onReorder: async (ids) => {
+          this.collapseRailForEditing();
+          await this.run(async () => { this.state = await this.controller.saveField(fieldKey, ids, this.options.now()); });
+        }
+      }));
+    }
+  }
+
+  private progressKey(sampleId: string, stageId: StageId, finalPhase?: string): string {
+    return finalPhase ? `${sampleId}:${stageId}:${finalPhase}` : `${sampleId}:${stageId}`;
+  }
+
+  private captureProgressTransitions(state: CuppingScreenState): void {
+    const current = new Map<string, "not_started" | "active" | "completed">();
+    for (const sample of state.rail) {
+      for (const stage of sample.stages) {
+        current.set(this.progressKey(sample.sampleId, stage.stageId), stage.status);
+        for (const phase of stage.finalPhases ?? []) {
+          current.set(this.progressKey(sample.sampleId, stage.stageId, phase.phase), phase.status);
+        }
       }
-    });
+    }
+
+    const completed = new Set<string>();
+    if (this.progressStatusSnapshot) {
+      for (const [key, status] of current) {
+        if (status === "completed" && this.progressStatusSnapshot.get(key) !== "completed") completed.add(key);
+      }
+    }
+    this.progressStatusSnapshot = current;
+    this.justCompletedProgressKeys = completed;
   }
 
   private applySampleLock(locked: boolean): void {
@@ -427,6 +497,7 @@ export class CuppingScreenRenderer {
   private async render(): Promise<void> {
     const state = this.state; if (!state) return;
     this.disposeDragHandlers();
+    this.captureProgressTransitions(state);
     this.renderRail(state);
 
     if (!this.railCompact && state.sessionStatus !== "completed" && state.sessionStatus !== "archived") {
@@ -535,18 +606,17 @@ export class CuppingScreenRenderer {
     }
 
     if (!sampleLocked) {
-      const flavorGroups = this.editorRoot.querySelector<HTMLElement>(".flavor-groups");
-      if (flavorGroups) {
-        this.disposeFlavorDrag = attachDragReorder(flavorGroups, {
+      for (const flavorGroups of this.editorRoot.querySelectorAll<HTMLElement>(".flavor-groups")) {
+        this.disposeFlavorDrags.push(attachDragReorder(flavorGroups, {
           itemSelector: ".flavor-group",
           itemIdAttribute: "data-group-id",
           onReorder: async (ids) => {
             this.collapseRailForEditing();
             await this.run(async () => { this.flavorPreferences = await this.flavorService.reorder(ids, this.options.now()); });
           }
-        });
+        }));
       }
-      this.attachTagStackDrag();
+      this.attachTagStackDrags();
     }
     this.applySampleLock(sampleLocked);
 
@@ -565,6 +635,11 @@ export class CuppingScreenRenderer {
     const stepCompleted = finalPhase ? currentPhaseState?.status === "completed" : active.slice.stageStatus === "completed";
     const completionHint = finalPhase ? currentPhaseState?.completionHint : stage?.completionHint;
     const previous = button("cupping-nav cupping-nav--previous", "上一步", previousAction);
+    const canGoPrevious = active.context.stageId === "final"
+      ? finalPhase !== "flavor"
+      : previousStage(active.context.stageId) !== undefined;
+    previous.disabled = !canGoPrevious;
+    if (!canGoPrevious) previous.title = "当前已是本样品的第一个杯测节点";
     const nextLabel = (active.context.stageId === "final" && finalPhase === "score") || active.context.stageId === "scoring" ? "完成本样品" : "下一步";
     const next = button("cupping-nav cupping-nav--next", nextLabel, nextAction);
     next.disabled = !stepCompleted;

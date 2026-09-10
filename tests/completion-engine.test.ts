@@ -3,8 +3,8 @@ import test from "node:test";
 import { completionForStage } from "../app/core/completion-engine";
 import type { SensoryObservation, StageId } from "../shared/protocol/aromasense-v1";
 
-function observations(stageId: StageId, values: Record<string, unknown>): SensoryObservation[] {
-  return Object.entries(values).map(([fieldKey, value]) => ({ observationId: fieldKey, sessionId: "s", sampleId: "x", stageId, fieldKey, value, dictionaryVersion: "test", updatedAt: "2026-09-04T00:00:00Z" }));
+function observations(stageId: StageId, values: Record<string, unknown>, dictionaryVersion = "test"): SensoryObservation[] {
+  return Object.entries(values).map(([fieldKey, value]) => ({ observationId: fieldKey, sessionId: "s", sampleId: "x", stageId, fieldKey, value, dictionaryVersion, updatedAt: "2026-09-04T00:00:00Z" }));
 }
 
 test("completion rules reject browsing-only and accept meaningful input", () => {
@@ -17,4 +17,58 @@ test("completion rules reject browsing-only and accept meaningful input", () => 
     bitterness_intensity: 2, mouthfeel_intensity: 7
   })).complete, true);
   assert.equal(completionForStage("scoring", observations("scoring", { score_confirmed: true })).complete, true);
+});
+
+test("classified aroma capture requires separate dry-fragrance and wet-aroma records", () => {
+  const incomplete = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    dry_fragrance_tags: ["jasmine"],
+    wet_aroma_intensity: 8
+  }));
+  assert.equal(incomplete.complete, false);
+  assert.deepEqual(incomplete.missing, ["wet_aroma_tags"]);
+
+  const complete = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    dry_fragrance_tags: ["jasmine"],
+    wet_aroma_intensity: 8,
+    wet_aroma_tags: ["citrus"]
+  }));
+  assert.equal(complete.complete, true);
+  assert.equal(complete.required, 4);
+});
+
+test("legacy aroma observations remain complete without rewriting historical tags", () => {
+  const legacy = completionForStage("aroma", observations("aroma", {
+    wet_aroma_intensity: 6,
+    flavor_tags: ["floral"]
+  }));
+  assert.equal(legacy.complete, true);
+  assert.equal(legacy.required, 2);
+
+  const legacyWithNewNote = completionForStage("aroma", [
+    ...observations("aroma", { wet_aroma_intensity: 6, flavor_tags: ["floral"] }, "sensory-dictionary/1.2"),
+    ...observations("aroma", { notes: "旧记录复盘备注" }, "sensory-dictionary/1.3")
+  ]);
+  assert.equal(legacyWithNewNote.complete, true);
+  assert.equal(legacyWithNewNote.required, 2);
+
+  const partiallyClassified = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    dry_fragrance_tags: ["cocoa"],
+    wet_aroma_intensity: 6,
+    flavor_tags: ["floral"]
+  }));
+  assert.equal(partiallyClassified.complete, true);
+  assert.equal(partiallyClassified.required, 4);
+});
+
+test("new dictionary intensity writes enter classified completion before either tag is selected", () => {
+  const result = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    wet_aroma_intensity: 6
+  }, "sensory-dictionary/1.3"));
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.missing, ["dry_fragrance_tags", "wet_aroma_tags"]);
+  assert.equal(result.required, 4);
 });

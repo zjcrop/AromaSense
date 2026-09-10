@@ -1,6 +1,6 @@
 # AromaSense Implementation Status
 
-Updated: 2026-09-06
+Updated: 2026-09-10
 
 > This file records **observed product capability**, not merely the existence of a model, interface, or renderer. Automated acceptance and physical/runtime acceptance are distinguished explicitly. A feature that depends on external infrastructure is not treated as complete until that infrastructure has been exercised.
 
@@ -93,6 +93,8 @@ Automated engineering acceptance is complete for the shared Worker ROI path and 
 - [x] whole left rail compact/expand action
 - [x] sample and stage direct selection
 - [x] drag reorder path retained in expanded mode
+- [x] gray / light-blue / green three-state indicators across rail and workflow strip
+- [x] newly completed points use a 300 ms two-flash light-green-to-green transition with reduced-motion fallback
 - [ ] visual/touch acceptance against the agreed sticky-note animation specification
 - [ ] physical-device long-press / scroll conflict validation
 
@@ -102,6 +104,7 @@ Automated engineering acceptance is complete for the shared Worker ROI path and 
 - [x] persistent flavor group collapse/order
 - [x] persistent descriptor/tag ordering
 - [x] aroma/high/mid/low/flavor/overall/score workflow for new sessions; legacy preparation/final compatibility retained
+- [x] aroma captures dry fragrance and wet aroma as separate intensity/tag observations; legacy shared tags remain readable
 - [x] browser voice prompt adapter
 - [x] final radar summary
 - [x] bottom action bar `退出 / 上一步 / 下一步`
@@ -109,6 +112,8 @@ Automated engineering acceptance is complete for the shared Worker ROI path and 
 - [x] Exit flushes pending writes instead of deleting the Session
 - [x] setup screen lists unfinished local Sessions for resume
 - [x] browsing alone does not start a stage or Session; meaningful saved sensory input does
+- [x] left-edge swipe and Android system back move to the preceding workflow point; leaving the active test remains confirmation-gated
+- [x] elapsed time derives from the persisted Session start and immediately resynchronizes on visibility/page/focus resume
 - [ ] exit/resume runtime acceptance after browser refresh
 - [ ] Android process-kill resume acceptance
 - [ ] small-screen scrolling acceptance

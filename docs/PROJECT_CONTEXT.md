@@ -72,6 +72,10 @@ The profile owns the scoring label, metadata policy and calculator version. The 
 - One active sample/stage editing context at a time.
 - Switching samples must not discard unfinished local edits.
 - Completed/recorded stages have clear visual progress states.
+- The aroma step records pre-infusion dry fragrance and post-infusion/break wet aroma as separate intensity/tag fields. Legacy aroma-stage `flavor_tags` remain readable and appear as the wet-aroma selection until explicitly edited; new edits use the classified fields without rewriting historical observations.
+- Progress uses exactly three states: gray for untouched, light blue for started, and green for complete. A newly completed point transitions through two highlight flashes over 300 ms, with the peaks 100 ms apart, before settling on green. Reduced-motion clients settle immediately on green.
+- Hardware back and a deliberate left-edge rightward swipe share the same navigation order: dismiss an active editor/overlay, move to the preceding workflow point, then leave the cupping screen. Leaving an active cupping screen always uses the existing exit confirmation and preserves the unfinished local record; the gesture cannot directly terminate the app.
+- Timed-session elapsed time is derived from the persisted Session start timestamp rather than accumulated interval ticks. `visibilitychange`, `pageshow`, and window focus trigger an immediate wall-clock resynchronization after calls, background suspension, browser page restoration, or app resume.
 - Browsing samples or workflow steps leaves both the Session and sensory stages unstarted. Empty edits, identity edits and legacy phase navigation do not start a Session. The first meaningful saved sensory input activates the Session; the first meaningful stage input records its start time. Completion still requires the stage's explicit criteria.
 - Voice prompts may signal preparation, high-temperature, mid-temperature, low-temperature, and completion stages.
 - Flavor labels can be grouped/collapsed and may support user ordering where defined by product requirements.

@@ -115,7 +115,7 @@ test("Web progress remains gray light-blue green across the seven formal workflo
   assert.match(cuppingCss, /grid-template-columns: repeat\(7, minmax\(0, 1fr\)\)/);
   assert.match(rail, /for \(const stage of item\.stages\)/);
   assert.match(rail, /sample-rail__identity-line/);
-  assert.match(rail, /buildStageProgress\(item\)/);
+  assert.match(rail, /buildStageProgress\(item, justCompletedStageKeys\)/);
 });
 
 test("Web side rail preserves exit-as-unfinished and finish-only-when-all-stages-complete semantics", () => {

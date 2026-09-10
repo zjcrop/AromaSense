@@ -60,7 +60,12 @@ test("full offline session remains local then synchronizes after network recover
       for (const [field, value] of Object.entries(fields)) await editor.saveField(field, value, "2026-08-24T22:03:10+08:00");
       await editor.completeActiveStage("2026-08-24T22:03:20+08:00");
     };
-    await completeStep("aroma", { wet_aroma_intensity: 7, flavor_tags: ["jasmine"] });
+    await completeStep("aroma", {
+      dry_fragrance_intensity: 6,
+      dry_fragrance_tags: ["cocoa"],
+      wet_aroma_intensity: 7,
+      wet_aroma_tags: ["jasmine"]
+    });
     await completeStep("mid_temp", {
       flavor_tags: ["jasmine"], acidity_intensity: 8, sweetness_intensity: 8,
       bitterness_intensity: 2, mouthfeel_intensity: 7, finish_intensity: 8

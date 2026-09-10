@@ -56,6 +56,11 @@
 .sensory-layer--affective { border-left-color: var(--as-blue); background: rgba(122,168,216,.07); }
 .sensory-layer__title { margin: 0; font-size: 14px; }
 .sensory-layer__note { margin: 4px 0 0; font-size: 10px; line-height: 1.5; color: var(--as-muted); }
+.sensory-aroma-phase { margin: 12px 0 18px; padding: 12px; border: 1px solid rgba(185,153,90,.24); border-radius: 12px; background: rgba(185,153,90,.045); }
+.sensory-aroma-phase--wet { border-color: rgba(131,185,230,.25); background: rgba(131,185,230,.045); }
+.sensory-aroma-phase__title { margin: 0; color: var(--as-text); font-size: 15px; }
+.sensory-aroma-phase__note { margin: 5px 0 6px; color: var(--as-muted); font-size: 10px; line-height: 1.55; }
+.sensory-aroma-phase .sensory-field:last-child { border-bottom: 0; padding-bottom: 2px; }
 .sensory-field { padding: 13px 0 15px; border-bottom: 1px solid rgba(255,255,255,.07); }
 .sensory-field[data-assessment-layer="affective"] .sensory-range__value { border-color: rgba(122,168,216,.55); color: var(--as-blue); }
 .sensory-field__label { display: block; margin-bottom: 10px; font-size: 13px; font-weight: 650; }
@@ -82,7 +87,9 @@
 
 /* Unified progress semantics: gray = untouched, light blue = started, green = complete. */
 .cupping-main__stage-strip { grid-template-columns: repeat(7, minmax(0, 1fr)) !important; }
-.cupping-stage-step { color: var(--as-progress-not-started) !important; opacity: 1 !important; }
+.cupping-stage-step { color: var(--as-progress-not-started) !important; opacity: 1 !important; display: grid; grid-template-rows: auto 7px; place-items: center; gap: 4px; }
+.cupping-stage-step__label { min-width: 0; }
+.cupping-stage-step__status-dot { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: none; }
 .cupping-stage-step.is-not_started { color: var(--as-progress-not-started) !important; }
 .cupping-stage-step.is-active { color: var(--as-progress-active) !important; }
 .cupping-stage-step.is-completed { color: var(--as-progress-completed) !important; }
@@ -96,6 +103,24 @@
 .cupping-progress-legend__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--as-progress-not-started); flex: 0 0 auto; }
 .cupping-progress-legend__dot.is-active { background: var(--as-progress-active); }
 .cupping-progress-legend__dot.is-completed { background: var(--as-progress-completed); }
+.cupping-stage-step__status-dot.is-completion-flash,
+.sample-rail__stage-line.is-completion-flash,
+.sample-rail__state-dot.is-completion-flash {
+  animation: aromasense-stage-completion-double-flash 300ms linear both;
+}
+@keyframes aromasense-stage-completion-double-flash {
+  0% { background-color: var(--as-progress-active); box-shadow: 0 0 0 0 rgba(225,255,232,0); transform: scale(1); }
+  16.667% { background-color: #effff3; box-shadow: 0 0 0 3px rgba(225,255,232,.36); transform: scale(1.22); }
+  33.333% { background-color: #9ed8aa; box-shadow: 0 0 0 1px rgba(158,216,170,.24); transform: scale(1.05); }
+  50% { background-color: #effff3; box-shadow: 0 0 0 3px rgba(225,255,232,.36); transform: scale(1.22); }
+  66.667% { background-color: #9ed8aa; box-shadow: 0 0 0 1px rgba(158,216,170,.24); transform: scale(1.05); }
+  100% { background-color: var(--as-progress-completed); box-shadow: 0 0 0 0 rgba(91,166,109,0); transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cupping-stage-step__status-dot.is-completion-flash,
+  .sample-rail__stage-line.is-completion-flash,
+  .sample-rail__state-dot.is-completion-flash { animation: none; background: var(--as-progress-completed) !important; }
+}
 .final-assessment__phase.is-not_started { color: var(--as-progress-not-started) !important; }
 .final-assessment__phase.is-active { color: var(--as-progress-active) !important; }
 .final-assessment__phase.is-completed { color: var(--as-progress-completed) !important; }

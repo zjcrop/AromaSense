@@ -70,7 +70,13 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function renderTagPicker(value: unknown, preferences: FlavorGroupPreferences, callbacks: SensoryEditorCallbacks): HTMLElement {
+function renderTagPicker(
+  fieldKey: string,
+  label: string,
+  value: unknown,
+  preferences: FlavorGroupPreferences,
+  callbacks: SensoryEditorCallbacks
+): HTMLElement {
   const root = element("div", "flavor-groups");
   const orderedSelected = stringArray(value);
   const selected = new Set(orderedSelected);
@@ -78,9 +84,9 @@ function renderTagPicker(value: unknown, preferences: FlavorGroupPreferences, ca
   const descriptorLabels = new Map(DESCRIPTOR_GROUPS_V1.flatMap((group) => group.descriptors.map((item) => [item.id, item.label] as const)));
 
   const stack = element("section", "selected-tag-stack-wrap");
-  stack.append(element("h3", "selected-tag-stack__title", "已选标签"));
+  stack.append(element("h3", "selected-tag-stack__title", `已选${label}`));
   const stackList = element("div", "selected-tag-stack");
-  stackList.dataset.fieldKey = "flavor_tags";
+  stackList.dataset.fieldKey = fieldKey;
   for (const descriptorId of orderedSelected) {
     const item = element("span", "selected-tag-stack__item");
     item.dataset.selectedId = descriptorId;
@@ -126,7 +132,7 @@ function renderTagPicker(value: unknown, preferences: FlavorGroupPreferences, ca
           const next = [...orderedSelected];
           const existing = next.indexOf(descriptor.id);
           if (existing >= 0) next.splice(existing, 1); else next.push(descriptor.id);
-          void callbacks.saveField("flavor_tags", next);
+          void callbacks.saveField(fieldKey, next);
           setPressed(tag, existing < 0);
         });
         setPressed(tag, selected.has(descriptor.id));
@@ -152,7 +158,7 @@ function renderControl(spec: SensoryControlSpec, value: unknown, input: SensoryE
     case "score": field.append(renderRange(spec, value, (next) => save(next))); break;
     case "toggle": field.append(renderToggle(value, (next) => save(next))); break;
     case "text": field.append(renderText(value, (next) => save(next))); break;
-    case "tag-picker": field.append(renderTagPicker(value, input.flavorPreferences, input.callbacks)); break;
+    case "tag-picker": field.append(renderTagPicker(spec.fieldKey, spec.label, value, input.flavorPreferences, input.callbacks)); break;
   }
   return field;
 }
@@ -160,7 +166,60 @@ function renderControl(spec: SensoryControlSpec, value: unknown, input: SensoryE
 export function renderSensoryEditor(root: HTMLElement, input: SensoryEditorRenderInput): void {
   clearElement(root);
   const values = observationMap(input.observations);
-  const controls = controlsForStage(input.stageId).filter((spec) => !input.fieldFilter || input.fieldFilter.has(spec.fieldKey));
+  const controls = controlsForStage(input.stageId)
+    .filter((spec) => !input.fieldFilter || input.fieldFilter.has(spec.fieldKey))
+    // AromaSense 1.3 writes classified dry/wet aroma tags. The former shared
+    // field remains readable in old observations but is not offered for new
+    // aroma-stage edits.
+    .filter((spec) => input.stageId !== "aroma" || spec.fieldKey !== "flavor_tags");
+
+  if (input.stageId === "aroma") {
+    const phases: ReadonlyArray<{
+      id: "dry" | "wet";
+      title: string;
+      note: string;
+      fields: ReadonlySet<string>;
+    }> = [
+      {
+        id: "dry",
+        title: "干香 · Fragrance",
+        note: "注水前记录研磨咖啡释放的香气；强度与描述只归入干香。",
+        fields: new Set(["dry_fragrance_intensity", "dry_fragrance_tags"])
+      },
+      {
+        id: "wet",
+        title: "湿香 · Aroma",
+        note: "注水并破渣时记录释放的香气；强度与描述只归入湿香。",
+        fields: new Set(["wet_aroma_intensity", "wet_aroma_tags"])
+      }
+    ];
+
+    const phaseFieldKeys = new Set(phases.flatMap((phase) => [...phase.fields]));
+    for (const phase of phases) {
+      const section = element("section", `sensory-aroma-phase sensory-aroma-phase--${phase.id}`);
+      section.dataset.aromaPhase = phase.id;
+      section.append(
+        element("h2", "sensory-aroma-phase__title", phase.title),
+        element("p", "sensory-aroma-phase__note", phase.note)
+      );
+      for (const spec of controls.filter((item) => phase.fields.has(item.fieldKey))) {
+        // The 1.2 aroma page stored its shared descriptor selection in
+        // flavor_tags. Show that value as wet aroma until the user edits it;
+        // the first edit then writes the classified wet_aroma_tags field.
+        const value = spec.fieldKey === "wet_aroma_tags" && !values.has(spec.fieldKey)
+          ? values.get("flavor_tags")
+          : values.get(spec.fieldKey);
+        section.append(renderControl(spec, value, input));
+      }
+      root.append(section);
+    }
+
+    for (const spec of controls.filter((item) => !phaseFieldKeys.has(item.fieldKey))) {
+      root.append(renderControl(spec, values.get(spec.fieldKey), input));
+    }
+    return;
+  }
+
   let activeLayer: SensoryAssessmentLayer | undefined;
 
   for (const spec of controls) {

@@ -10,6 +10,7 @@ export interface SampleRailCallbacks {
 export interface SampleRailRenderOptions {
   compact?: boolean;
   expandedSampleIds?: ReadonlySet<string>;
+  justCompletedStageKeys?: ReadonlySet<string>;
 }
 
 interface RailGeometry {
@@ -296,7 +297,9 @@ function installActivationStyles(): void {
     .sample-rail__item.is-active .sample-rail__identity-line,
     .sample-rail__item.is-active .sample-rail__stage-progress{color:#fff!important;opacity:1}
     .sample-rail__state-dot{position:relative;z-index:3}
-    .sample-rail__item.is-active .sample-rail__state-dot{background:#fff!important;box-shadow:none!important}
+    .sample-rail__state-dot[data-state="not_started"]{background:var(--as-progress-not-started)!important}
+    .sample-rail__state-dot[data-state="active"]{background:var(--as-progress-active)!important}
+    .sample-rail__state-dot[data-state="completed"]{background:var(--as-progress-completed)!important}
     .sample-rail__actions{position:absolute!important;z-index:4;right:3px;top:50%;transform:translateY(-50%)}
     .sample-rail__drag{
       width:14px!important;
@@ -564,23 +567,30 @@ function animateActiveCopy(root: HTMLElement, sampleId: string | undefined, dura
   );
 }
 
-function buildStageProgress(item: SampleRailItemViewState): HTMLElement {
+function buildStageProgress(item: SampleRailItemViewState, justCompletedStageKeys: ReadonlySet<string>): HTMLElement {
   const progress = element("span", "sample-rail__stage-progress");
   for (const stage of item.stages) {
     const token = element("span", "sample-rail__stage-token");
     token.dataset.state = stage.indicatorState;
+    token.dataset.stageId = stage.stageId;
     token.title = `${stage.label}：${indicatorTitle(stage.indicatorState)}`;
     token.setAttribute("aria-label", `${stage.label}：${indicatorTitle(stage.indicatorState)}`);
     token.append(
       element("span", "sample-rail__stage-name", stage.label),
-      element("span", "sample-rail__stage-line")
+      element("span", `sample-rail__stage-line${justCompletedStageKeys.has(`${item.sampleId}:${stage.stageId}`) ? " is-completion-flash" : ""}`)
     );
     progress.append(token);
   }
   return progress;
 }
 
-function updateCard(card: HTMLElement, item: SampleRailItemViewState, callbacks: SampleRailCallbacks, compact: boolean): void {
+function updateCard(
+  card: HTMLElement,
+  item: SampleRailItemViewState,
+  callbacks: SampleRailCallbacks,
+  compact: boolean,
+  justCompletedStageKeys: ReadonlySet<string>
+): void {
   const isExpanded = !compact;
   const stage = currentStage(item);
   card.className = `sample-rail__item sample-rail__item--${progressTone(item)}${item.active ? " is-active" : ""}${isExpanded ? " is-expanded" : " is-collapsed"}`;
@@ -607,12 +617,14 @@ function updateCard(card: HTMLElement, item: SampleRailItemViewState, callbacks:
     identityRow.append(element("strong", "sample-rail__sample-name", sampleName));
     if (metadata) identityRow.append(element("span", "sample-rail__metadata", metadata));
     identityRow.title = metadata ? `${sampleName}　${metadata}` : sampleName;
-    text.append(identityRow, buildStageProgress(item));
+    text.append(identityRow, buildStageProgress(item, justCompletedStageKeys));
     select.append(text);
   }
 
   if (compact) {
     const stateDot = element("span", `sample-rail__state-dot sample-rail__state-dot--${stage?.tone ?? "neutral"}`);
+    stateDot.dataset.state = stage?.indicatorState ?? "not_started";
+    if (stage && justCompletedStageKeys.has(`${item.sampleId}:${stage.stageId}`)) stateDot.classList.add("is-completion-flash");
     stateDot.title = stage ? `${stage.label}：${stage.status}` : "尚未开始";
     select.append(stateDot);
   }
@@ -651,13 +663,14 @@ export function renderSampleRail(
 
   cancelRailAnimations(root);
   const compact = Boolean(options.compact);
+  const justCompletedStageKeys = options.justCompletedStageKeys ?? new Set<string>();
   root.classList.add("sample-rail");
   root.classList.toggle("is-compact", compact);
 
   const liveSampleIds = new Set(items.map((item) => item.sampleId));
   for (const item of items) {
     const card = existingCards.get(item.sampleId) ?? element("article", "sample-rail__item");
-    updateCard(card, item, callbacks, compact);
+    updateCard(card, item, callbacks, compact, justCompletedStageKeys);
     root.append(card);
   }
   for (const card of directCards(root)) {
