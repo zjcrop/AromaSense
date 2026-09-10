@@ -56,30 +56,54 @@ function alignActiveSample(root: HTMLElement): void {
 function scheduleActiveSampleAlignment(root: HTMLElement): void {
   const existing = pendingFrames.get(root);
   if (existing !== undefined) cancelAnimationFrame(existing);
-  const frame = requestAnimationFrame(() => alignActiveSample(root));
+  // Wait one layout frame: compact/expanded transitions alter rail/card widths
+  // and can also change active-card height before the final geometry settles.
+  const frame = requestAnimationFrame(() => {
+    const settleFrame = requestAnimationFrame(() => alignActiveSample(root));
+    pendingFrames.set(root, settleFrame);
+  });
   pendingFrames.set(root, frame);
+}
+
+function railFromLayout(layout: HTMLElement): HTMLElement | undefined {
+  return layout.querySelector<HTMLElement>(".cupping-layout__rail-list.sample-rail") ?? undefined;
 }
 
 function installActiveSampleScrollObserver(): void {
   if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
 
   const observer = new MutationObserver((records) => {
+    const roots = new Set<HTMLElement>();
     for (const record of records) {
-      if (record.type !== "attributes" || record.attributeName !== "data-active-sample-id") continue;
-      if (!(record.target instanceof HTMLElement)) continue;
-      const root = record.target;
-      if (!root.classList.contains("cupping-layout__rail-list")) continue;
-      const current = root.dataset.activeSampleId ?? null;
-      if (record.oldValue === current) continue;
-      scheduleActiveSampleAlignment(root);
+      if (record.type !== "attributes" || !(record.target instanceof HTMLElement)) continue;
+
+      if (record.attributeName === "data-active-sample-id") {
+        const root = record.target;
+        if (!root.classList.contains("cupping-layout__rail-list")) continue;
+        const current = root.dataset.activeSampleId ?? null;
+        if (record.oldValue === current) continue;
+        roots.add(root);
+        continue;
+      }
+
+      if (record.attributeName === "class") {
+        const target = record.target;
+        if (target.classList.contains("cupping-layout")) {
+          const root = railFromLayout(target);
+          if (root) roots.add(root);
+        } else if (target.classList.contains("cupping-layout__rail-list")) {
+          roots.add(target);
+        }
+      }
     }
+    for (const root of roots) scheduleActiveSampleAlignment(root);
   });
 
   observer.observe(document.documentElement, {
     subtree: true,
     attributes: true,
     attributeOldValue: true,
-    attributeFilter: ["data-active-sample-id"]
+    attributeFilter: ["data-active-sample-id", "class"]
   });
 }
 
