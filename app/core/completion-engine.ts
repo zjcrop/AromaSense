@@ -31,10 +31,14 @@ export function completionForStage(stageId: StageId, observations: readonly Sens
   const meaningfulObservations = observations.filter((item) => meaningful(item.value));
   const values = new Map(meaningfulObservations.map((item) => [item.fieldKey, item.value] as const));
   if (stageId === "aroma") {
-    // New free-cupping records may keep dry/wet descriptors separately. Formal
-    // SCA CVA uses one shared Fragrance/Aroma CATA list while preserving the two
-    // intensity observations. Old records remain readable without migration.
+    // New dual-target capture stores dry and wet descriptors independently.
+    // Legacy records may still carry one shared flavor_tags list, so their old
+    // fallback remains readable without letting new 1.3 writes complete one-sided.
     const classifiedCapture = values.has("dry_fragrance_tags") || values.has("wet_aroma_tags");
+    const modernClassifiedCapture = meaningfulObservations.some((item) =>
+      item.dictionaryVersion === "sensory-dictionary/1.3"
+      && ["dry_fragrance_tags", "wet_aroma_tags"].includes(item.fieldKey)
+    );
     const modernSharedCapture = !classifiedCapture && meaningfulObservations.some((item) =>
       item.dictionaryVersion === "sensory-dictionary/1.3"
       && ["dry_fragrance_intensity", "wet_aroma_intensity"].includes(item.fieldKey)
@@ -44,9 +48,12 @@ export function completionForStage(stageId: StageId, observations: readonly Sens
       : modernSharedCapture
         ? ["dry_fragrance_intensity", "wet_aroma_intensity", "flavor_tags"] as const
         : ["wet_aroma_intensity", "flavor_tags"] as const;
-    const missing = required.filter((key) => key === "wet_aroma_tags"
-      ? !values.has("wet_aroma_tags") && !values.has("flavor_tags")
-      : !values.has(key));
+    const missing = required.filter((key) => {
+      if (modernClassifiedCapture) return !values.has(key);
+      return key === "wet_aroma_tags"
+        ? !values.has("wet_aroma_tags") && !values.has("flavor_tags")
+        : !values.has(key);
+    });
     return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
   }
   if (stageId === "final") {

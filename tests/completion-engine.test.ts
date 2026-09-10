@@ -38,6 +38,26 @@ test("classified aroma capture requires separate dry-fragrance and wet-aroma rec
   assert.equal(complete.required, 4);
 });
 
+test("new 1.3 dual-target aroma capture cannot complete from only one selected library", () => {
+  const dryOnly = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    dry_fragrance_tags: ["jasmine"],
+    wet_aroma_intensity: 8,
+    flavor_tags: ["jasmine"]
+  }, "sensory-dictionary/1.3"));
+  assert.equal(dryOnly.complete, false);
+  assert.deepEqual(dryOnly.missing, ["wet_aroma_tags"]);
+
+  const complete = completionForStage("aroma", observations("aroma", {
+    dry_fragrance_intensity: 7,
+    dry_fragrance_tags: ["jasmine"],
+    wet_aroma_intensity: 8,
+    wet_aroma_tags: ["citrus"],
+    flavor_tags: ["jasmine", "citrus"]
+  }, "sensory-dictionary/1.3"));
+  assert.equal(complete.complete, true);
+});
+
 test("legacy aroma observations remain complete without rewriting historical tags", () => {
   const legacy = completionForStage("aroma", observations("aroma", {
     wet_aroma_intensity: 6,
