@@ -12,8 +12,8 @@ export type {
 } from "./local-cupping-repository-base";
 
 /**
- * Extends the stable repository with the two roster mutations required by free
- * cupping. Existing persistence behavior remains in the untouched base class.
+ * Extends the stable repository with roster mutations and record reset required
+ * by free cupping and repeat cupping. Existing stable persistence stays in base.
  */
 export class LocalCuppingRepository extends BaseLocalCuppingRepository {
   constructor(private readonly rosterDb: SQLiteDriver) {
@@ -64,6 +64,35 @@ export class LocalCuppingRepository extends BaseLocalCuppingRepository {
         );
       }
       return this.listSamples(sessionId);
+    });
+  }
+
+  async resetSessionForRetest(sessionId: string, now: string): Promise<void> {
+    const session = await this.getSession(sessionId);
+    const completedMilestone = Boolean(session.metadata.completedEditableAt);
+    if (session.status !== "completed" && session.status !== "archived" && !completedMilestone) {
+      throw new Error("SESSION_NOT_COMPLETED");
+    }
+
+    const metadata = { ...session.metadata };
+    delete metadata.revealedAt;
+    delete metadata.competitionStartedAt;
+    delete metadata.competitionLockedAt;
+    delete metadata.competitionSubmittedAt;
+    delete metadata.completedEditableAt;
+    const resetSession = {
+      ...session,
+      metadata,
+      status: "draft" as const,
+      startedAt: undefined,
+      completedAt: undefined,
+      updatedAt: now
+    };
+
+    await this.rosterDb.transaction(async () => {
+      await this.rosterDb.run(`DELETE FROM observations WHERE session_id = ?`, [sessionId]);
+      await this.rosterDb.run(`DELETE FROM stage_state WHERE session_id = ?`, [sessionId]);
+      await this.saveSession(resetSession);
     });
   }
 }

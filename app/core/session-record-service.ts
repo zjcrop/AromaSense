@@ -25,6 +25,10 @@ export class SessionRecordService {
     return { version: "AromaSense-B0.2.a", exportedAt: this.now(), session, samples, observations, stageStates };
   }
 
+  async retest(sessionId: string): Promise<void> {
+    await this.repository.resetSessionForRetest(sessionId, this.now());
+  }
+
   async delete(sessionId: string): Promise<void> {
     await this.repository.deleteSession(sessionId);
   }

@@ -36,6 +36,7 @@ import { SessionRecordsRenderer } from "../ui/dom/session-records-renderer";
 
 const BATCH_SETUP_DRAFT_KEY = "batch.setup.draft.v2";
 const RECORD_ORDER_KEY = "records.order.v1";
+const CUPPING_SCROLL_MEMORY_PREFIX = "aromasense.cupping.scroll.v2:";
 
 export interface AromaSenseDomAppOptions {
   now(): string;
@@ -159,12 +160,21 @@ export class AromaSenseDomApp {
     await this.screen?.openEditor();
   }
 
+  private async retestSessions(recordService: SessionRecordService, sessionIds: readonly string[]): Promise<void> {
+    for (const sessionId of sessionIds) {
+      await recordService.retest(sessionId);
+      try { sessionStorage.removeItem(`${CUPPING_SCROLL_MEMORY_PREFIX}${sessionId}`); } catch { /* storage is optional */ }
+    }
+    this.preloadPromise = undefined;
+  }
+
   async showRecords(): Promise<void> {
     this.closeHomeModal(); this.screen?.dispose(); this.screen = undefined; this.setRootMode("records", () => this.showSetup());
     const repository = new LocalCuppingRepository(this.db); const recordService = new SessionRecordService(repository, this.options.now); const records = await new SessionRecordsReader(this.db).list(300);
     const shareClient = this.hasCloudAuthConfiguration() ? new SessionShareClient(this.options.cloudBaseUrl!, async () => (await this.authClient?.current())?.token) : undefined;
     const renderer = new SessionRecordsRenderer(this.root, {
       records, onBack: () => this.showSetup(), onOpen: async (sessionId, readOnly) => { if (readOnly) await this.showReplay(sessionId); else await this.openSession(sessionId); }, onEdit: (sessionId) => this.openSessionEditor(sessionId),
+      onRetest: async (sessionIds) => { await this.retestSessions(recordService, sessionIds); await this.showRecords(); },
       onDelete: async (sessionIds) => { for (const sessionId of sessionIds) await recordService.delete(sessionId); await this.showRecords(); }, onSync: async (sessionIds) => { await this.syncPending(sessionIds); await this.showRecords(); },
       onShare: async (sessionId) => { if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接"); const snapshot = await recordService.snapshot(sessionId); return (await shareClient.create(snapshot)).shareUrl; },
       onExport: async (sessionId) => { await this.downloadRecord(await recordService.snapshot(sessionId)); }, loadOrder: () => this.preferences.get<readonly string[]>(RECORD_ORDER_KEY), saveOrder: (ids) => this.preferences.set(RECORD_ORDER_KEY, [...ids], this.options.now())
@@ -216,6 +226,7 @@ export class AromaSenseDomApp {
       records, onBack: () => modal.close(),
       onOpen: async (sessionId, readOnly) => { modal.close(); if (readOnly) await this.showReplay(sessionId); else await this.openSession(sessionId); },
       onEdit: async (sessionId) => { modal.close(); await this.openSessionEditor(sessionId); },
+      onRetest: async (sessionIds) => { await this.retestSessions(recordService, sessionIds); modal.close(); await this.showHomeRecordsModal(); },
       onDelete: async (sessionIds) => { for (const sessionId of sessionIds) await recordService.delete(sessionId); modal.close(); await this.showHomeRecordsModal(); },
       onSync: async (sessionIds) => { await this.syncPending(sessionIds); modal.close(); await this.showHomeRecordsModal(); },
       onShare: async (sessionId) => { if (!shareClient) throw new Error("请先在账户中登录后再生成服务器分享链接"); const snapshot = await recordService.snapshot(sessionId); return (await shareClient.create(snapshot)).shareUrl; },

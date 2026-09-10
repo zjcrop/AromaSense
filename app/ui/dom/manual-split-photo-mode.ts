@@ -40,6 +40,8 @@ function installStyles(): void {
     .manual-split-photo__summary{min-height:20px;margin:6px 0;color:#b8afa0;font-size:11px}
     .manual-split-photo__tools,.manual-split-photo__actions{display:flex;flex-wrap:wrap;gap:8px}.manual-split-photo__actions{justify-content:flex-end;margin-top:10px}
     .manual-split-photo button{min-height:40px;border:1px solid rgba(185,153,90,.36);border-radius:9px;padding:7px 12px;background:#242424;color:#e7d9ba;font-weight:700}.manual-split-photo button.primary{border-color:#b9995a;background:#b9995a;color:#111}.manual-split-photo button:disabled{opacity:.45}
+    .manual-split-photo__source-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+    .manual-split-photo__source-actions button{width:100%}
   `;
   document.head.append(style);
 }
@@ -195,13 +197,13 @@ async function openManualSplitDialog(source: File): Promise<void> {
   };
 }
 
-async function captureForManualSplit(): Promise<void> {
+async function selectForManualSplit(useCamera: boolean): Promise<void> {
   const core = requireLuckyBeanRecognitionCore();
   void core.beginOcrSession?.("aromasense-manual-split-photo");
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*";
-  input.setAttribute("capture", "environment");
+  if (useCamera) input.setAttribute("capture", "environment");
   input.hidden = true;
   document.body.append(input);
   try {
@@ -215,6 +217,33 @@ async function captureForManualSplit(): Promise<void> {
   }
 }
 
+function openManualSplitSourceChoice(): void {
+  installStyles();
+  const overlay = document.createElement("div");
+  overlay.className = "manual-split-photo manual-split-photo--source";
+  overlay.innerHTML = `
+    <section class="manual-split-photo__panel" role="dialog" aria-modal="true" aria-label="选择图片来源" style="width:min(420px,100%)">
+      <h2 class="manual-split-photo__title">选择图片来源</h2>
+      <p class="manual-split-photo__help">分割识别前先选择拍照，或从设备上传一张已有图片。</p>
+      <div class="manual-split-photo__source-actions">
+        <button type="button" class="primary" data-camera>拍照</button>
+        <button type="button" data-upload>上传图片</button>
+      </div>
+      <div class="manual-split-photo__actions"><button type="button" data-cancel>取消</button></div>
+    </section>`;
+  document.body.append(overlay);
+  const choose = (useCamera: boolean): void => {
+    overlay.remove();
+    void selectForManualSplit(useCamera).catch((error) => {
+      window.alert(`分割识别失败：${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
+  overlay.querySelector<HTMLButtonElement>("[data-camera]")!.onclick = () => choose(true);
+  overlay.querySelector<HTMLButtonElement>("[data-upload]")!.onclick = () => choose(false);
+  overlay.querySelector<HTMLButtonElement>("[data-cancel]")!.onclick = () => overlay.remove();
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
+}
+
 function installButton(actions: HTMLElement): void {
   if (actions.querySelector("[data-manual-split-photo]")) return;
   const control = document.createElement("button");
@@ -223,9 +252,7 @@ function installButton(actions: HTMLElement): void {
   control.dataset.manualSplitPhoto = "true";
   control.textContent = "分割识别";
   control.setAttribute("aria-label", "分割识别");
-  control.addEventListener("click", () => void captureForManualSplit().catch((error) => {
-    window.alert(`分割识别失败：${error instanceof Error ? error.message : String(error)}`);
-  }));
+  control.addEventListener("click", openManualSplitSourceChoice);
   const second = actions.children.item(1);
   if (second) actions.insertBefore(control, second);
   else actions.append(control);

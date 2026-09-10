@@ -8,6 +8,7 @@ export interface SessionRecordsRendererOptions {
   onBack(): void | Promise<void>;
   onOpen(sessionId: string, readOnly: boolean): void | Promise<void>;
   onEdit?(sessionId: string): void | Promise<void>;
+  onRetest?(sessionIds: readonly string[]): void | Promise<void>;
   onDelete(sessionIds: readonly string[]): void | Promise<void>;
   onSync(sessionIds: readonly string[]): void | Promise<void>;
   onShare(sessionId: string): Promise<string>;
@@ -29,7 +30,9 @@ const LONG_PRESS_DELETE_MS = 650;
 function includes(value: unknown, query: string): boolean {
   return String(value ?? "").toLocaleLowerCase("zh-CN").includes(query.toLocaleLowerCase("zh-CN"));
 }
-function isUnfinished(record: SessionRecordSummary): boolean { return record.status === "draft" || record.status === "active"; }
+function isUnfinished(record: SessionRecordSummary): boolean {
+  return (record.status === "draft" || record.status === "active") && !record.metadata.completedEditableAt;
+}
 function isEditableFree(record: SessionRecordSummary): boolean { return isUnfinished(record) && cuppingModeFromMetadata(record.metadata) === "free"; }
 function statusLabel(record: SessionRecordSummary): string {
   if (record.syncState === "synced") return "已同步";
@@ -60,6 +63,7 @@ function installStatusScopeStyles(): void {
     .session-records__scope.is-active{background:rgba(185,153,90,.13);color:#d6c394;box-shadow:inset 0 0 0 1px rgba(185,153,90,.26)}
     .session-records__scope-count{margin-left:6px;color:#77726b;font-size:10px;font-weight:600}.session-records__scope.is-active .session-records__scope-count{color:#b99c68}
     .session-record__action.is-edit{color:#d6ad63!important;font-weight:750!important}
+    .session-record__action.is-retest,.session-records__batch-action.is-retest{color:#d6ad63!important;font-weight:800!important}
   `; document.head.append(style);
 }
 
@@ -97,9 +101,13 @@ export class SessionRecordsRenderer {
       batch.append(
         button("session-records__batch-action", "全选", () => { for (const record of filtered) this.selected.add(record.sessionId); void this.render(); }),
         button("session-records__batch-action", "取消选择", () => { this.selected.clear(); void this.render(); }),
-        button("session-records__batch-action", "立即同步", () => this.syncSelected()),
-        button("session-records__batch-action is-danger", "删除", () => this.deleteSelected())
-      ); this.root.append(batch);
+        button("session-records__batch-action", "立即同步", () => this.syncSelected())
+      );
+      if (this.statusScope === "completed" && this.options.onRetest) {
+        batch.append(button("session-records__batch-action is-retest", "批量复测", () => this.retestSelected()));
+      }
+      batch.append(button("session-records__batch-action is-danger", "删除", () => this.deleteSelected()));
+      this.root.append(batch);
     }
   }
 
@@ -159,6 +167,7 @@ export class SessionRecordsRenderer {
     const content = element("div", "session-record__content"); const first = element("div", "session-record__line session-record__line--primary"); const left = element("div", "session-record__identity"); left.append(element("span", "session-record__date", record.metadata.date), element("strong", "session-record__name", record.displayName));
     const right = element("div", "session-record__actions"); const dot = element("span", `session-record__sync-dot is-${record.syncState}`); dot.title = statusLabel(record); right.append(dot);
     if (isEditableFree(record) && this.options.onEdit) right.append(actionButton("session-record__action is-edit", "编辑", () => this.options.onEdit?.(record.sessionId)));
+    if (!isUnfinished(record) && this.options.onRetest) right.append(actionButton("session-record__action is-retest", "复测", () => this.retestRecords([record.sessionId])));
     right.append(actionButton("session-record__action", "分享", () => this.share(record.sessionId)), actionButton("session-record__action", "导出", () => this.options.onExport(record.sessionId)), actionButton("session-record__action", "删除", () => this.deleteRecords([record.sessionId])));
     first.append(left, right);
     const second = element("div", "session-record__line session-record__line--secondary"); second.append(element("span", "session-record__meta", `${record.sampleCount} 个样品`), element("span", "session-record__meta", `完成度 ${record.completionPct}%`), element("span", "session-record__meta", `可置信度 ${record.completenessPct}%`)); second.title = "可置信度按已填写项目占全部应填写项目的比例计算，内部字段为 dataCompleteness。";
@@ -180,6 +189,16 @@ export class SessionRecordsRenderer {
     } catch (error) { window.alert(`分享失败：${error instanceof Error ? error.message : String(error)}`); }
   }
 
+  private async retestRecords(ids: readonly string[]): Promise<void> {
+    if (!ids.length || !this.options.onRetest) return;
+    const copy = ids.length === 1
+      ? "复测这条杯测记录？将保留豆单和样品信息，但清空全部杯测录入、评分、进度和计时结果。"
+      : `复测已选的 ${ids.length} 条杯测记录？将保留各自豆单和样品信息，但清空全部杯测录入、评分、进度和计时结果。`;
+    if (!window.confirm(copy)) return;
+    await this.options.onRetest(ids);
+    for (const id of ids) this.selected.delete(id);
+  }
+  private async retestSelected(): Promise<void> { await this.retestRecords([...this.selected]); }
   private async deleteRecords(ids: readonly string[]): Promise<void> { if (!ids.length || !window.confirm(`删除 ${ids.length} 条杯测记录？`)) return; await this.options.onDelete(ids); for (const id of ids) this.selected.delete(id); }
   private async deleteSelected(): Promise<void> { await this.deleteRecords([...this.selected]); }
   private async syncSelected(): Promise<void> { const ids = [...this.selected]; if (!ids.length) return; await this.options.onSync(ids); this.selected.clear(); }

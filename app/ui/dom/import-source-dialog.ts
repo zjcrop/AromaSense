@@ -61,13 +61,27 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
 
   const grid = element("div", "import-source__grid");
   if (options.allowPhotos !== false && options.onPhotos) {
-    grid.append(sourceButton("photo", "图片", "多选照片，逐张识别", () => { close(); options.onPhotos?.(); }));
+    grid.append(sourceButton("photo", "图片", "拍照或上传图片", () => showPhotoForm()));
   }
   grid.append(
     sourceButton("sheet", "表格", "Excel · CSV · ODS · JSON", () => { close(); options.onSpreadsheet(); }),
     sourceButton("link", "链接", "导入 AromaSense 分享链接", () => showLinkForm()),
     sourceButton("qr", "二维码", "直接扫码或读取二维码图片", () => { close(); options.onQr(); })
   );
+
+  const photoForm = element("div", "import-source__link-form");
+  photoForm.hidden = true;
+  const photoTitle = element("div", "import-source__title", "选择图片来源");
+  const photoGrid = element("div", "import-source__grid");
+  photoGrid.append(
+    sourceButton("photo", "拍照", "调用设备相机拍摄", () => selectPhotoSource(true)),
+    sourceButton("photo", "上传图片", "从设备选择现有图片", () => selectPhotoSource(false))
+  );
+  const photoBack = button("import-source__secondary", "返回", () => {
+    photoForm.hidden = true;
+    grid.hidden = false;
+  });
+  photoForm.append(photoTitle, photoGrid, photoBack);
 
   const linkForm = element("div", "import-source__link-form");
   linkForm.hidden = true;
@@ -84,8 +98,32 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
   );
   linkForm.append(linkInput, linkStatus, linkActions);
 
+  function showPhotoForm(): void {
+    grid.hidden = true;
+    linkForm.hidden = true;
+    photoForm.hidden = false;
+  }
+
+  function selectPhotoSource(useCamera: boolean): void {
+    if (!useCamera) {
+      close();
+      options.onPhotos?.();
+      return;
+    }
+    const cameraInput = [...options.root.querySelectorAll<HTMLInputElement>('input[type="file"][accept="image/*"]')]
+      .find((input) => input.hasAttribute("capture"));
+    if (!cameraInput) {
+      close();
+      options.onPhotos?.();
+      return;
+    }
+    close();
+    cameraInput.click();
+  }
+
   function showLinkForm(): void {
     grid.hidden = true;
+    photoForm.hidden = true;
     linkForm.hidden = false;
     queueMicrotask(() => linkInput.focus());
   }
@@ -112,7 +150,7 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
   overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
   overlay.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
 
-  panel.append(header, grid, linkForm);
+  panel.append(header, grid, photoForm, linkForm);
   overlay.append(panel);
   options.root.append(overlay);
   return { close };
