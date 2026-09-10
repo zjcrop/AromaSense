@@ -12,6 +12,8 @@ import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import "../ui/dom/manual-split-photo-mode";
 import "../ui/dom/home-action-enhancements";
+import "../ui/dom/batch-intake-picker-layout-fix";
+import "../ui/dom/sample-rail-active-scroll";
 import { AromaSenseDomApp } from "./dom-app";
 import "./recognition-session-lifecycle";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
