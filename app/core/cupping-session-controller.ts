@@ -1,8 +1,5 @@
 import type { StageId, SensoryObservation } from "../../shared/protocol/aromasense-v1";
-import {
-  deriveStageStatus,
-  scoreAffectingField
-} from "./cupping-progress-policy";
+import { deriveStageStatus } from "./cupping-progress-policy";
 import { sensoryFieldDefinition, SENSORY_DICTIONARY_VERSION } from "./sensory-dictionary-v1";
 import type { EditingContext } from "./cupping-state-machine";
 import type { EditingSlice, LocalCuppingRepository } from "../storage/local-cupping-repository";
@@ -75,57 +72,7 @@ export class CuppingSessionController {
 
     return this.enqueueWrite(async () => {
       await this.repository.saveObservation(observation);
-      let observations = replaceObservation(this.active?.slice.observations ?? active.slice.observations, observation);
-
-      if (
-        observation.stageId === "final"
-        && fieldKey !== "final_score_confirmed"
-        && scoreAffectingField(fieldKey)
-      ) {
-        const scoreConfirmation = observations.find((item) => item.fieldKey === "final_score_confirmed");
-        if (scoreConfirmation?.value === true) {
-          const invalidated: SensoryObservation = {
-            observationId: this.observationIdFactory(active.context, "final_score_confirmed"),
-            sessionId: active.context.sessionId,
-            sampleId: active.context.sampleId,
-            stageId: "final",
-            fieldKey: "final_score_confirmed",
-            value: false,
-            dictionaryVersion: "sensory-0.1C",
-            updatedAt: now
-          };
-          await this.repository.saveObservation(invalidated);
-          observations = replaceObservation(observations, invalidated);
-        }
-      }
-
-      if (observation.stageId === "overall" && scoreAffectingField(fieldKey)) {
-        const scoringObservations = await this.repository.listObservationsForStage(observation.sampleId, "scoring");
-        const scoreConfirmation = scoringObservations.find((item) => item.fieldKey === "score_confirmed");
-        if (scoreConfirmation?.value === true) {
-          const scoringContext: EditingContext = { ...active.context, stageId: "scoring" };
-          const invalidated: SensoryObservation = {
-            observationId: this.observationIdFactory(scoringContext, "score_confirmed"),
-            sessionId: active.context.sessionId,
-            sampleId: active.context.sampleId,
-            stageId: "scoring",
-            fieldKey: "score_confirmed",
-            value: false,
-            dictionaryVersion: "sensory-flow/2.0",
-            updatedAt: now
-          };
-          await this.repository.saveObservation(invalidated);
-          await this.repository.setStageState(
-            observation.sessionId,
-            observation.sampleId,
-            "scoring",
-            "active",
-            now,
-            now
-          );
-        }
-      }
-
+      const observations = replaceObservation(this.active?.slice.observations ?? active.slice.observations, observation);
       const status = deriveStageStatus(observation.stageId, observations);
       await this.repository.setStageState(
         observation.sessionId,
