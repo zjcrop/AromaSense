@@ -15,7 +15,8 @@ const REQUIRED_FIELDS: Partial<Record<StageId, readonly string[]>> = {
   low_temp: ["flavor_tags", "acidity_intensity", "sweetness_intensity", "bitterness_intensity", "mouthfeel_intensity", "finish_intensity"],
   flavor: ["flavor_tags"],
   overall: QUALITY_KEYS,
-  scoring: ["score_confirmed"]
+  // Scoring is a derived/read-only result page. It never requires a second user confirmation.
+  scoring: []
 };
 
 function meaningful(value: unknown): boolean {
@@ -45,11 +46,11 @@ export function completionForStage(stageId: StageId, observations: readonly Sens
     return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
   }
   if (stageId === "final") {
-    const required = ["final_score_confirmed"] as const;
-    const missing = required.filter((key) => values.get(key) !== true);
-    return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
+    // Legacy final pages are now derived from their flavor/overall/score sub-phase state.
+    // No `final_score_confirmed` observation is required.
+    return { complete: false, observed: 0, required: 0, missing: [] };
   }
   const required = REQUIRED_FIELDS[stageId] ?? [];
-  const missing = required.filter((key) => key === "score_confirmed" ? values.get(key) !== true : !values.has(key));
+  const missing = required.filter((key) => !values.has(key));
   return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
 }
