@@ -1,7 +1,7 @@
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v2");
-const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation";
+const PATCH_FLAG = Symbol.for("aromasense.cupping.adjacent-navigation-hotfix.v3");
+const STATIC_RAIL_STYLE_ID = "aromasense-static-sample-activation-v3";
 const railScrollSyncInstalled = new WeakSet<HTMLElement>();
 
 interface RendererInternals {
@@ -33,8 +33,6 @@ function replaceNavigationButton(
   const current = root.querySelector<HTMLButtonElement>(`.cupping-main__footer ${selector}`);
   if (!current) return;
 
-  // Clone strips the old goPrevious/goNext listener. Those actions are workflow-gated;
-  // the bottom triangle groups are pure adjacent-node navigation controls.
   const replacement = current.cloneNode(true) as HTMLButtonElement;
   replacement.disabled = false;
   replacement.removeAttribute("title");
@@ -84,6 +82,10 @@ function installStaticRailStyles(): void {
       transition:none!important;
       animation:none!important;
     }
+    .cupping-layout__rail-list .sample-rail__active-tab{
+      transition-property:none!important;
+      animation-name:none!important;
+    }
   `;
   document.head.append(style);
 }
@@ -94,6 +96,15 @@ function cancelRailTransitionArtifacts(rail: HTMLElement): void {
   )) {
     node.getAnimations().forEach((animation) => animation.cancel());
   }
+}
+
+function hideActiveMarker(rail: HTMLElement): void {
+  const tab = rail.querySelector<HTMLElement>(".sample-rail__active-tab");
+  if (!tab) return;
+  tab.getAnimations().forEach((animation) => animation.cancel());
+  tab.style.transition = "none";
+  tab.style.visibility = "hidden";
+  tab.style.opacity = "0";
 }
 
 function activeCard(rail: HTMLElement): HTMLElement | undefined {
@@ -111,7 +122,10 @@ function syncActiveMarkerGeometry(rail: HTMLElement): void {
   const number = card?.querySelector<HTMLElement>(".sample-rail__number");
   const copy = card?.querySelector<HTMLElement>(".sample-rail__active-copy");
   if (!tab || !card || !outerRail || !number) {
-    if (tab) tab.style.opacity = "0";
+    if (tab) {
+      tab.style.visibility = "hidden";
+      tab.style.opacity = "0";
+    }
     return;
   }
 
@@ -128,11 +142,15 @@ function syncActiveMarkerGeometry(rail: HTMLElement): void {
 
   tab.getAnimations().forEach((animation) => animation.cancel());
   tab.style.transition = "none";
+  tab.style.visibility = "hidden";
+  tab.style.opacity = "0";
   tab.style.left = `${left}px`;
   tab.style.top = `${Math.round(cardRect.top + cardRect.height / 2 - height / 2)}px`;
   tab.style.width = `${Math.max(compact ? 40 : 54, Math.round(railRect.right + protrusion - left))}px`;
   tab.style.height = `${height}px`;
+  tab.getAnimations().forEach((animation) => animation.cancel());
   tab.style.opacity = visible ? "1" : "0";
+  tab.style.visibility = visible ? "visible" : "hidden";
 }
 
 function ensureRailScrollSync(rail: HTMLElement): void {
@@ -168,9 +186,6 @@ function restoreRailWithoutTopFlash(
     return;
   }
 
-  // Position the newly active sample synchronously. The active marker and enlarged
-  // number are never animated from the old/top geometry; they appear only at their
-  // final position in the same render turn.
   const maxScrollTop = Math.max(0, rail.scrollHeight - rail.clientHeight);
   const target = Math.max(0, Math.min(
     maxScrollTop,
@@ -187,8 +202,7 @@ function installPrePaintAnimationGuard(): void {
       if (record.type !== "attributes" || record.attributeName !== "data-active-sample-id") continue;
       const rail = record.target;
       if (!(rail instanceof HTMLElement) || !rail.classList.contains("cupping-layout__rail-list")) continue;
-      // MutationObserver runs before the next paint. Cancel Web Animations here so
-      // no intermediate frame can show the marker/large number falling from the top.
+      hideActiveMarker(rail);
       settleRailVisualState(rail);
     }
   });
@@ -207,16 +221,16 @@ function installPatch(): void {
   if (prototype[PATCH_FLAG]) return;
   prototype[PATCH_FLAG] = true;
 
-  // renderRail mutates the rail before the rest of render may await async data.
-  // Preserve/position scroll and settle the active visuals here synchronously so an
-  // intermediate browser paint cannot expose stale top-of-list activation geometry.
   const originalRenderRail = prototype.renderRail;
   if (typeof originalRenderRail === "function") {
     prototype.renderRail = function(state: unknown): void {
       const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
       const previousScrollTop = beforeRail?.scrollTop ?? 0;
       const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
+      if (beforeRail) hideActiveMarker(beforeRail);
+
       originalRenderRail.call(this, state);
+
       const rail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
       if (rail) restoreRailWithoutTopFlash(rail, previousScrollTop, previousActiveSampleId);
     };
@@ -227,6 +241,7 @@ function installPatch(): void {
     const beforeRail = this.root.querySelector<HTMLElement>(".cupping-layout__rail-list");
     const previousScrollTop = beforeRail?.scrollTop ?? 0;
     const previousActiveSampleId = beforeRail?.dataset.activeSampleId || undefined;
+    if (beforeRail) hideActiveMarker(beforeRail);
 
     await originalRender.call(this);
 
