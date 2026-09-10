@@ -233,12 +233,15 @@ function renderControl(spec: SensoryControlSpec, value: unknown, input: SensoryE
 export function renderSensoryEditor(root: HTMLElement, input: SensoryEditorRenderInput): void {
   clearElement(root);
   const values = observationMap(input.observations);
-  const aromaTagMode = input.aromaTagMode ?? "classified";
+  const appMode = typeof document !== "undefined" ? document.getElementById("app")?.dataset.cuppingMode : undefined;
+  const aromaTagMode = input.aromaTagMode ?? (appMode === "free" ? "classified" : "shared");
   const controls = controlsForStage(input.stageId)
     .filter((spec) => !input.fieldFilter || input.fieldFilter.has(spec.fieldKey))
-    .filter((spec) => input.stageId !== "aroma" || aromaTagMode === "shared"
-      ? !["dry_fragrance_tags", "wet_aroma_tags"].includes(spec.fieldKey)
-      : spec.fieldKey !== "flavor_tags");
+    .filter((spec) => input.stageId !== "aroma"
+      ? true
+      : aromaTagMode === "shared"
+        ? !["dry_fragrance_tags", "wet_aroma_tags"].includes(spec.fieldKey)
+        : spec.fieldKey !== "flavor_tags");
 
   if (input.stageId === "aroma") {
     if (aromaTagMode === "shared") {
