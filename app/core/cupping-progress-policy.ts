@@ -56,6 +56,10 @@ function anyObservation(
   );
 }
 
+function legacyConfirmation(observations: readonly SensoryObservation[], fieldKey: "score_confirmed" | "final_score_confirmed"): boolean {
+  return observations.some((observation) => observation.fieldKey === fieldKey && observation.value === true);
+}
+
 export function deriveFinalPhaseStatus(
   phase: FinalAssessmentPhase,
   observations: readonly SensoryObservation[]
@@ -81,7 +85,9 @@ export function deriveFinalPhaseStatus(
   }
 
   // Score is a live derived view. Once the SCA score inputs are valid, the
-  // phase is complete automatically; there is no per-sample confirmation gate.
+  // phase is complete automatically; legacy explicit confirmations remain
+  // readable but are never required for new records.
+  if (legacyConfirmation(observations, "score_confirmed") || legacyConfirmation(observations, "final_score_confirmed")) return "completed";
   const sca = calculateSCACVAScore(observations);
   if (sca.complete) return "completed";
   return anyObservation(observations, (fieldKey) => fieldKey.startsWith("final_sca_")) ? "active" : "not_started";
@@ -97,10 +103,15 @@ export function finalPhaseProgress(observations: readonly SensoryObservation[]):
 
 export function deriveStageStatus(stageId: StageId, observations: readonly SensoryObservation[]): StageStatus {
   if (stageId === "final") {
+    if (legacyConfirmation(observations, "final_score_confirmed") || completionForStage("final", observations).complete) return "completed";
     const phases = finalPhaseProgress(observations);
     const score = phases.find((phase) => phase.phase === "score");
     if (score?.status === "completed") return "completed";
     return phases.some((phase) => phase.status !== "not_started") ? "active" : "not_started";
+  }
+
+  if (stageId === "scoring") {
+    return deriveFinalPhaseStatus("score", observations);
   }
 
   if (completionForStage(stageId, observations).complete) return "completed";
