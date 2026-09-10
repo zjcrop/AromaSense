@@ -57,10 +57,11 @@ test("product shell visibly exposes three-state progress and current-step comple
   assert.match(renderer, /stage\.stageId === activeStageId/);
 });
 
-test("aroma page supports strict shared SCA CATA and source-classified free cupping", () => {
+test("aroma page supports one dry/wet score axis plus strict shared SCA CATA and source-classified free cupping", () => {
   const dictionary = readFileSync(resolve(root, "app/core/sensory-dictionary-v1.ts"), "utf8");
   const completion = readFileSync(resolve(root, "app/core/completion-engine.ts"), "utf8");
   const renderer = readFileSync(resolve(root, "app/ui/dom/sensory-editor-renderer.ts"), "utf8");
+  const singleAxis = readFileSync(resolve(root, "app/ui/dom/cupping-aroma-single-axis-score.ts"), "utf8");
   const browserAcceptance = readFileSync(resolve(root, "scripts/current-round-ui-acceptance.mjs"), "utf8");
 
   assert.match(dictionary, /sensory-dictionary\/1\.3/);
@@ -72,9 +73,15 @@ test("aroma page supports strict shared SCA CATA and source-classified free cupp
   assert.match(renderer, /Fragrance \/ Aroma 香气类别/);
   assert.match(renderer, /SCA正式流程共用一套 CATA 香气类别/);
   assert.match(renderer, /appMode === "free" \? "classified" : "shared"/);
-  assert.match(browserAcceptance, /setRangeByLabel\(cdp, "干香强度"/);
+  assert.match(singleAxis, /dry_fragrance_intensity:\s*"final_sca_affective_fragrance"/);
+  assert.match(singleAxis, /wet_aroma_intensity:\s*"final_sca_affective_aroma"/);
+  assert.match(singleAxis, /input\.min = "1"/);
+  assert.match(singleAxis, /input\.max = "9"/);
+  assert.match(singleAxis, /input\.step = "1"/);
+  assert.match(browserAcceptance, /setSensoryRange\(cdp, "dry_fragrance_intensity", 5\)/);
   assert.match(browserAcceptance, /data-aroma-phase=\"shared\"/);
-  assert.match(browserAcceptance, /setRangeByLabel\(cdp, "湿香强度"/);
+  assert.match(browserAcceptance, /setSensoryRange\(cdp, "wet_aroma_intensity", 5\)/);
+  assert.match(browserAcceptance, /duplicateScoreAxes === 0/);
 });
 
 test("latest workflow nodes use numbered circles, arrow navigation and requested triple-flash timing", () => {
