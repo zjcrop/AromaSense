@@ -20,15 +20,15 @@ export const STAGE_COMPLETION_HINTS: Readonly<Record<Exclude<StageId, "final">, 
   low_temp: "完成风味、酸质、甜感、苦味、口感与余韵强度",
   flavor: "选择至少一个最终风味描述",
   overall: "完成SCA 8项Affective评分、杯数/缺陷类型一致性与香迹洁净度",
-  scoring: "查看SCA得分与风味侧写后主动确认"
+  scoring: "SCA输入完整后实时计算总分，无需再次确认"
 };
 
-const CONTROL_FIELDS = new Set(["final_phase"]);
+const CONTROL_FIELDS = new Set(["final_phase", "score_confirmed", "final_score_confirmed"]);
 
 export const FINAL_PHASE_COMPLETION_HINTS: Readonly<Record<FinalAssessmentPhase, string>> = {
   flavor: "选择至少一个最终风味描述",
   overall: "完成SCA 8项Affective评分、杯数/缺陷类型一致性与香迹洁净度",
-  score: "查看SCA得分、结构雷达与温度—风味演化后主动确认"
+  score: "SCA输入完整后自动形成实时得分，不再要求人工确认"
 };
 
 export function hasMeaningfulValue(value: unknown): boolean {
@@ -80,10 +80,11 @@ export function deriveFinalPhaseStatus(
     return started ? "active" : "not_started";
   }
 
-  const confirmation = map.get("final_score_confirmed");
-  if (confirmation === true) return "completed";
-  if (confirmation === false) return "active";
-  return "not_started";
+  // Score is a live derived view. Once the SCA score inputs are valid, the
+  // phase is complete automatically; there is no per-sample confirmation gate.
+  const sca = calculateSCACVAScore(observations);
+  if (sca.complete) return "completed";
+  return anyObservation(observations, (fieldKey) => fieldKey.startsWith("final_sca_")) ? "active" : "not_started";
 }
 
 export function finalPhaseProgress(observations: readonly SensoryObservation[]): readonly FinalPhaseProgress[] {
@@ -108,7 +109,7 @@ export function deriveStageStatus(stageId: StageId, observations: readonly Senso
 
 export function stageCompletionHint(stageId: StageId): string {
   return stageId === "final"
-    ? "最终SCA得分确认后，本样品即视为完成"
+    ? "SCA有效输入完整后自动形成实时得分，不再人工确认"
     : STAGE_COMPLETION_HINTS[stageId];
 }
 
