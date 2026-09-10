@@ -139,17 +139,25 @@ function installNavigationPatch(): void {
   prototype.select = async function(sampleId: string, suggestedStageId: StageId): Promise<void> {
     const stateBefore = this.controller.current();
     let stageId = suggestedStageId;
-    if (stateBefore) {
-      const current = stateBefore.active?.context;
-      if (current?.sampleId === sampleId) {
-        stageId = current.stageId;
+    let rememberedFinalPhase: string | undefined;
+
+    // A sample-card change resumes that sample's own last page. A deliberate
+    // stage click inside the already active sample must always win immediately.
+    if (stateBefore && stateBefore.active?.context.sampleId !== sampleId) {
+      const remembered = readMemory(stateBefore.sessionId)?.samples[sampleId];
+      if (remembered && stageExists(stateBefore, sampleId, remembered.stageId)) {
+        stageId = remembered.stageId;
+        rememberedFinalPhase = remembered.finalPhase;
       } else {
-        const remembered = readMemory(stateBefore.sessionId)?.samples[sampleId];
-        if (remembered && stageExists(stateBefore, sampleId, remembered.stageId)) stageId = remembered.stageId;
+        stageId = firstStage(stateBefore, sampleId) ?? suggestedStageId;
       }
     }
 
     await originalSelect.call(this, sampleId, stageId);
+    if (stageId === "final" && rememberedFinalPhase && currentFinalPhase(this.controller) !== rememberedFinalPhase) {
+      await originalSelectFinalPhase.call(this, sampleId, rememberedFinalPhase);
+    }
+
     const stateAfter = this.controller.current();
     const active = stateAfter?.active;
     if (!stateAfter || !active) return;
@@ -187,5 +195,7 @@ function installNavigationPatch(): void {
   };
 }
 
-installCuppingProgressSuppression();
-installNavigationPatch();
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  installCuppingProgressSuppression();
+  installNavigationPatch();
+}
