@@ -17,6 +17,7 @@ import "../ui/dom/sample-rail-active-scroll";
 import "../ui/dom/cupping-lazy-navigation";
 import "../ui/dom/cupping-flow-enhancements";
 import "../ui/dom/cupping-latest-ui-finalize";
+import "../ui/dom/cupping-input-ux-upgrade";
 import { AromaSenseDomApp } from "./dom-app";
 import "./recognition-session-lifecycle";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
