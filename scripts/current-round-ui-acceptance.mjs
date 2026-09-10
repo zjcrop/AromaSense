@@ -169,10 +169,18 @@ async function runAcceptance(appUrl) {
     await setValue(cdp, '[data-session-field="杯测会名称"] input', "Current Round Visible UI");
     await setValue(cdp, '[data-cupping-type="true"]', "competition");
     await waitExpression(cdp, `document.querySelector('[data-cupping-type="true"]')?.value==='competition'`, "competition cupping type selection");
+
+    // Competition is not a blind-count flow. Seed one sample through the same
+    // text-intake UI users operate, then start the competition from that list.
+    await click(cdp, '[aria-label="批量录入"]');
+    await waitExpression(cdp, `Boolean(document.querySelector('[data-batch-intake-source="text"]'))`, "batch text-intake option");
+    await click(cdp, '[data-batch-intake-source="text"]');
+    await waitExpression(cdp, `Boolean(document.querySelector('.manual-import__textarea'))`, "manual text intake");
+    await setValue(cdp, '.manual-import__textarea', "验收样品；埃塞俄比亚；古吉；水洗；浅烘；茉莉、柑橘");
+    await click(cdp, '.manual-import__primary');
+    await waitExpression(cdp, `Boolean(document.querySelector('.batch-setup__row.is-auto-accepted .batch-setup__sample-label')) && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "competition sample seeded from text intake");
+
     await click(cdp, ".batch-setup__start");
-    await waitExpression(cdp, `Boolean(document.querySelector('.cupping-count-dialog__input'))`, "competition sample dialog");
-    await setValue(cdp, ".cupping-count-dialog__input", "1");
-    await click(cdp, ".cupping-count-dialog__confirm");
     await waitExpression(cdp, `document.querySelector('#app')?.dataset.screen==='cupping'`, "cupping screen");
     await waitExpression(cdp, `Boolean(document.querySelector('.competition-preflight__start'))`, "competition preflight");
 
