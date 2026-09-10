@@ -56,7 +56,7 @@ test("explicit human confirmation preserves conflict evidence without fabricatin
   assert.equal(canonical.manualOverrides?.[0]?.confirmedValue, "山嵐莊園");
 });
 
-test("entering cupping sets a stable session start time and completion keeps it", () => {
+test("a persisted session start time remains stable through completion", () => {
   const draft = createSession({ sessionId: "timing-session", now: "2026-09-05T13:00:00.000Z" });
   assert.equal(draft.startedAt, undefined);
   const active = activateSession(draft, "2026-09-05T13:01:02.000Z");
@@ -75,23 +75,22 @@ test("elapsed timing is derived consistently from the persisted session start", 
   assert.match(completion?.clockLabel ?? "", /^\d{2}:\d{2}$/u);
 });
 
-test("score confirmation UI and left-rail timer contracts remain present", () => {
-  const scoreSource = readFileSync("app/ui/dom/final-assessment-renderer.ts", "utf8");
-  assert.match(scoreSource, /确认 SCA 得分/u);
-  assert.match(scoreSource, /确认后锁定本样品/u);
-  assert.match(scoreSource, /font-size:18px!important/u);
-  assert.match(scoreSource, /font-weight:800!important/u);
-  assert.match(scoreSource, /text-align:center/u);
-
+test("competition timing uses persisted wall clock, 30-minute cues, wake lock and interruption-safe lifecycle", () => {
+  const flowSource = readFileSync("app/ui/dom/cupping-flow-enhancements.ts", "utf8");
   const screenSource = readFileSync("app/ui/dom/cupping-screen-renderer.ts", "utf8");
+  const latestUi = readFileSync("app/ui/dom/cupping-latest-ui-finalize.ts", "utf8");
+
   assert.match(screenSource, /data-cupping-timer/u);
   assert.match(screenSource, /cupping-rail-timer__compact-line/u);
-  assert.match(screenSource, /visibilitychange/u);
-  assert.match(screenSource, /pageshow/u);
-  assert.match(screenSource, /syncTimerFromWallClock/u);
-  assert.match(screenSource, /cuppingElapsedSeconds\(state\.sessionStartedAt, end\)/u);
   assert.match(screenSource, /本进程完成/u);
-  assert.match(screenSource, /得分已确认 · 本样品杯测记录已锁定为只读/u);
+  assert.match(flowSource, /const MILESTONE_SECONDS = 30 \* 60/u);
+  assert.match(flowSource, /competitionStartedAt \?\? state\?\.sessionStartedAt/u);
+  assert.match(flowSource, /Date\.parse\(start\)/u);
+  assert.match(flowSource, /document\.addEventListener\("visibilitychange"/u);
+  assert.match(flowSource, /nav\.wakeLock/u);
+  assert.match(flowSource, /比赛进行中，不可退出/u);
+  assert.match(flowSource, /competitionLockedAt/u);
+  assert.match(latestUi, /aromasense-stage-completion-triple-flash 2100ms/);
 });
 
 test("review dialog exposes pending state and asynchronous confirmation failures", () => {
