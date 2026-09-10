@@ -80,6 +80,10 @@ jobs:
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
         run: node scripts/current-round-ui-acceptance.mjs
+      - name: Verify active sample centers and clamps in rail
+        env:
+          AROMASENSE_ACCEPTANCE_DEBUG: '1'
+        run: node scripts/active-sample-centering-acceptance.mjs
       - name: Prove overflowing cupping rail scrolls
         env:
           AROMASENSE_ACCEPTANCE_DEBUG: '1'
