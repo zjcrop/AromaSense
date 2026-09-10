@@ -696,5 +696,5 @@ export function renderSampleRail(
     animateNumberTransition(root, nextActiveSampleId, before, after, Math.round(duration * .58), Math.round(duration * .34));
     animateActiveCopy(root, nextActiveSampleId, Math.round(duration * .42), Math.round(duration * .58));
   }
-  positionActiveTab(root, activeChanged, duration, tabBeforeRect);
+  positionActiveTab(root, false);
 }
