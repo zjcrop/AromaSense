@@ -3,7 +3,6 @@ import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { StageId } from "../shared/protocol/aromasense-v1";
 import { CuppingSessionController } from "../app/core/cupping-session-controller";
 import { buildSampleBatch } from "../app/core/sample-batch-service";
 import { createSession } from "../app/core/session-lifecycle";
@@ -16,50 +15,18 @@ const schema = readFileSync("app/storage/0001_local_schema.sql", "utf8");
 const metadataMigration = readFileSync("app/storage/0002_session_metadata.sql", "utf8");
 const timingMigration = readFileSync("app/storage/0005_session_timing.sql", "utf8");
 
-async function fillRequiredStage(screen: CuppingScreenController, sampleId: string, stageId: StageId, now: string): Promise<void> {
-  await screen.select(sampleId, stageId, now);
-  const fields: Record<StageId, ReadonlyArray<[string, unknown]>> = {
-    preparation: [["dry_fragrance_intensity", 6]],
-    aroma: [
-      ["dry_fragrance_intensity", 6], ["dry_fragrance_tags", ["cocoa"]],
-      ["wet_aroma_intensity", 7], ["wet_aroma_tags", ["jasmine"]]
-    ],
-    high_temp: [
-      ["flavor_tags", ["jasmine"]], ["acidity_intensity", 8], ["sweetness_intensity", 8],
-      ["bitterness_intensity", 2], ["mouthfeel_intensity", 7]
-    ],
-    mid_temp: [
-      ["flavor_tags", ["jasmine"]], ["acidity_intensity", 7], ["sweetness_intensity", 8],
-      ["bitterness_intensity", 2], ["mouthfeel_intensity", 7], ["finish_intensity", 8]
-    ],
-    low_temp: [
-      ["flavor_tags", ["jasmine"]], ["acidity_intensity", 6], ["sweetness_intensity", 7],
-      ["bitterness_intensity", 2], ["mouthfeel_intensity", 6], ["finish_intensity", 7]
-    ],
-    flavor: [["flavor_tags", ["jasmine"]]],
-    overall: [
-      ["quality_flavor", 8], ["quality_aftertaste", 8], ["quality_acidity", 8], ["quality_sweetness", 8],
-      ["quality_body", 8], ["quality_clean", 8], ["quality_uniformity", 8], ["quality_balance", 8]
-    ],
-    scoring: [["score_confirmed", true]],
-    final: [
-      ["flavor_tags", ["jasmine"]],
-      ["quality_flavor", 8], ["quality_aftertaste", 8], ["quality_acidity", 8], ["quality_sweetness", 8],
-      ["quality_body", 8], ["quality_clean", 8], ["quality_uniformity", 8], ["quality_balance", 8],
-      ["final_score_confirmed", true]
-    ]
-  };
-
-  for (const [fieldKey, value] of fields[stageId]) await screen.saveField(fieldKey, value, now);
-}
-
 function applySchema(db: NodeSQLiteDriver): void {
   db.exec(schema);
   db.exec(metadataMigration);
   db.exec(timingMigration);
 }
 
-test("entering the cupping screen starts the session clock while browsing alone does not start a sensory step", async () => {
+function buildScreen(db: NodeSQLiteDriver, repository: LocalCuppingRepository): CuppingScreenController {
+  const editor = new CuppingSessionController(repository, (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`);
+  return new CuppingScreenController(repository, new StageProgressReader(db), editor);
+}
+
+test("normal cupping browsing does not start the wall clock and the first sensory write establishes a stable start", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aromasense-screen-"));
   const db = NodeSQLiteDriver.open(join(dir, "screen.sqlite"));
   applySchema(db);
@@ -68,58 +35,41 @@ test("entering the cupping screen starts the session clock while browsing alone 
     const repository = new LocalCuppingRepository(db);
     const createdAt = "2026-08-24T20:39:00+08:00";
     const enteredAt = "2026-08-24T20:40:00+08:00";
-    const session = createSession({ sessionId: "screen-session", now: createdAt });
+    const firstWriteAt = "2026-08-24T20:40:20+08:00";
+    const session = createSession({ sessionId: "screen-session", now: createdAt, metadata: { cuppingMode: "formal" } });
     const samples = buildSampleBatch(session.sessionId, [{ label: "A" }], createdAt, () => "sample-1");
     await repository.createSessionWithSamples(session, samples);
-
-    const editor = new CuppingSessionController(repository, (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`);
-    const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
+    const screen = buildScreen(db, repository);
 
     await screen.initialize(session.sessionId, enteredAt);
-    assert.equal(screen.current()?.sessionStatus, "active");
-    assert.equal(screen.current()?.sessionStartedAt, enteredAt);
-    assert.equal((await repository.getSession(session.sessionId)).startedAt, enteredAt);
+    assert.equal(screen.current()?.sessionStatus, "draft");
+    assert.equal(screen.current()?.sessionStartedAt, undefined);
 
     for (const stage of ["aroma", "high_temp", "mid_temp", "low_temp", "flavor", "overall", "scoring"] as const) {
       await screen.select("sample-1", stage, enteredAt);
-      assert.equal(screen.current()?.sessionStatus, "active");
-      assert.equal((await repository.getSession(session.sessionId)).status, "active");
+      assert.equal(screen.current()?.sessionStatus, "draft");
+      assert.equal((await repository.getSession(session.sessionId)).startedAt, undefined);
       assert.equal(screen.current()?.rail[0]?.stages.find((item) => item.stageId === stage)?.status, "not_started");
     }
 
     await screen.select("sample-1", "aroma", enteredAt);
-    await screen.saveField("notes", "   ", "2026-08-24T20:40:10+08:00");
-    assert.equal((await repository.listStageStates(session.sessionId)).find((stage) => stage.stageId === "aroma")?.startedAt, undefined);
-    await screen.saveField("notes", "花香逐渐展开", "2026-08-24T20:40:20+08:00");
-    assert.equal(screen.current()?.active?.slice.stageStatus, "active");
-    assert.equal((await repository.listStageStates(session.sessionId)).find((stage) => stage.stageId === "aroma")?.startedAt, "2026-08-24T20:40:20+08:00");
+    await screen.saveField("notes", "花香逐渐展开", firstWriteAt);
+    assert.equal(screen.current()?.sessionStatus, "active");
+    assert.equal(screen.current()?.sessionStartedAt, firstWriteAt);
+    assert.equal((await repository.getSession(session.sessionId)).startedAt, firstWriteAt);
 
     await screen.leaveSession();
-    await screen.initialize(session.sessionId, "2026-08-24T20:40:25+08:00");
-    assert.equal(screen.current()?.sessionStartedAt, enteredAt, "re-entering must not reset the session clock");
-    await screen.select("sample-1", "aroma", "2026-08-24T20:40:25+08:00");
+    await screen.initialize(session.sessionId, "2026-08-24T20:41:00+08:00");
+    assert.equal(screen.current()?.sessionStartedAt, firstWriteAt, "re-entry must not reset the persisted wall-clock anchor");
+    await screen.select("sample-1", "aroma", "2026-08-24T20:41:00+08:00");
     assert.equal(screen.current()?.active?.slice.observations.find((item) => item.fieldKey === "notes")?.value, "花香逐渐展开");
-    await screen.saveField("wet_aroma_intensity", 7, "2026-08-24T20:40:30+08:00");
-    assert.equal(screen.current()?.rail[0]?.stages.find((stage) => stage.stageId === "aroma")?.status, "active");
-    await assert.rejects(() => screen.goNext("2026-08-24T20:40:40+08:00"), /STAGE_INCOMPLETE:aroma/);
-    await screen.saveField("dry_fragrance_intensity", 6, "2026-08-24T20:40:45+08:00");
-    await screen.saveField("dry_fragrance_tags", ["cocoa"], "2026-08-24T20:40:47+08:00");
-    await screen.saveField("wet_aroma_tags", ["jasmine"], "2026-08-24T20:40:50+08:00");
-    const afterNext = await screen.goNext("2026-08-24T20:41:00+08:00");
-
-    assert.equal(afterNext.active?.context.stageId, "high_temp");
-    const aroma = afterNext.rail[0]?.stages.find((stage) => stage.stageId === "aroma");
-    const high = afterNext.rail[0]?.stages.find((stage) => stage.stageId === "high_temp");
-    assert.equal(aroma?.status, "completed");
-    assert.equal(afterNext.progress.find((item) => item.sampleId === "sample-1" && item.stageId === "aroma")?.completedAt, "2026-08-24T20:41:00+08:00");
-    assert.equal(high?.status, "not_started");
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("blind identity edits persist during a browsed stage while rail identity remains hidden", async () => {
+test("blind identity can be prepared before competition start while the participant rail remains hidden", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aromasense-blind-identity-"));
   const db = NodeSQLiteDriver.open(join(dir, "blind.sqlite"));
   applySchema(db);
@@ -134,75 +84,67 @@ test("blind identity edits persist during a browsed stage while rail identity re
     });
     const samples = buildSampleBatch(session.sessionId, [{}], now, () => "blind-sample-1");
     await repository.createSessionWithSamples(session, samples);
-
-    const editor = new CuppingSessionController(repository, (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`);
-    const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
+    const screen = buildScreen(db, repository);
 
     await screen.initialize(session.sessionId, now);
-    await screen.select("blind-sample-1", "mid_temp", now);
     const updated = await screen.saveSampleIdentity(
       "blind-sample-1",
       "Ethiopia Guji Lot 12",
       { country: "Ethiopia", region: "Guji", process: "Washed", roast: "Light" },
-      "2026-08-27T11:21:00+08:00"
+      "2026-08-27T11:20:30+08:00"
     );
-
     assert.equal(updated.samples[0]?.label, "Ethiopia Guji Lot 12");
-    assert.equal(updated.samples[0]?.metadata.country, "Ethiopia");
-    assert.equal(updated.active?.slice.sample.label, "Ethiopia Guji Lot 12");
     assert.equal(updated.rail[0]?.label, "Sample 01");
     assert.deepEqual(updated.rail[0]?.metadata, {});
-    assert.equal(updated.rail[0]?.stages.find((stage) => stage.stageId === "mid_temp")?.status, "not_started");
-    assert.equal(updated.sessionStatus, "active");
 
-    const persisted = await repository.listSamples(session.sessionId);
-    assert.equal(persisted[0]?.label, "Ethiopia Guji Lot 12");
-    assert.equal(persisted[0]?.metadata.process, "Washed");
+    await assert.rejects(() => screen.select("blind-sample-1", "mid_temp", now), /COMPETITION_NOT_STARTED/);
+    await screen.startCompetition("2026-08-27T11:21:00+08:00");
+    const active = await screen.select("blind-sample-1", "mid_temp", "2026-08-27T11:21:01+08:00");
+    assert.equal(active.active?.context.stageId, "mid_temp");
+    assert.equal(active.rail[0]?.label, "Sample 01");
+    assert.deepEqual(active.rail[0]?.metadata, {});
+    await assert.rejects(
+      () => screen.saveSampleIdentity("blind-sample-1", "changed", {}, "2026-08-27T11:21:02+08:00"),
+      /CUPPING_SAMPLE_IDENTITY_LOCKED/
+    );
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("score confirmation is the final sample mutation and locks the sample while allowing the session to finish", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "aromasense-finish-gate-"));
-  const db = NodeSQLiteDriver.open(join(dir, "finish.sqlite"));
+test("competition keeps samples editable during scoring and locks all of them only at final session completion", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aromasense-competition-lock-"));
+  const db = NodeSQLiteDriver.open(join(dir, "competition.sqlite"));
   applySchema(db);
 
   try {
     const repository = new LocalCuppingRepository(db);
     const now = "2026-08-27T12:00:00+08:00";
-    const session = createSession({ sessionId: "finish-session", now });
-    const samples = buildSampleBatch(session.sessionId, [{ label: "A" }], now, () => "finish-sample-1");
+    const session = createSession({
+      sessionId: "competition-session",
+      now,
+      metadata: { date: "2026-08-27", time: "12:00", organizer: "tester", cuppingMode: "competition" }
+    });
+    const samples = buildSampleBatch(session.sessionId, [{ label: "A" }, { label: "B" }], now, (index) => `competition-sample-${index + 1}`);
     await repository.createSessionWithSamples(session, samples);
-
-    const editor = new CuppingSessionController(repository, (context, fieldKey) => `${context.sampleId}:${context.stageId}:${fieldKey}`);
-    const screen = new CuppingScreenController(repository, new StageProgressReader(db), editor);
+    const screen = buildScreen(db, repository);
 
     await screen.initialize(session.sessionId, now);
-    for (const stageId of ["aroma", "high_temp", "mid_temp", "low_temp", "flavor", "overall"] as const) {
-      await fillRequiredStage(screen, "finish-sample-1", stageId, "2026-08-27T12:03:00+08:00");
-      await screen.completeStage("2026-08-27T12:04:00+08:00");
-    }
-
-    assert.equal(screen.canFinishSession(), false);
-    await fillRequiredStage(screen, "finish-sample-1", "scoring", "2026-08-27T12:04:30+08:00");
-    assert.deepEqual(screen.current()?.lockedSampleIds, ["finish-sample-1"]);
-    await assert.rejects(
-      () => screen.saveField("score_confirmed", false, "2026-08-27T12:04:31+08:00"),
-      /SAMPLE_SCORE_LOCKED/
-    );
-    await assert.rejects(
-      () => screen.saveSampleIdentity("finish-sample-1", "changed", {}, "2026-08-27T12:04:32+08:00"),
-      /SAMPLE_SCORE_LOCKED/
-    );
-    await screen.completeStage("2026-08-27T12:04:45+08:00");
+    await screen.startCompetition("2026-08-27T12:00:05+08:00");
+    await screen.select("competition-sample-1", "scoring", "2026-08-27T12:05:00+08:00");
+    assert.deepEqual(screen.current()?.lockedSampleIds, []);
     assert.equal(screen.canFinishSession(), true);
 
-    const completed = await screen.finishSession("2026-08-27T12:05:00+08:00");
+    const completed = await screen.finishSession("2026-08-27T12:30:05+08:00");
     assert.equal(completed.sessionStatus, "completed");
-    assert.equal(completed.sessionStartedAt, now);
-    assert.equal(completed.sessionCompletedAt, "2026-08-27T12:05:00+08:00");
+    assert.equal(completed.sessionStartedAt, "2026-08-27T12:00:05+08:00");
+    assert.equal(completed.sessionCompletedAt, "2026-08-27T12:30:05+08:00");
+    assert.deepEqual(completed.lockedSampleIds, ["competition-sample-1", "competition-sample-2"]);
+    await assert.rejects(
+      () => screen.select("competition-sample-1", "aroma", "2026-08-27T12:30:06+08:00"),
+      /COMPLETED_SESSION_IS_READ_ONLY/
+    );
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });
