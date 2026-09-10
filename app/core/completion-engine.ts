@@ -30,19 +30,14 @@ function meaningful(value: unknown): boolean {
 export function completionForStage(stageId: StageId, observations: readonly SensoryObservation[]): CompletionResult {
   const values = new Map(observations.filter((item) => meaningful(item.value)).map((item) => [item.fieldKey, item.value] as const));
   if (stageId === "aroma") {
-    // sensory-dictionary/1.3 separates pre-infusion dry fragrance from the wet
-    // aroma released after infusion/break. Historical records used one shared
-    // flavor_tags field; keep those records complete without rewriting them.
-    const classifiedCapture = values.has("dry_fragrance_tags")
-      || values.has("wet_aroma_tags")
-      || observations.some((item) => item.dictionaryVersion === "sensory-dictionary/1.3"
-        && ["dry_fragrance_intensity", "wet_aroma_intensity"].includes(item.fieldKey));
+    // Free cupping records explicit dry/wet descriptor sources. Strict SCA CVA
+    // uses the legacy-neutral `flavor_tags` slot as one shared Fragrance/Aroma
+    // CATA list while retaining separate dry and wet intensity observations.
+    const classifiedCapture = values.has("dry_fragrance_tags") || values.has("wet_aroma_tags");
     const required = classifiedCapture
       ? ["dry_fragrance_intensity", "dry_fragrance_tags", "wet_aroma_intensity", "wet_aroma_tags"] as const
-      : ["wet_aroma_intensity", "flavor_tags"] as const;
-    const missing = required.filter((key) => key === "wet_aroma_tags"
-      ? !values.has("wet_aroma_tags") && !values.has("flavor_tags")
-      : !values.has(key));
+      : ["dry_fragrance_intensity", "wet_aroma_intensity", "flavor_tags"] as const;
+    const missing = required.filter((key) => !values.has(key));
     return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
   }
   if (stageId === "final") {
