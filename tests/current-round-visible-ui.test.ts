@@ -77,6 +77,7 @@ test("aroma page stores dry fragrance and wet aroma as separate classified obser
 test("newly completed workflow points use the requested 0.3 second two-flash transition", () => {
   const css = readFileSync(resolve(root, "app/ui/dom/aromasense-cupping.css"), "utf8");
   const renderer = readFileSync(resolve(root, "app/ui/dom/cupping-screen-renderer.ts"), "utf8");
+  const rail = readFileSync(resolve(root, "app/ui/dom/sample-rail-renderer.ts"), "utf8");
 
   assert.match(css, /aromasense-stage-completion-double-flash 300ms linear both/);
   assert.match(css, /16\.667%[\s\S]*#effff3/);
@@ -85,6 +86,7 @@ test("newly completed workflow points use the requested 0.3 second two-flash tra
   assert.match(css, /100%[\s\S]*var\(--as-progress-completed\)/);
   assert.match(renderer, /progressStatusSnapshot/);
   assert.match(renderer, /is-completion-flash/);
+  assert.doesNotMatch(rail, /token\.dataset\.stageId/, "rail progress must not shadow workflow button selectors");
 });
 
 test("sensory conclusion visibly preserves missing values instead of fabricating zero", () => {

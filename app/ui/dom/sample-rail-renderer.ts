@@ -572,7 +572,6 @@ function buildStageProgress(item: SampleRailItemViewState, justCompletedStageKey
   for (const stage of item.stages) {
     const token = element("span", "sample-rail__stage-token");
     token.dataset.state = stage.indicatorState;
-    token.dataset.stageId = stage.stageId;
     token.title = `${stage.label}：${indicatorTitle(stage.indicatorState)}`;
     token.setAttribute("aria-label", `${stage.label}：${indicatorTitle(stage.indicatorState)}`);
     token.append(
