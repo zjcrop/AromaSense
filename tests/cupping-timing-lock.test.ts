@@ -78,6 +78,7 @@ test("elapsed timing is derived consistently from the persisted session start", 
 test("competition timing uses persisted wall clock, 30-minute cues, wake lock and interruption-safe lifecycle", () => {
   const flowSource = readFileSync("app/ui/dom/cupping-flow-enhancements.ts", "utf8");
   const screenSource = readFileSync("app/ui/dom/cupping-screen-renderer.ts", "utf8");
+  const controllerSource = readFileSync("app/ui/cupping-screen-controller.ts", "utf8");
   const latestUi = readFileSync("app/ui/dom/cupping-latest-ui-finalize.ts", "utf8");
 
   assert.match(screenSource, /data-cupping-timer/u);
@@ -89,7 +90,7 @@ test("competition timing uses persisted wall clock, 30-minute cues, wake lock an
   assert.match(flowSource, /document\.addEventListener\("visibilitychange"/u);
   assert.match(flowSource, /nav\.wakeLock/u);
   assert.match(flowSource, /比赛进行中，不可退出/u);
-  assert.match(flowSource, /competitionLockedAt/u);
+  assert.match(controllerSource, /competitionLockedAt: now/u);
   assert.match(latestUi, /aromasense-stage-completion-triple-flash 2100ms/);
 });
 
