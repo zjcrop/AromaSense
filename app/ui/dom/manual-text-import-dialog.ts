@@ -50,7 +50,7 @@ export function openManualTextImportDialog(options: ManualTextImportDialogOption
   );
 
   const hint = element("p", "manual-import__hint");
-  hint.textContent = "一行代表一只咖啡。可以逐行输入并点“下一行”，也可以一次粘贴多行；系统会实时显示已分出的行。完成录入后直接触发识别，不再增加单独的确认步骤。同一行内的国家、产区、品种、处理法、烘焙度、风味等仍由本地识别基座自动拆分。";
+  hint.textContent = "每个豆子一行，一行代表一只咖啡。可以逐行输入并点“下一行”，也可以一次粘贴多行；系统会实时显示已分出的行。完成录入后直接触发识别，不再增加单独的确认步骤。同一行内的国家、产区、品种、处理法、烘焙度、风味等仍由本地识别基座自动拆分。";
 
   const textarea = element("textarea", "manual-import__textarea");
   textarea.rows = 10;
