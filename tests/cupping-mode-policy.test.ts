@@ -7,37 +7,43 @@ import {
   normalizeCuppingMode
 } from "../app/core/session-metadata";
 
-test("new cupping sessions default to free and expose exactly four canonical modes", () => {
-  assert.deepEqual(CUPPING_MODES, ["free", "timed", "blind", "semi_blind"]);
-  assert.equal(defaultSessionMetadata("2026-09-06T12:00:00+08:00").cuppingMode, "free");
+test("new cupping sessions default to formal and expose the six canonical modes", () => {
+  assert.deepEqual(CUPPING_MODES, ["formal", "free", "competition", "blind", "semi_blind", "timed"]);
+  assert.equal(defaultSessionMetadata("2026-09-06T12:00:00+08:00").cuppingMode, "formal");
 });
 
 test("legacy open normalizes to timed instead of changing historical behavior", () => {
   assert.equal(normalizeCuppingMode("open"), "timed");
 });
 
-test("free disables timing and unlocks roster while timed locks public identity and roster", () => {
+test("formal and free remain editable non-competition sessions with distinct protocols", () => {
+  assert.deepEqual(cuppingModePolicy("formal"), {
+    timerEnabled: false,
+    runtimeRosterMutable: true,
+    runtimeIdentityEditable: true,
+    competition: false,
+    completionLocks: false,
+    protocol: "sca_cva"
+  });
   assert.deepEqual(cuppingModePolicy("free"), {
     timerEnabled: false,
     runtimeRosterMutable: true,
-    runtimeIdentityEditable: true
-  });
-  assert.deepEqual(cuppingModePolicy("timed"), {
-    timerEnabled: true,
-    runtimeRosterMutable: false,
-    runtimeIdentityEditable: false
+    runtimeIdentityEditable: true,
+    competition: false,
+    completionLocks: false,
+    protocol: "aromasense_custom"
   });
 });
 
-test("blind variants keep timing and late identity entry but not roster mutation", () => {
-  assert.deepEqual(cuppingModePolicy("blind"), {
-    timerEnabled: true,
-    runtimeRosterMutable: false,
-    runtimeIdentityEditable: true
-  });
-  assert.deepEqual(cuppingModePolicy("semi_blind"), {
-    timerEnabled: true,
-    runtimeRosterMutable: false,
-    runtimeIdentityEditable: true
-  });
+test("competition variants share timer and whole-session lock policy", () => {
+  for (const mode of ["competition", "timed", "blind", "semi_blind"] as const) {
+    assert.deepEqual(cuppingModePolicy(mode), {
+      timerEnabled: true,
+      runtimeRosterMutable: false,
+      runtimeIdentityEditable: false,
+      competition: true,
+      completionLocks: true,
+      protocol: "sca_cva"
+    });
+  }
 });
