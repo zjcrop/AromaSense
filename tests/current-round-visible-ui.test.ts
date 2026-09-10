@@ -63,6 +63,7 @@ test("aroma page stores dry fragrance and wet aroma as separate classified obser
   const dictionary = readFileSync(resolve(root, "app/core/sensory-dictionary-v1.ts"), "utf8");
   const completion = readFileSync(resolve(root, "app/core/completion-engine.ts"), "utf8");
   const renderer = readFileSync(resolve(root, "app/ui/dom/sensory-editor-renderer.ts"), "utf8");
+  const browserAcceptance = readFileSync(resolve(root, "scripts/current-round-ui-acceptance.mjs"), "utf8");
 
   assert.match(dictionary, /sensory-dictionary\/1\.3/);
   assert.match(dictionary, /key: "dry_fragrance_tags"/);
@@ -72,6 +73,10 @@ test("aroma page stores dry fragrance and wet aroma as separate classified obser
   assert.match(renderer, /湿香 · Aroma/);
   assert.match(renderer, /fieldKey !== "flavor_tags"/);
   assert.match(renderer, /stackList\.dataset\.fieldKey = fieldKey/);
+  assert.match(browserAcceptance, /setRangeByLabel\(cdp, "干香强度"/);
+  assert.match(browserAcceptance, /data-aroma-phase=\"dry\"/);
+  assert.match(browserAcceptance, /setRangeByLabel\(cdp, "湿香强度"/);
+  assert.match(browserAcceptance, /data-aroma-phase=\"wet\"/);
 });
 
 test("newly completed workflow points use the requested 0.3 second two-flash transition", () => {

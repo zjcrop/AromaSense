@@ -236,17 +236,26 @@ async function runAcceptance(appUrl) {
 
     await click(cdp, '[data-stage-id="aroma"]');
     await waitExpression(cdp, `Boolean(document.querySelector('.sensory-range__input'))`, "aroma editor");
-    await setRangeByLabel(cdp, "湿香强度", "7");
+    await setRangeByLabel(cdp, "干香强度", "6");
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-active')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma active state");
     const activeBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(activeBorder !== initial?.currentBorder, `Started state did not visibly change progress color: ${activeBorder}`);
 
-    const groupTitle = await cdp.evaluate(`document.querySelector('.flavor-group__title')?.getAttribute('aria-expanded')`);
-    if (groupTitle !== "true") {
-      await click(cdp, ".flavor-group__title");
-      await waitExpression(cdp, `Boolean(document.querySelector('.flavor-tag'))`, "expanded flavor group");
+    const dryGroupTitle = await cdp.evaluate(`document.querySelector('[data-aroma-phase="dry"] .flavor-group__title')?.getAttribute('aria-expanded')`);
+    if (dryGroupTitle !== "true") {
+      await click(cdp, '[data-aroma-phase="dry"] .flavor-group__title');
+      await waitExpression(cdp, `Boolean(document.querySelector('[data-aroma-phase="dry"] .flavor-tag'))`, "expanded dry fragrance group");
     }
-    await click(cdp, ".flavor-tag");
+    await click(cdp, '[data-aroma-phase="dry"] .flavor-tag');
+    await waitExpression(cdp, `document.querySelector('[data-aroma-phase="dry"] .selected-tag-stack__item') && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "dry fragrance tag persisted");
+
+    await setRangeByLabel(cdp, "湿香强度", "7");
+    const wetGroupTitle = await cdp.evaluate(`document.querySelector('[data-aroma-phase="wet"] .flavor-group__title')?.getAttribute('aria-expanded')`);
+    if (wetGroupTitle !== "true") {
+      await click(cdp, '[data-aroma-phase="wet"] .flavor-group__title');
+      await waitExpression(cdp, `Boolean(document.querySelector('[data-aroma-phase="wet"] .flavor-tag'))`, "expanded wet aroma group");
+    }
+    await click(cdp, '[data-aroma-phase="wet"] .flavor-tag');
     await waitExpression(cdp, `document.querySelector('[data-stage-id="aroma"]')?.classList.contains('is-completed')===true && document.querySelector('#app')?.getAttribute('aria-busy')!=='true'`, "aroma completed state");
     const completedBorder = await cdp.evaluate(`getComputedStyle(document.querySelector('[data-stage-id="aroma"]')).borderBottomColor`);
     requireCondition(completedBorder !== activeBorder, `Completed state did not visibly change progress color: ${completedBorder}`);
