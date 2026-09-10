@@ -45,6 +45,17 @@ function sourceButton(kind: SourceKind, title: string, note: string, onClick: ()
   return control;
 }
 
+function photoChoiceButton(title: string, note: string, onClick: () => void): HTMLButtonElement {
+  const control = element("button", "import-source__photo-choice");
+  control.type = "button";
+  control.append(
+    element("strong", "import-source__photo-choice-title", title),
+    element("small", "import-source__photo-choice-note", note)
+  );
+  control.addEventListener("click", onClick);
+  return control;
+}
+
 export function openImportSourceDialog(options: ImportSourceDialogOptions): { close(): void } {
   const overlay = element("div", "import-source");
   const panel = element("section", "import-source__panel");
@@ -69,13 +80,13 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
     sourceButton("qr", "二维码", "直接扫码或读取二维码图片", () => { close(); options.onQr(); })
   );
 
-  const photoForm = element("div", "import-source__link-form");
+  const photoForm = element("div", "import-source__link-form import-source__photo-form");
   photoForm.hidden = true;
   const photoTitle = element("div", "import-source__title", "选择图片来源");
-  const photoGrid = element("div", "import-source__grid");
+  const photoGrid = element("div", "import-source__photo-grid");
   photoGrid.append(
-    sourceButton("photo", "拍照", "调用设备相机拍摄", () => selectPhotoSource(true)),
-    sourceButton("photo", "上传图片", "从设备选择现有图片", () => selectPhotoSource(false))
+    photoChoiceButton("拍照", "调用设备相机拍摄", () => selectPhotoSource(true)),
+    photoChoiceButton("上传图片", "从设备选择现有图片", () => selectPhotoSource(false))
   );
   const photoBack = button("import-source__secondary", "返回", () => {
     photoForm.hidden = true;
