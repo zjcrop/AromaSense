@@ -5,8 +5,6 @@ import test from "node:test";
 import { STAGE_IDS } from "../shared/protocol/aromasense-v1";
 import { buildSampleRailViewState } from "../app/ui/cupping-view-model";
 
-// npm test executes compiled tests with the repository as cwd. Avoid import.meta
-// so this contract remains compatible with the project's existing module target.
 const root = process.cwd();
 
 const sample = {
@@ -59,7 +57,7 @@ test("product shell visibly exposes three-state progress and current-step comple
   assert.match(renderer, /stage\.stageId === activeStageId/);
 });
 
-test("aroma page stores dry fragrance and wet aroma as separate classified observations", () => {
+test("aroma page supports strict shared SCA CATA and source-classified free cupping", () => {
   const dictionary = readFileSync(resolve(root, "app/core/sensory-dictionary-v1.ts"), "utf8");
   const completion = readFileSync(resolve(root, "app/core/completion-engine.ts"), "utf8");
   const renderer = readFileSync(resolve(root, "app/ui/dom/sensory-editor-renderer.ts"), "utf8");
@@ -68,27 +66,39 @@ test("aroma page stores dry fragrance and wet aroma as separate classified obser
   assert.match(dictionary, /sensory-dictionary\/1\.3/);
   assert.match(dictionary, /key: "dry_fragrance_tags"/);
   assert.match(dictionary, /key: "wet_aroma_tags"/);
-  assert.match(completion, /classifiedCapture/);
+  assert.match(completion, /modernSharedCapture/);
   assert.match(renderer, /干香 · Fragrance/);
   assert.match(renderer, /湿香 · Aroma/);
-  assert.match(renderer, /fieldKey !== "flavor_tags"/);
-  assert.match(renderer, /stackList\.dataset\.fieldKey = fieldKey/);
+  assert.match(renderer, /Fragrance \/ Aroma 香气类别/);
+  assert.match(renderer, /SCA正式流程共用一套 CATA 香气类别/);
+  assert.match(renderer, /appMode === "free" \? "classified" : "shared"/);
   assert.match(browserAcceptance, /setRangeByLabel\(cdp, "干香强度"/);
-  assert.match(browserAcceptance, /data-aroma-phase=\"dry\"/);
+  assert.match(browserAcceptance, /data-aroma-phase=\"shared\"/);
   assert.match(browserAcceptance, /setRangeByLabel\(cdp, "湿香强度"/);
-  assert.match(browserAcceptance, /data-aroma-phase=\"wet\"/);
 });
 
-test("newly completed workflow points use the requested 0.3 second two-flash transition", () => {
-  const css = readFileSync(resolve(root, "app/ui/dom/aromasense-cupping.css"), "utf8");
+test("latest workflow nodes use numbered circles, arrow navigation and requested triple-flash timing", () => {
+  const latest = readFileSync(resolve(root, "app/ui/dom/cupping-latest-ui-finalize.ts"), "utf8");
   const renderer = readFileSync(resolve(root, "app/ui/dom/cupping-screen-renderer.ts"), "utf8");
   const rail = readFileSync(resolve(root, "app/ui/dom/sample-rail-renderer.ts"), "utf8");
+  const entry = readFileSync(resolve(root, "app/runtime/web-entry.ts"), "utf8");
 
-  assert.match(css, /aromasense-stage-completion-double-flash 300ms linear both/);
-  assert.match(css, /16\.667%[\s\S]*#effff3/);
-  assert.match(css, /50%[\s\S]*#effff3/);
-  assert.match(css, /66\.667%[\s\S]*#9ed8aa/);
-  assert.match(css, /100%[\s\S]*var\(--as-progress-completed\)/);
+  assert.match(entry, /cupping-flow-enhancements/);
+  assert.match(entry, /cupping-latest-ui-finalize/);
+  assert.ok(entry.indexOf("cupping-flow-enhancements") < entry.indexOf("cupping-latest-ui-finalize"));
+  assert.match(latest, /cupping-stage-step__index/);
+  assert.match(latest, /badge\.textContent = String\(index \+ 1\)/);
+  assert.match(latest, /\.cupping-stage-step\.is-current \.cupping-stage-step__index/);
+  assert.match(latest, /previous\.textContent = "←"/);
+  assert.match(latest, /next\.textContent = "→"/);
+  assert.match(latest, /gap:10px!important/);
+  assert.match(latest, /translateY\(-0\.5px\)!important/);
+  assert.match(latest, /aromasense-stage-completion-triple-flash 2100ms linear both!important/);
+  assert.match(latest, /Three 0\.5 s flashes separated by two 0\.3 s quiet intervals/);
+  assert.match(latest, /11\.905%[\s\S]*#effff3/);
+  assert.match(latest, /50%[\s\S]*#effff3/);
+  assert.match(latest, /88\.095%[\s\S]*#effff3/);
+  assert.match(latest, /100%[\s\S]*var\(--as-progress-completed\)/);
   assert.match(renderer, /progressStatusSnapshot/);
   assert.match(renderer, /is-completion-flash/);
   assert.doesNotMatch(rail, /token\.dataset\.stageId/, "rail progress must not shadow workflow button selectors");
