@@ -267,6 +267,9 @@ async function runAcceptance(appUrl) {
     await click(cdp, ".cupping-count-dialog__confirm");
 
     await waitForExpression(cdp, `document.querySelector('#app')?.dataset.screen === 'cupping'`, "new cupping session");
+    await waitForExpression(cdp, `Boolean(document.querySelector('.competition-preflight__start'))`, "blind competition preflight");
+    await click(cdp, ".competition-preflight__start");
+    await waitForExpression(cdp, `Boolean(document.querySelector('[data-stage-id="aroma"]')) && !document.querySelector('.competition-preflight__start')`, "started blind competition");
     await click(cdp, ".sample-rail__select");
     await waitForExpression(cdp, `Boolean(document.querySelector('.sensory-range__input'))`, "first sensory stage editor");
 
