@@ -28,21 +28,34 @@ function meaningful(value: unknown): boolean {
 }
 
 export function completionForStage(stageId: StageId, observations: readonly SensoryObservation[]): CompletionResult {
-  const values = new Map(observations.filter((item) => meaningful(item.value)).map((item) => [item.fieldKey, item.value] as const));
+  const meaningfulObservations = observations.filter((item) => meaningful(item.value));
+  const values = new Map(meaningfulObservations.map((item) => [item.fieldKey, item.value] as const));
   if (stageId === "aroma") {
-    // Free cupping records explicit dry/wet descriptor sources. Strict SCA CVA
-    // uses the legacy-neutral `flavor_tags` slot as one shared Fragrance/Aroma
-    // CATA list while retaining separate dry and wet intensity observations.
+    // New free-cupping records may keep dry/wet descriptors separately. Formal
+    // SCA CVA uses one shared Fragrance/Aroma CATA list while preserving the two
+    // intensity observations. Old records remain readable without migration.
     const classifiedCapture = values.has("dry_fragrance_tags") || values.has("wet_aroma_tags");
+    const modernSharedCapture = !classifiedCapture && meaningfulObservations.some((item) =>
+      item.dictionaryVersion === "sensory-dictionary/1.3"
+      && ["dry_fragrance_intensity", "wet_aroma_intensity"].includes(item.fieldKey)
+    );
     const required = classifiedCapture
       ? ["dry_fragrance_intensity", "dry_fragrance_tags", "wet_aroma_intensity", "wet_aroma_tags"] as const
-      : ["dry_fragrance_intensity", "wet_aroma_intensity", "flavor_tags"] as const;
-    const missing = required.filter((key) => !values.has(key));
+      : modernSharedCapture
+        ? ["dry_fragrance_intensity", "wet_aroma_intensity", "flavor_tags"] as const
+        : ["wet_aroma_intensity", "flavor_tags"] as const;
+    const missing = required.filter((key) => key === "wet_aroma_tags"
+      ? !values.has("wet_aroma_tags") && !values.has("flavor_tags")
+      : !values.has(key));
     return { complete: missing.length === 0, observed: required.length - missing.length, required: required.length, missing };
   }
   if (stageId === "final") {
-    // Legacy final pages are now derived from their flavor/overall/score sub-phase state.
-    // No `final_score_confirmed` observation is required.
+    // Runtime completion now derives from flavor/overall/score sub-phases and
+    // never writes final_score_confirmed. Keep historical confirmed records
+    // complete so existing sessions are not silently downgraded after upgrade.
+    if (values.get("final_score_confirmed") === true) {
+      return { complete: true, observed: 1, required: 1, missing: [] };
+    }
     return { complete: false, observed: 0, required: 0, missing: [] };
   }
   const required = REQUIRED_FIELDS[stageId] ?? [];
