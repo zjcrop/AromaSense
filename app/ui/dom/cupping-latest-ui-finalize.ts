@@ -48,8 +48,8 @@ function installStyles(): void {
       font-variant-numeric:tabular-nums!important;
     }
     .cupping-stage-step.is-current .cupping-stage-step__index{
-      border-color:var(--as-gold)!important;
-      background:var(--as-gold)!important;
+      border-color:var(--as-gold,#d6ad63)!important;
+      background:var(--as-gold,#d6ad63)!important;
       color:#111!important;
       box-shadow:0 0 0 1px rgba(185,153,90,.18)!important;
     }
