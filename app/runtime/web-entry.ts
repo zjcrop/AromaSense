@@ -19,6 +19,7 @@ import "../ui/dom/cupping-flow-enhancements";
 import "../ui/dom/cupping-latest-ui-finalize";
 import "../ui/dom/cupping-input-ux-upgrade";
 import "../ui/dom/cupping-final-ux-20260910";
+import "../ui/dom/cupping-aroma-single-axis-score";
 import { AromaSenseDomApp } from "./dom-app";
 import "./recognition-session-lifecycle";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
