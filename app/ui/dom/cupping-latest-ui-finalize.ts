@@ -20,9 +20,28 @@ function installStyles(): void {
       gap:10px!important;
     }
     .cupping-stage-step{
+      position:static!important;
       min-height:78px!important;
       grid-template-rows:auto minmax(0,1fr) auto!important;
       gap:5px!important;
+    }
+    .cupping-stage-step.is-current::after{
+      content:attr(title);
+      position:absolute;
+      left:4px;
+      right:4px;
+      bottom:4px;
+      height:auto;
+      min-height:22px;
+      border-radius:0;
+      background:transparent;
+      color:#8f9397;
+      font-size:10px;
+      font-weight:500;
+      line-height:1.25;
+      text-align:left;
+      white-space:normal;
+      pointer-events:none;
     }
     .cupping-stage-step__status-dot{
       grid-row:1!important;
@@ -80,6 +99,12 @@ function installStyles(): void {
       76.19%{transform:scale(1);background-color:#9ed8aa;filter:none}
       88.095%{transform:scale(1.5);background-color:#effff3;filter:brightness(1.55)}
       100%{transform:scale(1);background-color:var(--as-progress-completed);filter:none}
+    }
+    @media(max-width:720px){
+      .cupping-stage-step.is-current::after{
+        font-size:9px;
+        line-height:1.3;
+      }
     }
     @media(prefers-reduced-motion:reduce){
       .cupping-stage-step__status-dot.is-completion-flash,
