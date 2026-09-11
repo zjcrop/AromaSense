@@ -67,6 +67,25 @@ export class LocalCuppingRepository extends BaseLocalCuppingRepository {
     });
   }
 
+  async deleteSessionWithSyncTombstone(sessionId: string, now: string): Promise<void> {
+    const syncTable = await this.rosterDb.get<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'record_sync_state'`
+    );
+    if (!syncTable) {
+      await super.deleteSession(sessionId);
+      return;
+    }
+    await this.rosterDb.transaction(async () => {
+      await this.rosterDb.run(
+        `INSERT INTO record_sync_state (record_id, last_pushed_at, deleted_at, updated_at)
+         VALUES (?, NULL, ?, ?) ON CONFLICT(record_id) DO UPDATE SET
+         last_pushed_at = NULL, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
+        [sessionId, now, now]
+      );
+      await this.rosterDb.run(`DELETE FROM sessions WHERE session_id = ?`, [sessionId]);
+    });
+  }
+
   async resetSessionForRetest(sessionId: string, now: string): Promise<void> {
     const session = await this.getSession(sessionId);
     const completedMilestone = Boolean(session.metadata.completedEditableAt);
