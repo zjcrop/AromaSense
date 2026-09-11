@@ -1,3 +1,5 @@
+import { handleRecordSyncRoute } from "./sync-record-routes";
+
 export interface YingxiangHostUser {
   userId: string;
   email: string;
@@ -85,6 +87,22 @@ async function issueToken(db: D1Database, accountId: string): Promise<{ token: s
       .bind(tokenHash, accountId, expiresAt, now)
   ]);
   return { token, expiresAt };
+}
+
+async function authenticateAromaSenseSyncUser(request: Request, db: D1Database): Promise<{ userId: string } | null> {
+  const header = request.headers.get("authorization");
+  if (!header?.startsWith("Bearer ")) return null;
+  const token = header.slice(7).trim();
+  if (!/^[a-f0-9]{64}$/iu.test(token)) return null;
+  const tokenHash = await sha256Hex(token);
+  const now = new Date().toISOString();
+  const row = await db.prepare(`
+    SELECT u.user_id
+    FROM auth_tokens t
+    JOIN users u ON u.user_id = t.user_id
+    WHERE t.token_hash = ?1 AND t.expires_at > ?2 AND u.email_verified_at IS NOT NULL
+  `).bind(tokenHash, now).first<{ user_id: string }>();
+  return row ? { userId: row.user_id } : null;
 }
 
 export async function authenticateYingxiangHost(request: Request, db: D1Database): Promise<YingxiangHostUser | null> {
@@ -224,6 +242,11 @@ async function logout(request: Request, db: D1Database): Promise<Response> {
 }
 
 export async function handleYingxiangHostAuthRoute(request: Request, url: URL, db: D1Database): Promise<Response | undefined> {
+  if (url.pathname === "/api/v1/records" || url.pathname === "/api/v1/records/index" || url.pathname.startsWith("/api/v1/records/")) {
+    const user = await authenticateAromaSenseSyncUser(request, db);
+    if (!user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
+    return await handleRecordSyncRoute(request, url, db, user) ?? json({ ok: false, error: "NOT_FOUND" }, 404);
+  }
   if (!url.pathname.startsWith("/api/v1/yingxiang/host/")) return undefined;
   if (url.pathname === "/api/v1/yingxiang/host/register" && request.method === "POST") return register(request, db);
   if (url.pathname === "/api/v1/yingxiang/host/login" && request.method === "POST") return login(request, db);
