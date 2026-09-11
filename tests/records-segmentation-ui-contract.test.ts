@@ -20,13 +20,16 @@ test("home records modal uses the shared Stage 1 scrim and paints loading state 
   assert.match(app, /new SessionRecordsReader\(this\.db\)\.list\(300\)/u);
 });
 
-test("record summary query preaggregates tables and only uses final scoring completion", () => {
+test("record summary query preaggregates tables, uses final scoring completion and whole-record cloud status", () => {
   const records = source("app/storage/session-records-reader.ts");
   assert.match(records, /WITH[\s\S]*sample_stats AS/u);
   assert.match(records, /completion_stats AS/u);
   assert.match(records, /observation_stats AS/u);
-  assert.match(records, /revision_stats AS/u);
+  assert.match(records, /local_versions AS/u);
+  assert.match(records, /record_sync_state/u);
+  assert.match(records, /record_sync_failures/u);
   assert.match(records, /stage_id IN \('scoring', 'final'\)/u);
+  assert.doesNotMatch(records, /revision_stats AS/u);
   assert.doesNotMatch(records, /flow\.stage_id IN \('aroma'/u);
 });
 

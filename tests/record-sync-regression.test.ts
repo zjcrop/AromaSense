@@ -12,12 +12,14 @@ import { NodeSQLiteDriver } from "../app/storage/node-sqlite-driver";
 
 const schema = readFileSync("app/storage/0001_local_schema.sql", "utf8");
 const syncSchema = readFileSync("app/storage/0008_record_sync.sql", "utf8");
+const syncStatusSchema = readFileSync("app/storage/0009_record_sync_status.sql", "utf8");
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "aromasense-record-sync-"));
   const db = NodeSQLiteDriver.open(join(dir, "sync.sqlite"));
   db.exec(schema);
   db.exec(syncSchema);
+  db.exec(syncStatusSchema);
   const repository = new LocalCuppingRepository(db);
   return { dir, db, repository };
 }
@@ -76,11 +78,64 @@ test("record sync uploads each changed session independently", async () => {
 
     const result = await new RecordSyncService(f.db, "https://sync.example", async () => "token", () => updatedAt).sync();
     assert.equal(result.pushed, 1);
+    assert.equal(result.failed, 0);
     const put = requests.find((item) => item.method === "PUT");
     assert.ok(put);
     assert.equal(put.body?.recordId, session.sessionId);
     assert.equal(put.body?.updatedAt, updatedAt);
     assert.equal((put.body?.payload as { session?: { sessionId?: string } })?.session?.sessionId, session.sessionId);
+    const state = await f.db.get<{ last_pushed_at: string }>("SELECT last_pushed_at FROM record_sync_state WHERE record_id = ?", [session.sessionId]);
+    assert.equal(state?.last_pushed_at, updatedAt);
+  } finally {
+    globalThis.fetch = previousFetch;
+    f.db.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("one failed record does not block later local records and persists only that failure", async () => {
+  const f = fixture();
+  const previousFetch = globalThis.fetch;
+  try {
+    const updatedAt = "2026-09-11T03:30:00.000Z";
+    for (const sessionId of ["a-fails", "b-succeeds"]) {
+      const session = createSession({ sessionId, now: updatedAt });
+      const samples = buildSampleBatch(session.sessionId, [{ label: sessionId }], updatedAt, () => `${sessionId}-sample`);
+      await f.repository.createSessionWithSamples(session, samples);
+    }
+
+    const putIds: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const method = init?.method ?? "GET";
+      if (method === "PUT") {
+        const body = JSON.parse(String(init?.body)) as { recordId: string; updatedAt: string };
+        putIds.push(body.recordId);
+        if (body.recordId === "a-fails") {
+          return new Response(JSON.stringify({ ok: false, error: "UPSTREAM_UNAVAILABLE" }), {
+            status: 503, headers: { "content-type": "application/json" }
+          });
+        }
+        return new Response(JSON.stringify({
+          ok: true, applied: true, recordId: body.recordId,
+          updatedAt: body.updatedAt, serverChangedAt: "2026-09-11T03:30:01.000Z"
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ ok: true, records: [], nextCursor: 0, hasMore: false }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+
+    await assert.rejects(
+      () => new RecordSyncService(f.db, "https://sync.example", async () => "token", () => updatedAt).sync(),
+      /RECORD_SYNC_HTTP_503/
+    );
+    assert.deepEqual(putIds, ["a-fails", "b-succeeds"]);
+    const failed = await f.db.get<{ error_message: string }>("SELECT error_message FROM record_sync_failures WHERE record_id = ?", ["a-fails"]);
+    const succeededFailure = await f.db.get<{ count: number }>("SELECT COUNT(*) AS count FROM record_sync_failures WHERE record_id = ?", ["b-succeeds"]);
+    const succeededState = await f.db.get<{ last_pushed_at: string }>("SELECT last_pushed_at FROM record_sync_state WHERE record_id = ?", ["b-succeeds"]);
+    assert.match(failed?.error_message ?? "", /RECORD_SYNC_HTTP_503/);
+    assert.equal(succeededFailure?.count, 0);
+    assert.equal(succeededState?.last_pushed_at, updatedAt);
   } finally {
     globalThis.fetch = previousFetch;
     f.db.close();

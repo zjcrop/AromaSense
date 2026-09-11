@@ -19,6 +19,7 @@ export interface SessionRecordSummary {
   completionPct: number;
   completenessPct: number;
   syncState: RecordSyncState;
+  syncError?: string;
 }
 
 interface RecordRow {
@@ -28,17 +29,24 @@ interface RecordRow {
   status: SessionStatus;
   created_at: string;
   updated_at: string;
+  local_updated_at: string | null;
   sample_count: number;
   completed_samples: number;
   observation_count: number;
-  revision_count: number;
-  synced_count: number;
-  failed_count: number;
-  pending_count: number;
+  last_pushed_at: string | null;
+  deleted_at: string | null;
+  failure_error: string | null;
+  failed_at: string | null;
 }
 
 const FINAL_EXTRA_FIELD_COUNT = 6 + 8 + 3 + 1 + 1 + 1;
 const EXPECTED_FIELDS_PER_SAMPLE = STAGE_IDS.reduce((sum, stage) => sum + fieldsForStage(stage).length, 0) + FINAL_EXTRA_FIELD_COUNT;
+
+function timestampValue(value?: string | null): number {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
 
 function legacyMetadata(createdAt: string): CuppingSessionMetadata {
   const date = new Date(createdAt);
@@ -77,31 +85,33 @@ export class SessionRecordsReader {
         FROM observations
         GROUP BY session_id
       ),
-      revision_stats AS (
-        SELECT
-          r.session_id,
-          COUNT(DISTINCT r.revision_id) AS revision_count,
-          COUNT(DISTINCT CASE WHEN q.status = 'synced' THEN r.revision_id END) AS synced_count,
-          COUNT(DISTINCT CASE WHEN q.status IN ('failed','conflict') THEN r.revision_id END) AS failed_count,
-          COUNT(DISTINCT CASE WHEN q.status IN ('pending','uploading') THEN r.revision_id END) AS pending_count
-        FROM revisions r
-        LEFT JOIN sync_queue q ON q.revision_id = r.revision_id
-        GROUP BY r.session_id
+      local_versions AS (
+        SELECT session_id, MAX(updated_at) AS local_updated_at
+        FROM (
+          SELECT session_id, updated_at FROM sessions
+          UNION ALL SELECT session_id, updated_at FROM samples
+          UNION ALL SELECT session_id, updated_at FROM stage_state
+          UNION ALL SELECT session_id, updated_at FROM observations
+        )
+        GROUP BY session_id
       )
       SELECT
         s.session_id, s.title, s.metadata_json, s.status, s.created_at, s.updated_at,
+        versions.local_updated_at,
         COALESCE(samples.sample_count, 0) AS sample_count,
         COALESCE(completed.completed_samples, 0) AS completed_samples,
         COALESCE(observations.observation_count, 0) AS observation_count,
-        COALESCE(revisions.revision_count, 0) AS revision_count,
-        COALESCE(revisions.synced_count, 0) AS synced_count,
-        COALESCE(revisions.failed_count, 0) AS failed_count,
-        COALESCE(revisions.pending_count, 0) AS pending_count
+        sync.last_pushed_at,
+        sync.deleted_at,
+        failure.error_message AS failure_error,
+        failure.failed_at
       FROM sessions s
       LEFT JOIN sample_stats samples ON samples.session_id = s.session_id
       LEFT JOIN completion_stats completed ON completed.session_id = s.session_id
       LEFT JOIN observation_stats observations ON observations.session_id = s.session_id
-      LEFT JOIN revision_stats revisions ON revisions.session_id = s.session_id
+      LEFT JOIN local_versions versions ON versions.session_id = s.session_id
+      LEFT JOIN record_sync_state sync ON sync.record_id = s.session_id
+      LEFT JOIN record_sync_failures failure ON failure.record_id = s.session_id
       ORDER BY s.updated_at DESC
       LIMIT ?`, [safeLimit]);
 
@@ -111,11 +121,12 @@ export class SessionRecordsReader {
       const observationCount = Number(row.observation_count) || 0;
       const expected = Math.max(1, sampleCount * EXPECTED_FIELDS_PER_SAMPLE);
       const metadata = metadataFromRow(row);
-      const failed = Number(row.failed_count) || 0;
-      const pending = Number(row.pending_count) || 0;
-      const revisions = Number(row.revision_count) || 0;
-      const synced = Number(row.synced_count) || 0;
-      const syncState: RecordSyncState = failed > 0 ? "failed" : pending > 0 || revisions === 0 ? "pending" : synced >= revisions ? "synced" : "pending";
+      const localVersion = row.local_updated_at ?? row.updated_at;
+      const syncState: RecordSyncState = row.failed_at
+        ? "failed"
+        : !row.deleted_at && timestampValue(row.last_pushed_at) >= timestampValue(localVersion)
+          ? "synced"
+          : "pending";
       return {
         sessionId: row.session_id,
         title: row.title ?? undefined,
@@ -128,7 +139,8 @@ export class SessionRecordsReader {
         completedSamples,
         completionPct: sampleCount ? Math.round(completedSamples / sampleCount * 100) : 0,
         completenessPct: Math.min(100, Math.round(observationCount / expected * 100)),
-        syncState
+        syncState,
+        syncError: row.failure_error ?? undefined
       };
     });
   }
