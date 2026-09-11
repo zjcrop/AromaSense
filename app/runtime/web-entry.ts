@@ -14,6 +14,7 @@ import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-
 import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
+import { installCloudRecordDownloadFeature } from "../ui/dom/cloud-records-renderer";
 import "../ui/dom/manual-split-photo-mode";
 import "../ui/dom/home-action-enhancements";
 import "../ui/dom/batch-intake-picker-layout-fix";
@@ -101,6 +102,10 @@ async function main(): Promise<void> {
     catch (error) { console.warn("AromaSense record sync deferred", error); }
   };
   if (recordSync) {
+    installCloudRecordDownloadFeature({
+      service: recordSync,
+      onDownloaded: async () => { await app?.showRecords(); }
+    });
     const legacySyncPending = app.syncPending.bind(app);
     app.syncPending = async (sessionIds?: readonly string[]) => {
       await runRecordSync();
