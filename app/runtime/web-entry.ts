@@ -8,6 +8,7 @@ import sessionTimingMigration from "../storage/0005_session_timing.sql";
 import yingxiangCollectionMigration from "../storage/0007_yingxiang_collection.sql";
 import yingxiangEventMigration from "../storage/0006_yingxiang_event_context.sql";
 import recordSyncMigration from "../storage/0008_record_sync.sql";
+import recordSyncStatusMigration from "../storage/0009_record_sync_status.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
@@ -73,7 +74,8 @@ async function main(): Promise<void> {
       { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration },
       { id: 6, name: "yingxiang_event_context_0_1", sql: yingxiangEventMigration },
       { id: 7, name: "yingxiang_collection_0_1", sql: yingxiangCollectionMigration },
-      { id: 8, name: "record_sync_0_2", sql: recordSyncMigration }
+      { id: 8, name: "record_sync_0_2", sql: recordSyncMigration },
+      { id: 9, name: "record_sync_status_0_2", sql: recordSyncStatusMigration }
     ],
     new Date().toISOString()
   );
