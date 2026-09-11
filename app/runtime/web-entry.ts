@@ -32,6 +32,7 @@ import "../ui/dom/cupping-cup-selection-hotfix";
 import "../ui/dom/source-choice-layout-hotfix";
 import { AromaSenseDomApp } from "./dom-app";
 import "./recognition-session-lifecycle";
+import "./record-sync-fetch-timeout";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
 
 async function openRuntimeDatabase(): Promise<SQLiteScriptDriver> {
