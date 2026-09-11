@@ -15,6 +15,7 @@ import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import { installCloudRecordDownloadFeature } from "../ui/dom/cloud-records-renderer";
+import "../ui/dom/cloud-records-form-alignment";
 import "../ui/dom/manual-split-photo-mode";
 import "../ui/dom/home-action-enhancements";
 import "../ui/dom/batch-intake-picker-layout-fix";
