@@ -2,6 +2,41 @@
  * This module mirrors the existing account form metrics so the cloud library
  * remains visually consistent with the established form system.
  */
+
+const RECORD_SYNC_TIMEOUT_MS = 8_000;
+const runtimeWindow = window as Window & { __aromasenseRecordFetchGuardInstalled?: boolean };
+
+if (!runtimeWindow.__aromasenseRecordFetchGuardInstalled) {
+  runtimeWindow.__aromasenseRecordFetchGuardInstalled = true;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    let isRecordSyncRequest = false;
+    try { isRecordSyncRequest = new URL(href, window.location.href).pathname.startsWith("/api/v1/records"); }
+    catch { isRecordSyncRequest = false; }
+    if (!isRecordSyncRequest) return nativeFetch(input, init);
+
+    const controller = new AbortController();
+    const sourceSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    const abortFromSource = () => controller.abort(sourceSignal?.reason);
+    if (sourceSignal?.aborted) abortFromSource();
+    else sourceSignal?.addEventListener("abort", abortFromSource, { once: true });
+    const timer = window.setTimeout(() => controller.abort("RECORD_SYNC_TIMEOUT"), RECORD_SYNC_TIMEOUT_MS);
+
+    try {
+      return await nativeFetch(input, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted && !sourceSignal?.aborted) {
+        throw new Error("云端记录请求超时，请检查网络后重试");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+      sourceSignal?.removeEventListener("abort", abortFromSource);
+    }
+  };
+}
+
 const style = document.createElement("style");
 style.dataset.aromasenseCloudFormAlignment = "true";
 style.textContent = `
