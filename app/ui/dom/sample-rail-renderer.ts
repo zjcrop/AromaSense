@@ -445,7 +445,9 @@ function captureGeometry(root: HTMLElement): Map<string, RailGeometry> {
 function cancelRailAnimations(root: HTMLElement): void {
   for (const card of directCards(root)) {
     card.getAnimations().forEach((animation) => animation.cancel());
-    card.querySelector<HTMLElement>(".sample-rail__number")?.getAnimations().forEach((animation) => animation.cancel());
+    card.querySelector<HTMLElement>(".sample-rail__number")?.getAnimations().forEach((animation) => {
+      if (animation.id !== "aromasense-active-label-reveal") animation.cancel();
+    });
     card.querySelector<HTMLElement>(".sample-rail__active-copy")?.getAnimations().forEach((animation) => animation.cancel());
   }
   activeTabStates.get(root)?.tab.getAnimations().forEach((animation) => animation.cancel());

@@ -64,9 +64,53 @@ const geometryExpression = (displayNumber) => `(()=>{
 })()`;
 
 async function selectDisplayNumber(cdp, displayNumber) {
-  const ok=await cdp.evaluate(`(()=>{const card=[...document.querySelectorAll('.sample-rail__item')].find(n=>Number(n.dataset.displayNumber)===${displayNumber});const button=card?.querySelector('.sample-rail__select');if(!(button instanceof HTMLElement))return false;button.click();return true;})()`);
-  requireCondition(ok===true,`Unable to select sample ${displayNumber}`);
-  await waitExpression(cdp,`document.querySelector('.sample-rail__item.is-active')?.dataset.displayNumber==='${displayNumber}'`,`sample ${displayNumber} activation`);
+  const frames=await cdp.evaluate(`new Promise((resolve,reject)=>{
+    const card=[...document.querySelectorAll('.sample-rail__item')].find(n=>Number(n.dataset.displayNumber)===${displayNumber});
+    const button=card?.querySelector('.sample-rail__select');
+    if(!(button instanceof HTMLElement)){reject(new Error('Missing sample ${displayNumber}'));return;}
+    const frames=[],started=performance.now();
+    button.click();
+    const capture=()=>{
+      const active=document.querySelector('.sample-rail__item.is-active');
+      const marker=document.querySelector('.cupping-rail-active-float');
+      const number=active?.querySelector('.sample-rail__number');
+      const list=document.querySelector('.cupping-layout__rail-list');
+      if(active?.dataset.displayNumber==='${displayNumber}'&&marker&&number&&list){
+        const ms=getComputedStyle(marker),ns=getComputedStyle(number);
+        const mr=marker.getBoundingClientRect(),nr=number.getBoundingClientRect(),cr=active.getBoundingClientRect();
+        const mt=new DOMMatrixReadOnly(ms.transform),nt=new DOMMatrixReadOnly(ns.transform);
+        const entryStart=node=>{
+          const first=node.getAnimations().flatMap(animation=>animation.effect?.getKeyframes()??[]).find(frame=>frame.transform&&Number(frame.opacity)===0);
+          return first?new DOMMatrixReadOnly(first.transform).m41:null;
+        };
+        frames.push({opacity:Number(ms.opacity),numberOpacity:Number(ns.opacity),visible:ms.visibility==='visible',
+          x:mt.m41,y:mt.m42,numberX:nt.m41,numberY:nt.m42,top:mr.top,numberTop:nr.top,scrollTop:list.scrollTop,
+          markerRight:mr.right,numberRight:nr.right,rowError:Math.abs(mr.top+mr.height/2-cr.top-cr.height/2),
+          markerStartX:entryStart(marker),numberStartX:entryStart(number),
+          numberColor:ns.color,numberWeight:Number(ns.fontWeight),transition:ms.transitionProperty});
+      }
+      if(performance.now()-started<1600)requestAnimationFrame(capture);else resolve(frames);
+    };
+    requestAnimationFrame(capture);
+  })`);
+  requireCondition(frames.length>5,`Sample ${displayNumber} did not activate`);
+  requireCondition(frames.some(f=>f.opacity===0&&f.numberOpacity===0),`Sample ${displayNumber} appeared before settling`);
+  // rAF sampling can run just before entry is created, then observe its next
+  // nonzero frame. Read the actual browser effect's initial transform as well.
+  requireCondition(frames.some(f=>f.markerStartX!==null&&f.numberStartX!==null&&f.markerRight-f.x+f.markerStartX<=0&&f.numberRight-f.numberX+f.numberStartX<=0),`Sample ${displayNumber} did not start outside the left viewport`);
+  const entering=frames.filter(f=>f.visible&&f.opacity>.01&&f.opacity<.99);
+  const last=frames.at(-1);
+  requireCondition(entering.length>=3,`Sample ${displayNumber} has no visible fade-in: ${JSON.stringify(frames)}`);
+  requireCondition(entering.every(f=>f.x<0&&Math.abs(f.x-f.numberX)<.5&&f.y===0&&Math.abs(f.numberY-last.numberY)<.01),`Marker and number did not move horizontally together: ${JSON.stringify(entering)}`);
+  requireCondition(entering.every(f=>Math.abs(f.opacity-f.numberOpacity)<.01),`Number faded separately from the marker: ${JSON.stringify(entering)}`);
+  requireCondition(entering.every(f=>f.rowError<=1&&f.transition==='none'),`Visible marker travelled between rows: ${JSON.stringify(entering)}`);
+  for(const key of ['top','numberTop','scrollTop']){
+    requireCondition(Math.max(...entering.map(f=>f[key]))-Math.min(...entering.map(f=>f[key]))<=1,`Sample ${displayNumber} moved vertically during reveal (${key})`);
+    requireCondition(Math.abs(entering[0][key]-last[key])<=1,`Sample ${displayNumber} jumped at the end of reveal (${key})`);
+  }
+  requireCondition(last.visible&&last.opacity===1&&last.numberOpacity===1&&last.x===0&&last.numberX===0,`Sample ${displayNumber} did not finish revealing: ${JSON.stringify(last)}`);
+  requireCondition(last.numberColor==='rgb(255, 255, 255)'&&last.numberWeight>=800,`Active number is not white and bold: ${JSON.stringify(last)}`);
+  console.log(`Sample ${displayNumber} horizontal marker + number reveal: PASS`,JSON.stringify({frames:frames.length,enteringFrames:entering.length,final:last}));
 }
 
 async function run(appUrl){
