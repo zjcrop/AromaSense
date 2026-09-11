@@ -105,7 +105,7 @@ jobs:
           const config = {
             $schema: 'node_modules/wrangler/config-schema.json',
             name: 'aromasense-api',
-            main: './src/index.ts',
+            main: './src/worker-entry.ts',
             compatibility_date: '2026-08-24',
             workers_dev: true,
             observability: { enabled: true },
