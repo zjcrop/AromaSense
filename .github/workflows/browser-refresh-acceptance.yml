@@ -10,6 +10,22 @@ permissions:
   contents: read
 
 jobs:
+  rail-activation:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build browser application
+        run: npm run bundle:web
+      - name: Verify active sample centers and reveals horizontally
+        run: node scripts/active-sample-centering-acceptance.mjs
+
   browser-refresh:
     runs-on: ubuntu-latest
     steps:
@@ -38,10 +54,6 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build browser application
         run: npm run bundle:web
-      - name: Verify active sample centers and clamps in rail
-        env:
-          AROMASENSE_ACCEPTANCE_DEBUG: '1'
-        run: node scripts/active-sample-centering-acceptance.mjs
       - name: Record Stage 0 six-phase recognition baseline
         shell: bash
         run: |
