@@ -50,7 +50,7 @@ async function authenticateRecordSync(request: Request, db: D1Database): Promise
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const recordRoute = url.pathname === "/api/v1/records" || url.pathname.startsWith("/api/v1/records/");
     if (recordRoute && request.method === "OPTIONS") return new Response(null, {
@@ -68,6 +68,6 @@ export default {
       const response = await handleRecordSyncRoute(request, url, env.DB, user);
       if (response) return response;
     }
-    return baseWorker.fetch(request, env, ctx);
+    return baseWorker.fetch(request, env);
   }
 } satisfies ExportedHandler<Env>;
