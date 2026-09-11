@@ -44,12 +44,6 @@ function installModeSelectStyles(): void {
   document.head.append(style);
 }
 
-/**
- * Thin compatibility layer over the existing home renderer. The old home UI is
- * preserved intact; only its direct mode buttons are replaced by one canonical
- * selector. Formal SCA is the new default, while free cupping explicitly enters
- * AromaSense's richer custom capture route.
- */
 export class BatchSetupRenderer {
   private readonly home: HomeBatchSetupRenderer;
   private modeObserver?: MutationObserver;
@@ -70,10 +64,32 @@ export class BatchSetupRenderer {
     this.modeObserver = undefined;
     await this.home.render();
     this.installCuppingTypeSelect();
+    this.installOptionalOrganizerDefault();
   }
 
   private modeHost(): BaseModeHost {
     return (this.home as unknown as HomeRendererInternals).base;
+  }
+
+  private installOptionalOrganizerDefault(): void {
+    const field = this.root.querySelector<HTMLElement>('[data-session-field="组织方"]');
+    const input = field?.querySelector<HTMLInputElement>(".batch-setup__session-meta-input");
+    const start = this.root.querySelector<HTMLButtonElement>(".batch-setup__start");
+    if (!input) return;
+    input.required = false;
+    input.removeAttribute("aria-required");
+    input.placeholder = "组织方（不填默认为自己）";
+    input.title = "组织方（可选；不填默认为自己）";
+    const applyDefault = (): void => {
+      if (!input.value.trim()) input.value = "自己";
+    };
+    if (start && start.dataset.organizerDefaultGuard !== "true") {
+      start.dataset.organizerDefaultGuard = "true";
+      start.addEventListener("click", applyDefault, { capture: true });
+      start.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") applyDefault();
+      }, { capture: true });
+    }
   }
 
   private installCuppingTypeSelect(): void {

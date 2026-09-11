@@ -45,13 +45,10 @@ function sourceButton(kind: SourceKind, title: string, note: string, onClick: ()
   return control;
 }
 
-function photoChoiceButton(title: string, note: string, onClick: () => void): HTMLButtonElement {
-  const control = element("button", "import-source__photo-choice");
+function photoChoiceButton(title: string, onClick: () => void, primary = false): HTMLButtonElement {
+  const control = element("button", `import-source__photo-choice${primary ? " is-primary" : ""}`);
   control.type = "button";
-  control.append(
-    element("strong", "import-source__photo-choice-title", title),
-    element("small", "import-source__photo-choice-note", note)
-  );
+  control.textContent = title;
   control.addEventListener("click", onClick);
   return control;
 }
@@ -80,19 +77,18 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
     sourceButton("qr", "二维码", "直接扫码或读取二维码图片", () => { close(); options.onQr(); })
   );
 
-  const photoForm = element("div", "import-source__link-form import-source__photo-form");
+  const photoForm = element("div", "import-source__photo-form");
   photoForm.hidden = true;
-  const photoTitle = element("div", "import-source__title", "选择图片来源");
+  const photoTitle = element("div", "import-source__photo-title", "选择图片来源");
+  const photoHelp = element("p", "import-source__photo-help", "批量录入前先选择拍照，或从设备上传已有图片。多图上传仍按图片顺序进入识别流程。");
   const photoGrid = element("div", "import-source__photo-grid");
   photoGrid.append(
-    photoChoiceButton("拍照", "调用设备相机拍摄", () => selectPhotoSource(true)),
-    photoChoiceButton("上传图片", "从设备选择现有图片", () => selectPhotoSource(false))
+    photoChoiceButton("拍照", () => selectPhotoSource(true), true),
+    photoChoiceButton("上传图片", () => selectPhotoSource(false))
   );
-  const photoBack = button("import-source__secondary", "返回", () => {
-    photoForm.hidden = true;
-    grid.hidden = false;
-  });
-  photoForm.append(photoTitle, photoGrid, photoBack);
+  const photoActions = element("div", "import-source__photo-actions");
+  photoActions.append(button("import-source__photo-cancel", "取消", close));
+  photoForm.append(photoTitle, photoHelp, photoGrid, photoActions);
 
   const linkForm = element("div", "import-source__link-form");
   linkForm.hidden = true;
@@ -112,7 +108,10 @@ export function openImportSourceDialog(options: ImportSourceDialogOptions): { cl
   function showPhotoForm(): void {
     grid.hidden = true;
     linkForm.hidden = true;
+    header.hidden = true;
     photoForm.hidden = false;
+    overlay.classList.add("is-photo-choice");
+    panel.classList.add("is-photo-choice");
   }
 
   function selectPhotoSource(useCamera: boolean): void {

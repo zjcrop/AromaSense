@@ -175,6 +175,17 @@
 .import-source__link-input:focus { border-bottom-color: #d6ad63; }
 .import-source__link-status { display: block; min-height: 20px; padding-top: 8px; }
 
+.import-source.is-photo-choice{padding:12px;place-items:center;background:rgba(0,0,0,.82);backdrop-filter:blur(4px)}
+.import-source__panel.is-photo-choice{width:min(420px,100%);min-height:0;max-height:96dvh;overflow:auto;border:1px solid rgba(185,153,90,.42);border-radius:14px;padding:14px;background:#171717;color:#f4efe4;box-shadow:0 20px 55px rgba(0,0,0,.62)}
+.import-source__photo-form{padding:0}
+.import-source__photo-title{margin:0;color:#f4efe4;font-size:18px;font-weight:800}
+.import-source__photo-help{margin:5px 0 10px;color:#aaa39a;font-size:11px;line-height:1.5}
+.import-source__photo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+.import-source__photo-choice{width:100%;min-height:40px;border:1px solid rgba(185,153,90,.36);border-radius:9px;padding:7px 12px;background:#242424;color:#e7d9ba;font:inherit;font-weight:700;cursor:pointer}
+.import-source__photo-choice.is-primary{border-color:#b9995a;background:#b9995a;color:#111}
+.import-source__photo-actions{display:flex;justify-content:flex-end;margin-top:10px}
+.import-source__photo-cancel{min-height:40px;border:1px solid rgba(185,153,90,.36);border-radius:9px;padding:7px 12px;background:#242424;color:#e7d9ba;font:inherit;font-weight:700}
+
 .qr-scanner__stage {
   position: relative;
   width: min(520px, 100%);
@@ -208,6 +219,8 @@
   .import-bundle__panel,
   .qr-scanner__panel,
   .import-source__panel { width: 100%; max-height: 100dvh; min-height: 100dvh; border: 0; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+  .import-source.is-photo-choice{padding:12px;place-items:center}
+  .import-source__panel.is-photo-choice{width:min(420px,100%);min-height:0;max-height:96dvh;border:1px solid rgba(185,153,90,.42);border-radius:14px;padding:14px}
   .qr-scanner__stage { width: 100%; margin-top: 22px; }
   .import-source__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .import-source__option { min-height: 132px; padding-inline: 8px; }

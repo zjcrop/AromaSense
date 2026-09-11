@@ -15,6 +15,9 @@ export const SCA_CVA_AFFECTIVE_FIELDS = [
 
 export const SCA_NON_UNIFORM_CUPS_FIELD = "final_sca_non_uniform_cups" as const;
 export const SCA_DEFECTIVE_CUPS_FIELD = "final_sca_defective_cups" as const;
+export const SCA_NON_UNIFORM_CUP_IDS_FIELD = "final_sca_non_uniform_cup_ids" as const;
+export const SCA_DEFECTIVE_CUP_IDS_FIELD = "final_sca_defective_cup_ids" as const;
+export const SCA_CUP_CAPACITY_FIELD = "final_sca_cup_capacity" as const;
 export const SCA_DEFECT_TYPES_VALIDATION_KEY = "final_sca_defect_types" as const;
 export const SCA_DEFECT_UNIFORMITY_VALIDATION_KEY = "final_sca_defect_uniformity_consistency" as const;
 export const SCA_CVA_DEFECT_TYPE_IDS = ["defect-potato", "defect-mold", "defect-phenolic"] as const;
@@ -51,7 +54,18 @@ function affectiveScore(value: unknown): number | undefined {
 }
 
 function cupCount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 5 ? value : undefined;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function optionalCupCount(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return 0;
+  return cupCount(value);
+}
+
+function cupCapacity(observations: readonly SensoryObservation[], nonUniformCups: number | undefined, defectiveCups: number | undefined): number {
+  const raw = lastValue(observations, SCA_CUP_CAPACITY_FIELD);
+  const explicit = typeof raw === "number" && Number.isInteger(raw) && raw >= 5 ? raw : 5;
+  return Math.max(5, explicit, nonUniformCups ?? 0, defectiveCups ?? 0);
 }
 
 function roundToQuarter(value: number): number {
@@ -69,13 +83,8 @@ function selectedSCADefectTypes(observations: readonly SensoryObservation[]): st
  * Implements the SCA-104 Affective Assessment total-score equation.
  * Eight 1–9 final affective scores are converted to the 0–100 base score,
  * then 2 points are deducted per non-uniform cup and 4 per defective cup.
- * Missing/invalid inputs are never silently replaced with zero.
- *
- * SCA-104 section 5.4 also requires a named sensory defect type whenever
- * defective cups are recorded, and requires defective cups to be marked
- * non-uniform except for the special case where all five cups share the defect.
- * Those recording invariants are validated here before a score is considered
- * complete; they do not change the standard numeric equation.
+ * Cup selectors are optional: no selected cup is equivalent to zero penalty.
+ * Affective scores remain mandatory and are never silently replaced with zero.
  */
 export function calculateSCACVAScore(observations: readonly SensoryObservation[]): SCACVAScoreResult {
   const missing: string[] = [];
@@ -95,14 +104,13 @@ export function calculateSCACVAScore(observations: readonly SensoryObservation[]
 
   const nonUniformRaw = lastValue(observations, SCA_NON_UNIFORM_CUPS_FIELD);
   const defectiveRaw = lastValue(observations, SCA_DEFECTIVE_CUPS_FIELD);
-  const nonUniformCups = cupCount(nonUniformRaw);
-  const defectiveCups = cupCount(defectiveRaw);
+  const nonUniformCups = optionalCupCount(nonUniformRaw);
+  const defectiveCups = optionalCupCount(defectiveRaw);
   const defectTypes = selectedSCADefectTypes(observations);
+  const capacity = cupCapacity(observations, nonUniformCups, defectiveCups);
 
-  if (nonUniformRaw === undefined || nonUniformRaw === null || nonUniformRaw === "") missing.push(SCA_NON_UNIFORM_CUPS_FIELD);
-  else if (nonUniformCups === undefined) invalid.push(SCA_NON_UNIFORM_CUPS_FIELD);
-  if (defectiveRaw === undefined || defectiveRaw === null || defectiveRaw === "") missing.push(SCA_DEFECTIVE_CUPS_FIELD);
-  else if (defectiveCups === undefined) invalid.push(SCA_DEFECTIVE_CUPS_FIELD);
+  if (nonUniformCups === undefined) invalid.push(SCA_NON_UNIFORM_CUPS_FIELD);
+  if (defectiveCups === undefined) invalid.push(SCA_DEFECTIVE_CUPS_FIELD);
 
   if (defectiveCups !== undefined && defectiveCups > 0 && defectTypes.length === 0) {
     invalid.push(SCA_DEFECT_TYPES_VALIDATION_KEY);
@@ -111,7 +119,7 @@ export function calculateSCACVAScore(observations: readonly SensoryObservation[]
     defectiveCups !== undefined
     && nonUniformCups !== undefined
     && defectiveCups > nonUniformCups
-    && defectiveCups !== 5
+    && defectiveCups !== capacity
   ) {
     invalid.push(SCA_DEFECT_UNIFORMITY_VALIDATION_KEY);
   }
