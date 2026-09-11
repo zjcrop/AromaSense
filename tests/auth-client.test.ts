@@ -128,3 +128,31 @@ test("password reset uses Firebase and does not send mail through the Worker", a
     await client.requestPasswordReset(" User@Example.com ");
   });
 });
+
+test("account requests abort instead of waiting indefinitely", async () => {
+  const client = new CloudflareAuthClient(
+    "https://api.example.test",
+    "firebase-key",
+    new MemorySessionStore(),
+    new MemoryPendingStore(),
+    15
+  );
+
+  await withFetch(async (_input, init) => new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal;
+    assert.ok(signal, "auth request must carry an AbortSignal");
+    const abort = () => reject(new DOMException("aborted", "AbortError"));
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  }), async () => {
+    await assert.rejects(
+      () => client.login("user@example.com", "0123456789"),
+      (error: unknown) => {
+        assert.ok(error instanceof AuthClientError);
+        assert.equal(error.code, "NETWORK_TIMEOUT");
+        assert.match(error.message, /超时/);
+        return true;
+      }
+    );
+  });
+});

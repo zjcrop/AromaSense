@@ -46,6 +46,8 @@ export class AuthClientError extends Error {
   }
 }
 
+const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 8_000;
+
 function messageForAuthError(code: string, status: number): string {
   const messages: Record<string, string> = {
     INVALID_CREDENTIALS_FORMAT: "邮箱格式无效，或密码未达到至少 10 位。",
@@ -60,7 +62,8 @@ function messageForAuthError(code: string, status: number): string {
     AUTH_RATE_LIMITED: "认证请求过于频繁，请稍后重试。",
     USER_DISABLED: "该账户已被停用。",
     INVALID_EMAIL: "邮箱格式无效。",
-    NETWORK_ERROR: "当前无法连接认证服务器，本地杯测仍可正常使用。"
+    NETWORK_ERROR: "当前无法连接认证服务器，本地杯测仍可正常使用。",
+    NETWORK_TIMEOUT: "服务器连接超时，请检查网络后重试；本地杯测仍可正常使用。"
   };
   return messages[code] ?? (status >= 500 ? "服务器暂时不可用，请稍后重试。" : "账户操作失败，请检查输入后重试。");
 }
@@ -92,12 +95,17 @@ function mapFirebaseCode(raw: string | undefined): string {
   return map[code] ?? "FIREBASE_AUTH_FAILED";
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+}
+
 export class CloudflareAuthClient {
   constructor(
     private readonly baseUrl: string,
     private readonly firebaseApiKey: string,
     private readonly sessionStore: AuthSessionStore,
-    private readonly pendingStore?: PendingRegistrationStore
+    private readonly pendingStore?: PendingRegistrationStore,
+    private readonly requestTimeoutMs = DEFAULT_AUTH_REQUEST_TIMEOUT_MS
   ) {}
 
   async register(email: string, password: string): Promise<RegistrationResult> {
@@ -173,10 +181,14 @@ export class CloudflareAuthClient {
     const session = await this.sessionStore.get();
     try {
       if (session) {
-        await fetch(`${this.baseUrl}/api/v1/auth/logout`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${session.token}` }
-        });
+        try {
+          await this.fetchWithTimeout(`${this.baseUrl}/api/v1/auth/logout`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${session.token}` }
+          });
+        } catch {
+          // Logout must always clear the local session even when the network is unavailable.
+        }
       }
     } finally {
       await this.sessionStore.clear();
@@ -227,10 +239,20 @@ export class CloudflareAuthClient {
     }
   }
 
+  private async fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), Math.max(1, this.requestTimeoutMs));
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  }
+
   private async firebaseRequest(path: string, body: Record<string, unknown>): Promise<FirebaseResponse> {
     if (!this.firebaseApiKey) throw new AuthClientError("FIREBASE_NOT_CONFIGURED", 503, messageForAuthError("FIREBASE_NOT_CONFIGURED", 503));
     try {
-      const response = await fetch(`https://identitytoolkit.googleapis.com/v1/${path}?key=${encodeURIComponent(this.firebaseApiKey)}`, {
+      const response = await this.fetchWithTimeout(`https://identitytoolkit.googleapis.com/v1/${path}?key=${encodeURIComponent(this.firebaseApiKey)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body)
@@ -244,13 +266,14 @@ export class CloudflareAuthClient {
       return payload;
     } catch (error) {
       if (error instanceof AuthClientError) throw error;
+      if (isAbortError(error)) throw new AuthClientError("NETWORK_TIMEOUT", 0, messageForAuthError("NETWORK_TIMEOUT", 0));
       throw new AuthClientError("NETWORK_ERROR", 0, messageForAuthError("NETWORK_ERROR", 0));
     }
   }
 
   private async cloudRequest(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body)
@@ -259,11 +282,8 @@ export class CloudflareAuthClient {
       try { payload = await response.json() as Record<string, unknown>; } catch { /* keep empty payload */ }
       return { ok: response.ok, status: response.status, body: payload };
     } catch (error) {
-      throw new AuthClientError(
-        "NETWORK_ERROR",
-        0,
-        error instanceof Error && error.name === "AbortError" ? "服务器连接超时，请稍后重试。" : messageForAuthError("NETWORK_ERROR", 0)
-      );
+      if (isAbortError(error)) throw new AuthClientError("NETWORK_TIMEOUT", 0, messageForAuthError("NETWORK_TIMEOUT", 0));
+      throw new AuthClientError("NETWORK_ERROR", 0, messageForAuthError("NETWORK_ERROR", 0));
     }
   }
 
