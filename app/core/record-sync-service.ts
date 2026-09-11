@@ -56,6 +56,7 @@ export interface RecordSyncRunResult {
   pulled: number;
   deleted: number;
   skipped: number;
+  failed: number;
 }
 
 export interface RecordDownloadResult {
@@ -191,8 +192,9 @@ export class RecordSyncService {
   }
 
   private async run(): Promise<RecordSyncRunResult> {
-    const result: RecordSyncRunResult = { pushed: 0, pulled: 0, deleted: 0, skipped: 0 };
+    const result: RecordSyncRunResult = { pushed: 0, pulled: 0, deleted: 0, skipped: 0, failed: 0 };
     const local = await this.listLocalVersions();
+    let firstError: unknown;
 
     for (const record of local) {
       const state = await this.getState(record.session_id);
@@ -208,13 +210,20 @@ export class RecordSyncService {
         );
       }
       if (!state?.last_pushed_at || timestampValue(record.updated_at) > timestampValue(state.last_pushed_at)) {
-        const snapshot = await this.snapshot(record.session_id);
-        const ack = await this.client.push(record.session_id, record.updated_at, snapshot);
-        const ackEvent = ack.deletedAt ?? ack.updatedAt;
-        if (!ack.deletedAt && timestampValue(ackEvent) === timestampValue(record.updated_at)) {
-          await this.saveState(record.session_id, record.updated_at, undefined);
+        try {
+          const snapshot = await this.snapshot(record.session_id);
+          const ack = await this.client.push(record.session_id, record.updated_at, snapshot);
+          await this.clearFailure(record.session_id);
+          const ackEvent = ack.deletedAt ?? ack.updatedAt;
+          if (!ack.deletedAt && timestampValue(ackEvent) === timestampValue(record.updated_at)) {
+            await this.saveState(record.session_id, record.updated_at, undefined);
+          }
+          result.pushed += 1;
+        } catch (error) {
+          await this.saveFailure(record.session_id, error);
+          result.failed += 1;
+          firstError ??= error;
         }
-        result.pushed += 1;
       }
     }
 
@@ -224,27 +233,40 @@ export class RecordSyncService {
     for (const tombstone of tombstones) {
       const deletedAt = tombstone.deleted_at!;
       if (!tombstone.last_pushed_at || timestampValue(deletedAt) > timestampValue(tombstone.last_pushed_at)) {
-        const ack = await this.client.push(tombstone.record_id, deletedAt, undefined, deletedAt);
-        if (ack.deletedAt && timestampValue(ack.deletedAt) >= timestampValue(deletedAt)) {
-          await this.saveState(tombstone.record_id, deletedAt, deletedAt);
+        try {
+          const ack = await this.client.push(tombstone.record_id, deletedAt, undefined, deletedAt);
+          await this.clearFailure(tombstone.record_id);
+          if (ack.deletedAt && timestampValue(ack.deletedAt) >= timestampValue(deletedAt)) {
+            await this.saveState(tombstone.record_id, deletedAt, deletedAt);
+          }
+          result.pushed += 1;
+        } catch (error) {
+          await this.saveFailure(tombstone.record_id, error);
+          result.failed += 1;
+          firstError ??= error;
         }
-        result.pushed += 1;
       }
     }
 
-    let cursor = await this.getCursor();
-    for (let pageCount = 0; pageCount < 100; pageCount += 1) {
-      const page = await this.client.pull(cursor);
-      for (const remote of page.records) {
-        const applied = await this.applyRemote(remote);
-        if (applied === "pulled") result.pulled += 1;
-        else if (applied === "deleted") result.deleted += 1;
-        else result.skipped += 1;
+    try {
+      let cursor = await this.getCursor();
+      for (let pageCount = 0; pageCount < 100; pageCount += 1) {
+        const page = await this.client.pull(cursor);
+        for (const remote of page.records) {
+          const applied = await this.applyRemote(remote);
+          if (applied === "pulled") result.pulled += 1;
+          else if (applied === "deleted") result.deleted += 1;
+          else result.skipped += 1;
+        }
+        cursor = Math.max(cursor, page.nextCursor);
+        await this.setCursor(cursor);
+        if (!page.hasMore) break;
       }
-      cursor = Math.max(cursor, page.nextCursor);
-      await this.setCursor(cursor);
-      if (!page.hasMore) break;
+    } catch (error) {
+      firstError ??= error;
     }
+
+    if (firstError) throw firstError;
     return result;
   }
 
@@ -310,6 +332,7 @@ export class RecordSyncService {
          last_pushed_at = excluded.last_pushed_at, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
         [remote.recordId, deletedAt, deletedAt, this.now()]
       );
+      await this.db.run(`DELETE FROM record_sync_failures WHERE record_id = ?`, [remote.recordId]);
     });
     return "deleted";
   }
@@ -368,6 +391,20 @@ export class RecordSyncService {
        last_pushed_at=excluded.last_pushed_at, deleted_at=excluded.deleted_at, updated_at=excluded.updated_at`,
       [recordId, lastPushedAt, deletedAt ?? null, this.now()]
     );
+    await this.clearFailure(recordId);
+  }
+
+  private async saveFailure(recordId: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    await this.db.run(
+      `INSERT INTO record_sync_failures (record_id, error_message, failed_at) VALUES (?, ?, ?)
+       ON CONFLICT(record_id) DO UPDATE SET error_message=excluded.error_message, failed_at=excluded.failed_at`,
+      [recordId, message.slice(0, 1000), this.now()]
+    );
+  }
+
+  private async clearFailure(recordId: string): Promise<void> {
+    await this.db.run(`DELETE FROM record_sync_failures WHERE record_id = ?`, [recordId]);
   }
 
   private async getCursor(): Promise<number> {
