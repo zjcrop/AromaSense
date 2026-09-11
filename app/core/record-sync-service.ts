@@ -65,6 +65,8 @@ export interface RecordDownloadResult {
   skipped: number;
 }
 
+const RECORD_SYNC_REQUEST_TIMEOUT_MS = 8_000;
+
 function timestampValue(value?: string | null): number {
   if (!value) return Number.NEGATIVE_INFINITY;
   const parsed = Date.parse(value);
@@ -105,9 +107,22 @@ class CloudflareRecordSyncClient {
     return token;
   }
 
+  private async request(path: string, init: RequestInit = {}): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), RECORD_SYNC_REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(`${this.baseUrl}${path}`, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("RECORD_SYNC_TIMEOUT");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async authorizedGet<T extends { ok: true }>(path: string): Promise<T> {
     const token = await this.token();
-    const response = await fetch(`${this.baseUrl}${path}`, { headers: { authorization: `Bearer ${token}` } });
+    const response = await this.request(path, { headers: { authorization: `Bearer ${token}` } });
     const body = await response.json() as T | { ok: false; error: string };
     if (!response.ok || body.ok !== true) {
       throw new Error(`RECORD_SYNC_HTTP_${response.status}:${"error" in body ? body.error : "UNKNOWN"}`);
@@ -117,8 +132,8 @@ class CloudflareRecordSyncClient {
 
   async push(recordId: string, updatedAt: string, payload?: CuppingRecordSnapshot, deletedAt?: string): Promise<PushAck> {
     const token = await this.token();
-    const response = await fetch(`${this.baseUrl}/api/v1/records/${encodeURIComponent(recordId)}`, {
-      method: "PUT",
+    const response = await this.request(`/api/v1/records/${encodeURIComponent(recordId)}`, {
+      method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({ recordId, updatedAt, deletedAt, payload })
     });
