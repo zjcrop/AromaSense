@@ -1,5 +1,6 @@
 import { SENSORY_DICTIONARY_VERSION } from "../core/sensory-dictionary-v1";
 import { RecordSyncService } from "../core/record-sync-service";
+import { CloudRecordDownloadService } from "../core/cloud-record-download-service";
 import localSchema from "../storage/0001_local_schema.sql";
 import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import workflowMigration from "../storage/0003_workflow_event_comparison.sql";
@@ -14,6 +15,7 @@ import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-
 import { LocalAuthSessionStore } from "../storage/auth-session-store";
 import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
+import { installCloudRecordDownloadEntry } from "../ui/dom/cloud-record-download-panel";
 import "../ui/dom/manual-split-photo-mode";
 import "../ui/dom/home-action-enhancements";
 import "../ui/dom/batch-intake-picker-layout-fix";
@@ -92,8 +94,12 @@ async function main(): Promise<void> {
   window.AromaSenseNavigation = app.navigationApi();
 
   const syncAuthStore = new LocalAuthSessionStore(new UserPreferencesRepository(db), now);
+  const tokenProvider = async () => (await syncAuthStore.get())?.token;
   const recordSync = cloudBaseUrl
-    ? new RecordSyncService(db, cloudBaseUrl, async () => (await syncAuthStore.get())?.token, now)
+    ? new RecordSyncService(db, cloudBaseUrl, tokenProvider, now)
+    : undefined;
+  const cloudRecordDownload = cloudBaseUrl
+    ? new CloudRecordDownloadService(db, cloudBaseUrl, tokenProvider, now)
     : undefined;
   const runRecordSync = async (): Promise<void> => {
     if (!recordSync || !(await syncAuthStore.get())) return;
@@ -106,6 +112,12 @@ async function main(): Promise<void> {
       await runRecordSync();
       return legacySyncPending(sessionIds);
     };
+  }
+  if (cloudRecordDownload) {
+    installCloudRecordDownloadEntry({
+      service: cloudRecordDownload,
+      onDownloaded: async () => { await runRecordSync(); }
+    });
   }
 
   yingxiang = new YingxiangBrowserBootstrap(root, db, {
