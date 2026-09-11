@@ -31,9 +31,9 @@ test("visible cup-comparison sliders are replaced by numbered grey-to-white cup 
   const source = readFileSync("app/ui/dom/cupping-cup-selection-hotfix.ts", "utf8");
   assert.match(source, /querySelector<HTMLElement>\("\.cup-comparison"\)/);
   assert.match(source, /comparison\.classList\.add\("cup-comparison--square-picker"\)/);
-  assert.match(source, /comparison\.replaceChildren\(/);
-  assert.match(source, /"非一致性"[\s\S]*SCA_NON_UNIFORM_CUP_IDS_FIELD[\s\S]*"top"/);
-  assert.match(source, /"缺陷杯数"[\s\S]*SCA_DEFECTIVE_CUP_IDS_FIELD[\s\S]*"bottom"/);
+  assert.match(source, /comparison\.replaceChildren\(nonUniformSelector, defectiveSelector\)/);
+  assert.match(source, /label: "非一致性"[\s\S]*numberPosition: "top"/);
+  assert.match(source, /label: "缺陷杯数"[\s\S]*numberPosition: "bottom"/);
   assert.match(source, /control\.dataset\.cupIndex = String\(index\)/);
   assert.match(source, /background:#5b5b5b/);
   assert.match(source, /border-color:#ffffff;[\s\S]*background:#f4f4f4/);
@@ -45,6 +45,26 @@ test("visible cup-comparison sliders are replaced by numbered grey-to-white cup 
   assert.match(source, /SCA_CUP_CAPACITY_FIELD/);
   assert.match(source, /LEGACY_SAMPLE_CUP_COUNT_FIELD/);
   assert.doesNotMatch(source, /border-color:#d0ad62;background:#b9995a/);
+});
+
+test("defective cup selection forces the same cup to remain non-uniform", () => {
+  const source = readFileSync("app/ui/dom/cupping-cup-selection-hotfix.ts", "utf8");
+  assert.match(source, /if \(!nextPressed && protectedIds\?\.has\(index\)\) return/);
+  assert.match(source, /protectedIds: defective/);
+  assert.match(source, /if \(pressed\) \{[\s\S]*nonUniform\.add\(index\)/);
+  assert.match(source, /setSquareState\(nonUniformSelector, "非一致性", index, true, true\)/);
+  assert.match(source, /idsField: SCA_DEFECTIVE_CUP_IDS_FIELD[\s\S]*idsField: SCA_NON_UNIFORM_CUP_IDS_FIELD/);
+  assert.match(source, /if \(pressed\)[\s\S]*updates\.push/);
+  assert.match(source, /else \{[\s\S]*setSquareState\(nonUniformSelector, "非一致性", index, nonUniform\.has\(index\), false\)/);
+});
+
+test("editable legacy records repair defective cups into the non-uniform set", () => {
+  const source = readFileSync("app/ui/dom/cupping-cup-selection-hotfix.ts", "utf8");
+  assert.match(source, /async function repairLegacySubset/);
+  assert.match(source, /for \(const index of defective\) repaired\.add\(index\)/);
+  assert.match(source, /saveField\(SCA_NON_UNIFORM_CUP_IDS_FIELD, ids/);
+  assert.match(source, /saveField\(SCA_NON_UNIFORM_CUPS_FIELD, ids\.length/);
+  assert.match(source, /locked[\s\S]*new Set\(\[\.\.\.originalNonUniform, \.\.\.defective\]\)[\s\S]*repairLegacySubset/);
 });
 
 test("visible slider producer is known and cup selector runs after it", () => {
