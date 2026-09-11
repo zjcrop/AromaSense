@@ -13,6 +13,16 @@ export interface RemoteRecordEnvelope {
   changeId: number;
 }
 
+export interface CloudRecordIndexEntry {
+  recordId: string;
+  date: string;
+  organizer: string;
+  eventName: string;
+  status: string;
+  updatedAt: string;
+  serverChangedAt: string;
+}
+
 interface PushAck {
   ok: true;
   applied: boolean;
@@ -29,8 +39,27 @@ interface PullPage {
   hasMore: boolean;
 }
 
+interface CloudRecordIndexPage {
+  ok: true;
+  records: CloudRecordIndexEntry[];
+  nextOffset: number;
+  hasMore: boolean;
+}
+
+interface CloudRecordResponse {
+  ok: true;
+  record: RemoteRecordEnvelope;
+}
+
 export interface RecordSyncRunResult {
   pushed: number;
+  pulled: number;
+  deleted: number;
+  skipped: number;
+}
+
+export interface RecordDownloadResult {
+  requested: number;
   pulled: number;
   deleted: number;
   skipped: number;
@@ -76,6 +105,16 @@ class CloudflareRecordSyncClient {
     return token;
   }
 
+  private async authorizedGet<T extends { ok: true }>(path: string): Promise<T> {
+    const token = await this.token();
+    const response = await fetch(`${this.baseUrl}${path}`, { headers: { authorization: `Bearer ${token}` } });
+    const body = await response.json() as T | { ok: false; error: string };
+    if (!response.ok || body.ok !== true) {
+      throw new Error(`RECORD_SYNC_HTTP_${response.status}:${"error" in body ? body.error : "UNKNOWN"}`);
+    }
+    return body as T;
+  }
+
   async push(recordId: string, updatedAt: string, payload?: CuppingRecordSnapshot, deletedAt?: string): Promise<PushAck> {
     const token = await this.token();
     const response = await fetch(`${this.baseUrl}/api/v1/records/${encodeURIComponent(recordId)}`, {
@@ -90,16 +129,17 @@ class CloudflareRecordSyncClient {
     return body as PushAck;
   }
 
-  async pull(cursor: number, limit = 200): Promise<PullPage> {
-    const token = await this.token();
-    const response = await fetch(`${this.baseUrl}/api/v1/records?cursor=${Math.max(0, cursor)}&limit=${Math.max(1, Math.min(500, limit))}`, {
-      headers: { authorization: `Bearer ${token}` }
-    });
-    const body = await response.json() as PullPage | { ok: false; error: string };
-    if (!response.ok || body.ok !== true) {
-      throw new Error(`RECORD_SYNC_HTTP_${response.status}:${"error" in body ? body.error : "UNKNOWN"}`);
-    }
-    return body as PullPage;
+  pull(cursor: number, limit = 200): Promise<PullPage> {
+    return this.authorizedGet<PullPage>(`/api/v1/records?cursor=${Math.max(0, cursor)}&limit=${Math.max(1, Math.min(500, limit))}`);
+  }
+
+  listIndex(offset: number, limit = 200): Promise<CloudRecordIndexPage> {
+    return this.authorizedGet<CloudRecordIndexPage>(`/api/v1/records/index?offset=${Math.max(0, offset)}&limit=${Math.max(1, Math.min(500, limit))}`);
+  }
+
+  async getRecord(recordId: string): Promise<RemoteRecordEnvelope> {
+    const response = await this.authorizedGet<CloudRecordResponse>(`/api/v1/records/${encodeURIComponent(recordId)}`);
+    return response.record;
   }
 }
 
@@ -120,6 +160,34 @@ export class RecordSyncService {
     if (this.inFlight) return this.inFlight;
     this.inFlight = this.run().finally(() => { this.inFlight = undefined; });
     return this.inFlight;
+  }
+
+  async listCloudRecords(): Promise<CloudRecordIndexEntry[]> {
+    const records: CloudRecordIndexEntry[] = [];
+    let offset = 0;
+    for (let pageCount = 0; pageCount < 50; pageCount += 1) {
+      const page = await this.client.listIndex(offset);
+      records.push(...page.records);
+      offset = Math.max(offset, page.nextOffset);
+      if (!page.hasMore) break;
+    }
+    return records.sort((a, b) => {
+      const dateCompare = (b.date || b.updatedAt.slice(0, 10)).localeCompare(a.date || a.updatedAt.slice(0, 10));
+      return dateCompare || b.updatedAt.localeCompare(a.updatedAt);
+    });
+  }
+
+  async downloadRecords(recordIds: readonly string[]): Promise<RecordDownloadResult> {
+    const uniqueIds = [...new Set(recordIds.filter(Boolean))];
+    const result: RecordDownloadResult = { requested: uniqueIds.length, pulled: 0, deleted: 0, skipped: 0 };
+    for (const recordId of uniqueIds) {
+      const remote = await this.client.getRecord(recordId);
+      const applied = await this.applyRemote(remote);
+      if (applied === "pulled") result.pulled += 1;
+      else if (applied === "deleted") result.deleted += 1;
+      else result.skipped += 1;
+    }
+    return result;
   }
 
   private async run(): Promise<RecordSyncRunResult> {
