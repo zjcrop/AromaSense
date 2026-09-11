@@ -27,30 +27,33 @@ test("batch photo source chooser mirrors the compact manual split source dialog"
   assert.match(css, /\.import-source__photo-grid\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 });
 
-test("non-uniform and defective cups use grey-to-white square selectors with aligned numbering", () => {
+test("visible cup-comparison sliders are replaced by numbered grey-to-white cup squares", () => {
   const source = readFileSync("app/ui/dom/cupping-cup-selection-hotfix.ts", "utf8");
-  assert.match(source, /buildCupSelector\(host, fields\[0\], "非一致性"[\s\S]*"top"\)/);
-  assert.match(source, /buildCupSelector\(host, fields\[1\], "缺陷杯数"[\s\S]*"bottom"\)/);
-  assert.match(source, /control\.textContent = ""/);
+  assert.match(source, /querySelector<HTMLElement>\("\.cup-comparison"\)/);
+  assert.match(source, /comparison\.classList\.add\("cup-comparison--square-picker"\)/);
+  assert.match(source, /comparison\.replaceChildren\(/);
+  assert.match(source, /"非一致性"[\s\S]*SCA_NON_UNIFORM_CUP_IDS_FIELD[\s\S]*"top"/);
+  assert.match(source, /"缺陷杯数"[\s\S]*SCA_DEFECTIVE_CUP_IDS_FIELD[\s\S]*"bottom"/);
   assert.match(source, /control\.dataset\.cupIndex = String\(index\)/);
   assert.match(source, /background:#5b5b5b/);
-  assert.match(source, /border-color:#ffffff;background:#f4f4f4/);
-  assert.match(source, /function buildNumberRow\(capacity: number, position: NumberPosition\)/);
-  assert.match(source, /number\.textContent = String\(index\)/);
-  assert.match(source, /final-assessment__cup-number-row is-\$\{position\}/);
+  assert.match(source, /border-color:#ffffff;[\s\S]*background:#f4f4f4/);
+  assert.match(source, /number\.textContent = placeholder \? "0" : String\(index\)/);
   assert.match(source, /add\.textContent = "\+"/);
   assert.match(source, /persistCapacity\(host, capacity \+ 1\)/);
   assert.match(source, /SCA_NON_UNIFORM_CUP_IDS_FIELD/);
   assert.match(source, /SCA_DEFECTIVE_CUP_IDS_FIELD/);
   assert.match(source, /SCA_CUP_CAPACITY_FIELD/);
+  assert.match(source, /LEGACY_SAMPLE_CUP_COUNT_FIELD/);
   assert.doesNotMatch(source, /border-color:#d0ad62;background:#b9995a/);
-  assert.doesNotMatch(source, /未选择即为 0/);
 });
 
-test("web runtime loads cup selector hotfix after all previous cupping patches", () => {
-  const source = readFileSync("app/runtime/web-entry.ts", "utf8");
-  const mobile = source.indexOf('import "../ui/dom/cupping-mobile-browser-hotfix";');
-  const cups = source.indexOf('import "../ui/dom/cupping-cup-selection-hotfix";');
-  assert.ok(mobile >= 0);
-  assert.ok(cups > mobile);
+test("visible slider producer is known and cup selector runs after it", () => {
+  const upgrade = readFileSync("app/ui/dom/cupping-input-ux-upgrade.ts", "utf8");
+  const runtime = readFileSync("app/runtime/web-entry.ts", "utf8");
+  assert.match(upgrade, /cupSlider\(SCA_NON_UNIFORM_CUPS_FIELD, "非一致性杯数"/);
+  assert.match(upgrade, /cupSlider\(SCA_DEFECTIVE_CUPS_FIELD, "缺陷杯数"/);
+  const inputUx = runtime.indexOf('import "../ui/dom/cupping-input-ux-upgrade";');
+  const cups = runtime.indexOf('import "../ui/dom/cupping-cup-selection-hotfix";');
+  assert.ok(inputUx >= 0);
+  assert.ok(cups > inputUx);
 });
