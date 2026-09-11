@@ -9,7 +9,7 @@ import {
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v4");
+const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v5");
 const MAX_VISIBLE_CUPS = 40;
 const LEGACY_SAMPLE_CUP_COUNT_FIELD = "overall_sample_cup_count";
 
@@ -27,6 +27,23 @@ interface RendererInternals {
 interface RendererPrototype {
   [PATCH_FLAG]?: boolean;
   render(this: RendererInternals): Promise<void>;
+}
+
+interface SelectionUpdate {
+  idsField: string;
+  countField: string;
+  ids: readonly number[];
+}
+
+interface CupSelectorOptions {
+  host: RendererInternals;
+  label: string;
+  selected: Set<number>;
+  capacity: number;
+  locked: boolean;
+  numberPosition: NumberPosition;
+  protectedIds?: ReadonlySet<number>;
+  onChange(index: number, pressed: boolean, ids: readonly number[]): void;
 }
 
 function latestValue(observations: readonly SensoryObservation[], fieldKey: string): unknown {
@@ -49,6 +66,10 @@ function normalizedIds(raw: unknown, legacyCount: unknown): number[] {
     ? Math.min(MAX_VISIBLE_CUPS, legacyCount)
     : 0;
   return Array.from({ length: count }, (_, index) => index + 1);
+}
+
+function sortedIds(selected: ReadonlySet<number>): number[] {
+  return [...selected].sort((a, b) => a - b);
 }
 
 function installStyles(): void {
@@ -136,6 +157,9 @@ function installStyles(): void {
       color:transparent;
       box-shadow:0 0 0 1px rgba(255,255,255,.22);
     }
+    .cup-comparison--square-picker .cup-comparison__square[data-required-by-defect="true"]{
+      cursor:not-allowed;
+    }
     .cup-comparison--square-picker .cup-comparison__square:active:not(:disabled){transform:scale(.92)}
     .cup-comparison--square-picker .cup-comparison__add-slot{flex-basis:26px;width:26px}
     .cup-comparison--square-picker .cup-comparison__add{
@@ -170,17 +194,14 @@ function installStyles(): void {
   document.head.append(style);
 }
 
-async function persistSelection(
-  host: RendererInternals,
-  idsField: string,
-  countField: string,
-  ids: readonly number[]
-): Promise<void> {
+async function persistSelections(host: RendererInternals, updates: readonly SelectionUpdate[]): Promise<void> {
   const editor = host.root.querySelector<HTMLElement>(".cupping-main__editor");
   const scrollTop = editor?.scrollTop ?? 0;
   await host.run(async () => {
-    host.state = await host.controller.saveField(idsField, [...ids], host.options.now());
-    host.state = await host.controller.saveField(countField, ids.length, host.options.now());
+    for (const update of updates) {
+      host.state = await host.controller.saveField(update.idsField, [...update.ids], host.options.now());
+      host.state = await host.controller.saveField(update.countField, update.ids.length, host.options.now());
+    }
   });
   requestAnimationFrame(() => {
     const nextEditor = host.root.querySelector<HTMLElement>(".cupping-main__editor");
@@ -201,6 +222,20 @@ async function persistCapacity(host: RendererInternals, capacity: number): Promi
   });
 }
 
+async function repairLegacySubset(
+  host: RendererInternals,
+  nonUniform: ReadonlySet<number>,
+  defective: ReadonlySet<number>
+): Promise<Set<number>> {
+  const repaired = new Set(nonUniform);
+  for (const index of defective) repaired.add(index);
+  if (repaired.size === nonUniform.size) return repaired;
+  const ids = sortedIds(repaired);
+  host.state = await host.controller.saveField(SCA_NON_UNIFORM_CUP_IDS_FIELD, ids, host.options.now());
+  host.state = await host.controller.saveField(SCA_NON_UNIFORM_CUPS_FIELD, ids.length, host.options.now());
+  return repaired;
+}
+
 function cupNumber(index: number, placeholder = false): HTMLElement {
   const number = document.createElement("span");
   number.className = `cup-comparison__number${placeholder ? " is-placeholder" : ""}`;
@@ -209,17 +244,22 @@ function cupNumber(index: number, placeholder = false): HTMLElement {
   return number;
 }
 
-function buildCupSelector(
-  host: RendererInternals,
-  label: string,
-  countField: string,
-  idsField: string,
-  selectedIds: readonly number[],
-  capacity: number,
-  locked: boolean,
-  numberPosition: NumberPosition
-): HTMLElement {
-  const selected = new Set(selectedIds);
+function setSquareState(root: HTMLElement, label: string, index: number, pressed: boolean, requiredByDefect = false): void {
+  const control = root.querySelector<HTMLButtonElement>(`.cup-comparison__square[data-cup-index="${index}"]`);
+  if (!control) return;
+  control.setAttribute("aria-pressed", String(pressed));
+  control.setAttribute("aria-label", `${label} 第 ${index} 杯${pressed ? "，有问题" : "，正常"}`);
+  if (requiredByDefect) {
+    control.dataset.requiredByDefect = "true";
+    control.title = `第 ${index} 杯已标记为缺陷，必须同时保持非一致`;
+  } else {
+    delete control.dataset.requiredByDefect;
+    control.title = `${label} · 第 ${index} 杯`;
+  }
+}
+
+function buildCupSelector(options: CupSelectorOptions): HTMLElement {
+  const { host, label, selected, capacity, locked, numberPosition, protectedIds, onChange } = options;
   const field = document.createElement("div");
   field.className = `cup-comparison__selector is-${numberPosition}-numbered`;
 
@@ -244,17 +284,23 @@ function buildCupSelector(
     control.textContent = "";
     control.dataset.cupIndex = String(index);
     control.disabled = locked;
-    control.setAttribute("aria-pressed", String(selected.has(index)));
-    control.setAttribute("aria-label", `${label} 第 ${index} 杯${selected.has(index) ? "，有问题" : "，正常"}`);
-    control.title = `${label} · 第 ${index} 杯`;
+    const pressed = selected.has(index);
+    const requiredByDefect = Boolean(protectedIds?.has(index));
+    control.setAttribute("aria-pressed", String(pressed));
+    control.setAttribute("aria-label", `${label} 第 ${index} 杯${pressed ? "，有问题" : "，正常"}`);
+    if (requiredByDefect) {
+      control.dataset.requiredByDefect = "true";
+      control.title = `第 ${index} 杯已标记为缺陷，必须同时保持非一致`;
+    } else {
+      control.title = `${label} · 第 ${index} 杯`;
+    }
     control.addEventListener("click", () => {
-      if (selected.has(index)) selected.delete(index); else selected.add(index);
-      const pressed = selected.has(index);
-      control.setAttribute("aria-pressed", String(pressed));
-      control.setAttribute("aria-label", `${label} 第 ${index} 杯${pressed ? "，有问题" : "，正常"}`);
-      const ids = [...selected].sort((a, b) => a - b);
-      void persistSelection(host, idsField, countField, ids)
-        .catch((error) => console.error("AromaSense cup selection save failed", error));
+      const nextPressed = !selected.has(index);
+      if (!nextPressed && protectedIds?.has(index)) return;
+      if (nextPressed) selected.add(index); else selected.delete(index);
+      control.setAttribute("aria-pressed", String(nextPressed));
+      control.setAttribute("aria-label", `${label} 第 ${index} 杯${nextPressed ? "，有问题" : "，正常"}`);
+      onChange(index, nextPressed, sortedIds(selected));
     });
 
     const number = cupNumber(index);
@@ -300,48 +346,79 @@ async function applyCupSelectors(host: RendererInternals): Promise<void> {
   if (!comparison) return;
 
   const observations = await host.summaryReader.listObservations(active.context.sampleId);
-  const nonUniform = normalizedIds(
+  const originalNonUniform = new Set(normalizedIds(
     latestValue(observations, SCA_NON_UNIFORM_CUP_IDS_FIELD),
     latestValue(observations, SCA_NON_UNIFORM_CUPS_FIELD)
-  );
-  const defective = normalizedIds(
+  ));
+  const defective = new Set(normalizedIds(
     latestValue(observations, SCA_DEFECTIVE_CUP_IDS_FIELD),
     latestValue(observations, SCA_DEFECTIVE_CUPS_FIELD)
-  );
+  ));
   const storedCapacity = Number(latestValue(observations, SCA_CUP_CAPACITY_FIELD));
   const legacyCapacity = Number(latestValue(observations, LEGACY_SAMPLE_CUP_COUNT_FIELD));
+  const locked = state.lockedSampleIds.includes(active.context.sampleId);
+  const nonUniform = locked
+    ? new Set([...originalNonUniform, ...defective])
+    : await repairLegacySubset(host, originalNonUniform, defective);
   const capacity = Math.min(MAX_VISIBLE_CUPS, Math.max(
     5,
     Number.isInteger(storedCapacity) ? storedCapacity : 0,
     Number.isInteger(legacyCapacity) ? legacyCapacity : 0,
-    nonUniform.at(-1) ?? 0,
-    defective.at(-1) ?? 0
+    sortedIds(nonUniform).at(-1) ?? 0,
+    sortedIds(defective).at(-1) ?? 0
   ));
-  const locked = state.lockedSampleIds.includes(active.context.sampleId);
 
   comparison.classList.add("cup-comparison--square-picker");
-  comparison.replaceChildren(
-    buildCupSelector(
-      host,
-      "非一致性",
-      SCA_NON_UNIFORM_CUPS_FIELD,
-      SCA_NON_UNIFORM_CUP_IDS_FIELD,
-      nonUniform,
-      capacity,
-      locked,
-      "top"
-    ),
-    buildCupSelector(
-      host,
-      "缺陷杯数",
-      SCA_DEFECTIVE_CUPS_FIELD,
-      SCA_DEFECTIVE_CUP_IDS_FIELD,
-      defective,
-      capacity,
-      locked,
-      "bottom"
-    )
-  );
+
+  let nonUniformSelector: HTMLElement;
+  nonUniformSelector = buildCupSelector({
+    host,
+    label: "非一致性",
+    selected: nonUniform,
+    capacity,
+    locked,
+    numberPosition: "top",
+    protectedIds: defective,
+    onChange: (_index, _pressed, ids) => {
+      void persistSelections(host, [{
+        idsField: SCA_NON_UNIFORM_CUP_IDS_FIELD,
+        countField: SCA_NON_UNIFORM_CUPS_FIELD,
+        ids
+      }]).catch((error) => console.error("AromaSense non-uniform cup save failed", error));
+    }
+  });
+
+  const defectiveSelector = buildCupSelector({
+    host,
+    label: "缺陷杯数",
+    selected: defective,
+    capacity,
+    locked,
+    numberPosition: "bottom",
+    onChange: (index, pressed, defectIds) => {
+      const updates: SelectionUpdate[] = [{
+        idsField: SCA_DEFECTIVE_CUP_IDS_FIELD,
+        countField: SCA_DEFECTIVE_CUPS_FIELD,
+        ids: defectIds
+      }];
+      if (pressed) {
+        nonUniform.add(index);
+        const nonUniformIds = sortedIds(nonUniform);
+        setSquareState(nonUniformSelector, "非一致性", index, true, true);
+        updates.push({
+          idsField: SCA_NON_UNIFORM_CUP_IDS_FIELD,
+          countField: SCA_NON_UNIFORM_CUPS_FIELD,
+          ids: nonUniformIds
+        });
+      } else {
+        setSquareState(nonUniformSelector, "非一致性", index, nonUniform.has(index), false);
+      }
+      void persistSelections(host, updates)
+        .catch((error) => console.error("AromaSense defective cup save failed", error));
+    }
+  });
+
+  comparison.replaceChildren(nonUniformSelector, defectiveSelector);
 }
 
 function installPatch(): void {
