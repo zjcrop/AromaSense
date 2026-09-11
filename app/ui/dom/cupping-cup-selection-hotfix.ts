@@ -9,8 +9,9 @@ import {
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v3");
+const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v4");
 const MAX_VISIBLE_CUPS = 40;
+const LEGACY_SAMPLE_CUP_COUNT_FIELD = "overall_sample_cup_count";
 
 type NumberPosition = "top" | "bottom";
 
@@ -59,49 +60,111 @@ function installStyles(): void {
       border:0!important;
       box-shadow:0 4px 14px rgba(0,0,0,.24)!important;
     }
-    .final-assessment__cup-grid{grid-template-columns:1fr!important;gap:7px!important;margin-top:12px!important}
-    .final-assessment__cup-field--indexed{
-      display:grid!important;grid-template-columns:72px minmax(0,1fr)!important;gap:10px!important;
-      align-items:center!important;min-height:46px!important;
+    .cup-comparison.cup-comparison--square-picker{
+      display:grid!important;
+      grid-template-columns:1fr!important;
+      gap:7px!important;
+      align-items:stretch!important;
+      margin-top:10px!important;
+      padding:10px!important;
     }
-    .final-assessment__cup-label{display:block;color:#c8c0b5;font-size:11px;line-height:1.2;white-space:nowrap}
-    .final-assessment__cup-track{
-      min-width:0;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;touch-action:pan-x;
+    .cup-comparison--square-picker .cup-comparison__selector{
+      display:grid!important;
+      grid-template-columns:78px minmax(0,1fr)!important;
+      gap:10px!important;
+      align-items:center!important;
+      min-width:0!important;
     }
-    .final-assessment__cup-track::-webkit-scrollbar{display:none}
-    .final-assessment__cup-index-row,.final-assessment__cup-number-row{
-      display:flex;align-items:center;gap:7px;width:max-content;min-width:max-content;
+    .cup-comparison--square-picker .cup-comparison__label{
+      color:#c8c0b5;
+      font-size:11px;
+      line-height:1.2;
+      white-space:nowrap;
     }
-    .final-assessment__cup-index-row{padding:2px 0}
-    .final-assessment__cup-number-row{padding:0 0 2px;color:#8f8b85;font-size:9px;line-height:1;font-variant-numeric:tabular-nums}
-    .final-assessment__cup-number-row.is-bottom{padding:2px 0 0}
-    .final-assessment__cup-number{
-      flex:0 0 24px;width:24px;text-align:center;box-sizing:border-box;
+    .cup-comparison--square-picker .cup-comparison__selector.is-top-numbered .cup-comparison__label{padding-top:12px}
+    .cup-comparison--square-picker .cup-comparison__selector.is-bottom-numbered .cup-comparison__label{padding-bottom:12px}
+    .cup-comparison--square-picker .cup-comparison__track{
+      min-width:0;
+      overflow-x:auto;
+      scrollbar-width:none;
+      overscroll-behavior-x:contain;
+      touch-action:pan-x;
     }
-    .final-assessment__cup-number-spacer{flex:0 0 26px;width:26px;height:1px}
-    .final-assessment__cup-index{
-      flex:0 0 24px;width:24px;height:24px;padding:0;box-sizing:border-box;
-      border:1px solid #696969;border-radius:3px;background:#5b5b5b;color:transparent;
-      font-size:0;line-height:0;cursor:pointer;box-shadow:none;
+    .cup-comparison--square-picker .cup-comparison__track::-webkit-scrollbar{display:none}
+    .cup-comparison--square-picker .cup-comparison__slots{
+      display:flex;
+      align-items:start;
+      gap:7px;
+      width:max-content;
+      min-width:max-content;
+    }
+    .cup-comparison--square-picker .cup-comparison__slot{
+      flex:0 0 24px;
+      width:24px;
+      display:grid;
+      justify-items:center;
+      gap:3px;
+    }
+    .cup-comparison--square-picker .cup-comparison__number{
+      width:24px;
+      height:9px;
+      color:#8f8b85;
+      font-size:9px;
+      line-height:9px;
+      text-align:center;
+      font-variant-numeric:tabular-nums;
+    }
+    .cup-comparison--square-picker .cup-comparison__number.is-placeholder{visibility:hidden}
+    .cup-comparison--square-picker .cup-comparison__square{
+      width:24px;
+      height:24px;
+      padding:0;
+      box-sizing:border-box;
+      border:1px solid #696969;
+      border-radius:3px;
+      background:#5b5b5b;
+      color:transparent;
+      font-size:0;
+      line-height:0;
+      cursor:pointer;
+      box-shadow:none;
       transition:background-color .12s ease,border-color .12s ease,transform .12s ease,box-shadow .12s ease;
     }
-    .final-assessment__cup-index[aria-pressed="true"]{
-      border-color:#ffffff;background:#f4f4f4;color:transparent;box-shadow:0 0 0 1px rgba(255,255,255,.22);
+    .cup-comparison--square-picker .cup-comparison__square[aria-pressed="true"]{
+      border-color:#ffffff;
+      background:#f4f4f4;
+      color:transparent;
+      box-shadow:0 0 0 1px rgba(255,255,255,.22);
     }
-    .final-assessment__cup-index:active:not(:disabled){transform:scale(.92)}
-    .final-assessment__cup-add{
-      flex:0 0 26px;width:26px;height:26px;display:grid;place-items:center;padding:0;margin-left:1px;
-      border:0;background:transparent;color:#d6ad63;font:inherit;font-size:23px;font-weight:500;line-height:1;cursor:pointer;box-shadow:none;
+    .cup-comparison--square-picker .cup-comparison__square:active:not(:disabled){transform:scale(.92)}
+    .cup-comparison--square-picker .cup-comparison__add-slot{flex-basis:26px;width:26px}
+    .cup-comparison--square-picker .cup-comparison__add{
+      width:26px;
+      height:24px;
+      display:grid;
+      place-items:center;
+      padding:0;
+      border:0;
+      background:transparent;
+      color:#d6ad63;
+      font:inherit;
+      font-size:23px;
+      font-weight:500;
+      line-height:1;
+      cursor:pointer;
+      box-shadow:none;
     }
-    .final-assessment__cup-index:disabled,.final-assessment__cup-add:disabled{opacity:.38;cursor:not-allowed}
-    .final-assessment__zero-cups{display:none!important}
+    .cup-comparison--square-picker .cup-comparison__square:disabled,
+    .cup-comparison--square-picker .cup-comparison__add:disabled{opacity:.38;cursor:not-allowed}
     @media(max-width:390px){
-      .final-assessment__cup-field--indexed{grid-template-columns:66px minmax(0,1fr)!important;gap:8px!important}
-      .final-assessment__cup-index-row,.final-assessment__cup-number-row{gap:6px}
-      .final-assessment__cup-index,.final-assessment__cup-number{flex-basis:22px;width:22px}
-      .final-assessment__cup-index{height:22px;border-radius:3px}
-      .final-assessment__cup-number-spacer{flex-basis:24px;width:24px}
-      .final-assessment__cup-add{flex-basis:24px;width:24px;height:24px;font-size:21px}
+      .cup-comparison.cup-comparison--square-picker{padding:8px!important}
+      .cup-comparison--square-picker .cup-comparison__selector{grid-template-columns:66px minmax(0,1fr)!important;gap:8px!important}
+      .cup-comparison--square-picker .cup-comparison__slots{gap:6px}
+      .cup-comparison--square-picker .cup-comparison__slot,
+      .cup-comparison--square-picker .cup-comparison__number{flex-basis:22px;width:22px}
+      .cup-comparison--square-picker .cup-comparison__square{width:22px;height:22px}
+      .cup-comparison--square-picker .cup-comparison__add-slot{flex-basis:24px;width:24px}
+      .cup-comparison--square-picker .cup-comparison__add{width:24px;height:22px;font-size:21px}
     }
   `;
   document.head.append(style);
@@ -130,6 +193,7 @@ async function persistCapacity(host: RendererInternals, capacity: number): Promi
   const scrollTop = editor?.scrollTop ?? 0;
   await host.run(async () => {
     host.state = await host.controller.saveField(SCA_CUP_CAPACITY_FIELD, capacity, host.options.now());
+    host.state = await host.controller.saveField(LEGACY_SAMPLE_CUP_COUNT_FIELD, capacity, host.options.now());
   });
   requestAnimationFrame(() => {
     const nextEditor = host.root.querySelector<HTMLElement>(".cupping-main__editor");
@@ -137,25 +201,16 @@ async function persistCapacity(host: RendererInternals, capacity: number): Promi
   });
 }
 
-function buildNumberRow(capacity: number, position: NumberPosition): HTMLElement {
-  const numbers = document.createElement("div");
-  numbers.className = `final-assessment__cup-number-row is-${position}`;
-  numbers.setAttribute("aria-hidden", "true");
-  for (let index = 1; index <= capacity; index += 1) {
-    const number = document.createElement("span");
-    number.className = "final-assessment__cup-number";
-    number.textContent = String(index);
-    numbers.append(number);
-  }
-  const spacer = document.createElement("span");
-  spacer.className = "final-assessment__cup-number-spacer";
-  numbers.append(spacer);
-  return numbers;
+function cupNumber(index: number, placeholder = false): HTMLElement {
+  const number = document.createElement("span");
+  number.className = `cup-comparison__number${placeholder ? " is-placeholder" : ""}`;
+  number.textContent = placeholder ? "0" : String(index);
+  number.setAttribute("aria-hidden", "true");
+  return number;
 }
 
 function buildCupSelector(
   host: RendererInternals,
-  field: HTMLElement,
   label: string,
   countField: string,
   idsField: string,
@@ -163,72 +218,86 @@ function buildCupSelector(
   capacity: number,
   locked: boolean,
   numberPosition: NumberPosition
-): void {
+): HTMLElement {
   const selected = new Set(selectedIds);
-  field.className = "final-assessment__cup-field final-assessment__cup-field--indexed";
-  field.replaceChildren();
+  const field = document.createElement("div");
+  field.className = `cup-comparison__selector is-${numberPosition}-numbered`;
 
   const labelNode = document.createElement("span");
-  labelNode.className = "final-assessment__cup-label";
+  labelNode.className = "cup-comparison__label";
   labelNode.textContent = label;
 
-  const row = document.createElement("div");
-  row.className = "final-assessment__cup-index-row";
-  row.setAttribute("role", "group");
-  row.setAttribute("aria-label", label);
+  const track = document.createElement("div");
+  track.className = "cup-comparison__track";
+  const slots = document.createElement("div");
+  slots.className = "cup-comparison__slots";
+  slots.setAttribute("role", "group");
+  slots.setAttribute("aria-label", label);
 
   for (let index = 1; index <= capacity; index += 1) {
+    const slot = document.createElement("span");
+    slot.className = "cup-comparison__slot";
+
     const control = document.createElement("button");
     control.type = "button";
-    control.className = "final-assessment__cup-index";
+    control.className = "cup-comparison__square";
     control.textContent = "";
     control.dataset.cupIndex = String(index);
     control.disabled = locked;
     control.setAttribute("aria-pressed", String(selected.has(index)));
-    control.setAttribute("aria-label", `${label} 第 ${index} 杯${selected.has(index) ? "，有问题" : "，未标记"}`);
-    control.title = `第 ${index} 杯`;
+    control.setAttribute("aria-label", `${label} 第 ${index} 杯${selected.has(index) ? "，有问题" : "，正常"}`);
+    control.title = `${label} · 第 ${index} 杯`;
     control.addEventListener("click", () => {
       if (selected.has(index)) selected.delete(index); else selected.add(index);
       const pressed = selected.has(index);
       control.setAttribute("aria-pressed", String(pressed));
-      control.setAttribute("aria-label", `${label} 第 ${index} 杯${pressed ? "，有问题" : "，未标记"}`);
+      control.setAttribute("aria-label", `${label} 第 ${index} 杯${pressed ? "，有问题" : "，正常"}`);
       const ids = [...selected].sort((a, b) => a - b);
-      void persistSelection(host, idsField, countField, ids).catch((error) => console.error("AromaSense cup selection save failed", error));
+      void persistSelection(host, idsField, countField, ids)
+        .catch((error) => console.error("AromaSense cup selection save failed", error));
     });
-    row.append(control);
+
+    const number = cupNumber(index);
+    if (numberPosition === "top") slot.append(number, control);
+    else slot.append(control, number);
+    slots.append(slot);
   }
 
+  const addSlot = document.createElement("span");
+  addSlot.className = "cup-comparison__slot cup-comparison__add-slot";
   const add = document.createElement("button");
   add.type = "button";
-  add.className = "final-assessment__cup-add";
+  add.className = "cup-comparison__add";
   add.textContent = "+";
   add.disabled = locked || capacity >= MAX_VISIBLE_CUPS;
   add.setAttribute("aria-label", "增加一个杯位");
   add.title = "增加杯位（两项同步）";
   add.addEventListener("click", () => {
     if (capacity >= MAX_VISIBLE_CUPS) return;
-    void persistCapacity(host, capacity + 1).catch((error) => console.error("AromaSense cup capacity save failed", error));
+    void persistCapacity(host, capacity + 1)
+      .catch((error) => console.error("AromaSense cup capacity save failed", error));
   });
-  row.append(add);
+  const spacer = cupNumber(0, true);
+  if (numberPosition === "top") addSlot.append(spacer, add);
+  else addSlot.append(add, spacer);
+  slots.append(addSlot);
 
-  const track = document.createElement("div");
-  track.className = "final-assessment__cup-track";
-  const numbers = buildNumberRow(capacity, numberPosition);
-  if (numberPosition === "top") track.append(numbers, row);
-  else track.append(row, numbers);
-
+  track.append(slots);
   field.append(labelNode, track);
+  return field;
 }
 
 async function applyCupSelectors(host: RendererInternals): Promise<void> {
   installStyles();
   const state = host.state;
   const active = state?.active;
-  if (!state || !active || active.context.stageId !== "overall") return;
-  const grid = host.root.querySelector<HTMLElement>(".final-assessment__cup-grid");
-  if (!grid) return;
-  const fields = [...grid.querySelectorAll<HTMLElement>(".final-assessment__cup-field")];
-  if (fields.length < 2) return;
+  if (!state || !active) return;
+
+  // cupping-input-ux-upgrade renders the visible slider block as .cup-comparison.
+  // Replace that exact visible block after every render rather than editing the
+  // hidden .final-assessment__cup-grid underneath it.
+  const comparison = host.root.querySelector<HTMLElement>(".cup-comparison");
+  if (!comparison) return;
 
   const observations = await host.summaryReader.listObservations(active.context.sampleId);
   const nonUniform = normalizedIds(
@@ -240,17 +309,39 @@ async function applyCupSelectors(host: RendererInternals): Promise<void> {
     latestValue(observations, SCA_DEFECTIVE_CUPS_FIELD)
   );
   const storedCapacity = Number(latestValue(observations, SCA_CUP_CAPACITY_FIELD));
+  const legacyCapacity = Number(latestValue(observations, LEGACY_SAMPLE_CUP_COUNT_FIELD));
   const capacity = Math.min(MAX_VISIBLE_CUPS, Math.max(
     5,
     Number.isInteger(storedCapacity) ? storedCapacity : 0,
+    Number.isInteger(legacyCapacity) ? legacyCapacity : 0,
     nonUniform.at(-1) ?? 0,
     defective.at(-1) ?? 0
   ));
   const locked = state.lockedSampleIds.includes(active.context.sampleId);
 
-  buildCupSelector(host, fields[0], "非一致性", SCA_NON_UNIFORM_CUPS_FIELD, SCA_NON_UNIFORM_CUP_IDS_FIELD, nonUniform, capacity, locked, "top");
-  buildCupSelector(host, fields[1], "缺陷杯数", SCA_DEFECTIVE_CUPS_FIELD, SCA_DEFECTIVE_CUP_IDS_FIELD, defective, capacity, locked, "bottom");
-  host.root.querySelector(".final-assessment__zero-cups")?.remove();
+  comparison.classList.add("cup-comparison--square-picker");
+  comparison.replaceChildren(
+    buildCupSelector(
+      host,
+      "非一致性",
+      SCA_NON_UNIFORM_CUPS_FIELD,
+      SCA_NON_UNIFORM_CUP_IDS_FIELD,
+      nonUniform,
+      capacity,
+      locked,
+      "top"
+    ),
+    buildCupSelector(
+      host,
+      "缺陷杯数",
+      SCA_DEFECTIVE_CUPS_FIELD,
+      SCA_DEFECTIVE_CUP_IDS_FIELD,
+      defective,
+      capacity,
+      locked,
+      "bottom"
+    )
+  );
 }
 
 function installPatch(): void {
