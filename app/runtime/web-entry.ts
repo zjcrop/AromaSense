@@ -27,6 +27,7 @@ import "../ui/dom/cupping-aroma-single-axis-score";
 import "../ui/dom/cupping-adjacent-navigation-hotfix";
 import "../ui/dom/cupping-mobile-browser-hotfix";
 import "../ui/dom/cupping-cup-selection-hotfix";
+import "../ui/dom/source-choice-layout-hotfix";
 import { AromaSenseDomApp } from "./dom-app";
 import "./recognition-session-lifecycle";
 import { YingxiangBrowserBootstrap } from "./yingxiang-browser-bootstrap";
