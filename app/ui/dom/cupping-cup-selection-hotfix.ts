@@ -9,8 +9,10 @@ import {
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v2");
+const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v3");
 const MAX_VISIBLE_CUPS = 40;
+
+type NumberPosition = "top" | "bottom";
 
 interface RendererInternals {
   root: HTMLElement;
@@ -57,25 +59,34 @@ function installStyles(): void {
       border:0!important;
       box-shadow:0 4px 14px rgba(0,0,0,.24)!important;
     }
-    .final-assessment__cup-grid{grid-template-columns:1fr!important;gap:10px!important;margin-top:12px!important}
+    .final-assessment__cup-grid{grid-template-columns:1fr!important;gap:7px!important;margin-top:12px!important}
     .final-assessment__cup-field--indexed{
       display:grid!important;grid-template-columns:72px minmax(0,1fr)!important;gap:10px!important;
-      align-items:center!important;min-height:30px!important;
+      align-items:center!important;min-height:46px!important;
     }
     .final-assessment__cup-label{display:block;color:#c8c0b5;font-size:11px;line-height:1.2;white-space:nowrap}
-    .final-assessment__cup-index-row{
-      display:flex;align-items:center;gap:7px;min-width:0;overflow-x:auto;scrollbar-width:none;padding:2px 0;
-      touch-action:pan-x;
+    .final-assessment__cup-track{
+      min-width:0;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;touch-action:pan-x;
     }
-    .final-assessment__cup-index-row::-webkit-scrollbar{display:none}
+    .final-assessment__cup-track::-webkit-scrollbar{display:none}
+    .final-assessment__cup-index-row,.final-assessment__cup-number-row{
+      display:flex;align-items:center;gap:7px;width:max-content;min-width:max-content;
+    }
+    .final-assessment__cup-index-row{padding:2px 0}
+    .final-assessment__cup-number-row{padding:0 0 2px;color:#8f8b85;font-size:9px;line-height:1;font-variant-numeric:tabular-nums}
+    .final-assessment__cup-number-row.is-bottom{padding:2px 0 0}
+    .final-assessment__cup-number{
+      flex:0 0 24px;width:24px;text-align:center;box-sizing:border-box;
+    }
+    .final-assessment__cup-number-spacer{flex:0 0 26px;width:26px;height:1px}
     .final-assessment__cup-index{
       flex:0 0 24px;width:24px;height:24px;padding:0;box-sizing:border-box;
       border:1px solid #696969;border-radius:3px;background:#5b5b5b;color:transparent;
       font-size:0;line-height:0;cursor:pointer;box-shadow:none;
-      transition:background-color .12s ease,border-color .12s ease,transform .12s ease;
+      transition:background-color .12s ease,border-color .12s ease,transform .12s ease,box-shadow .12s ease;
     }
     .final-assessment__cup-index[aria-pressed="true"]{
-      border-color:#d0ad62;background:#b9995a;color:transparent;box-shadow:0 0 0 1px rgba(185,153,90,.18);
+      border-color:#ffffff;background:#f4f4f4;color:transparent;box-shadow:0 0 0 1px rgba(255,255,255,.22);
     }
     .final-assessment__cup-index:active:not(:disabled){transform:scale(.92)}
     .final-assessment__cup-add{
@@ -86,8 +97,10 @@ function installStyles(): void {
     .final-assessment__zero-cups{display:none!important}
     @media(max-width:390px){
       .final-assessment__cup-field--indexed{grid-template-columns:66px minmax(0,1fr)!important;gap:8px!important}
-      .final-assessment__cup-index-row{gap:6px}
-      .final-assessment__cup-index{flex-basis:22px;width:22px;height:22px;border-radius:3px}
+      .final-assessment__cup-index-row,.final-assessment__cup-number-row{gap:6px}
+      .final-assessment__cup-index,.final-assessment__cup-number{flex-basis:22px;width:22px}
+      .final-assessment__cup-index{height:22px;border-radius:3px}
+      .final-assessment__cup-number-spacer{flex-basis:24px;width:24px}
       .final-assessment__cup-add{flex-basis:24px;width:24px;height:24px;font-size:21px}
     }
   `;
@@ -124,6 +137,22 @@ async function persistCapacity(host: RendererInternals, capacity: number): Promi
   });
 }
 
+function buildNumberRow(capacity: number, position: NumberPosition): HTMLElement {
+  const numbers = document.createElement("div");
+  numbers.className = `final-assessment__cup-number-row is-${position}`;
+  numbers.setAttribute("aria-hidden", "true");
+  for (let index = 1; index <= capacity; index += 1) {
+    const number = document.createElement("span");
+    number.className = "final-assessment__cup-number";
+    number.textContent = String(index);
+    numbers.append(number);
+  }
+  const spacer = document.createElement("span");
+  spacer.className = "final-assessment__cup-number-spacer";
+  numbers.append(spacer);
+  return numbers;
+}
+
 function buildCupSelector(
   host: RendererInternals,
   field: HTMLElement,
@@ -132,7 +161,8 @@ function buildCupSelector(
   idsField: string,
   selectedIds: readonly number[],
   capacity: number,
-  locked: boolean
+  locked: boolean,
+  numberPosition: NumberPosition
 ): void {
   const selected = new Set(selectedIds);
   field.className = "final-assessment__cup-field final-assessment__cup-field--indexed";
@@ -155,11 +185,13 @@ function buildCupSelector(
     control.dataset.cupIndex = String(index);
     control.disabled = locked;
     control.setAttribute("aria-pressed", String(selected.has(index)));
-    control.setAttribute("aria-label", `${label} 第 ${index} 杯`);
+    control.setAttribute("aria-label", `${label} 第 ${index} 杯${selected.has(index) ? "，有问题" : "，未标记"}`);
     control.title = `第 ${index} 杯`;
     control.addEventListener("click", () => {
       if (selected.has(index)) selected.delete(index); else selected.add(index);
-      control.setAttribute("aria-pressed", String(selected.has(index)));
+      const pressed = selected.has(index);
+      control.setAttribute("aria-pressed", String(pressed));
+      control.setAttribute("aria-label", `${label} 第 ${index} 杯${pressed ? "，有问题" : "，未标记"}`);
       const ids = [...selected].sort((a, b) => a - b);
       void persistSelection(host, idsField, countField, ids).catch((error) => console.error("AromaSense cup selection save failed", error));
     });
@@ -178,7 +210,14 @@ function buildCupSelector(
     void persistCapacity(host, capacity + 1).catch((error) => console.error("AromaSense cup capacity save failed", error));
   });
   row.append(add);
-  field.append(labelNode, row);
+
+  const track = document.createElement("div");
+  track.className = "final-assessment__cup-track";
+  const numbers = buildNumberRow(capacity, numberPosition);
+  if (numberPosition === "top") track.append(numbers, row);
+  else track.append(row, numbers);
+
+  field.append(labelNode, track);
 }
 
 async function applyCupSelectors(host: RendererInternals): Promise<void> {
@@ -209,8 +248,8 @@ async function applyCupSelectors(host: RendererInternals): Promise<void> {
   ));
   const locked = state.lockedSampleIds.includes(active.context.sampleId);
 
-  buildCupSelector(host, fields[0], "非一致性", SCA_NON_UNIFORM_CUPS_FIELD, SCA_NON_UNIFORM_CUP_IDS_FIELD, nonUniform, capacity, locked);
-  buildCupSelector(host, fields[1], "缺陷杯数", SCA_DEFECTIVE_CUPS_FIELD, SCA_DEFECTIVE_CUP_IDS_FIELD, defective, capacity, locked);
+  buildCupSelector(host, fields[0], "非一致性", SCA_NON_UNIFORM_CUPS_FIELD, SCA_NON_UNIFORM_CUP_IDS_FIELD, nonUniform, capacity, locked, "top");
+  buildCupSelector(host, fields[1], "缺陷杯数", SCA_DEFECTIVE_CUPS_FIELD, SCA_DEFECTIVE_CUP_IDS_FIELD, defective, capacity, locked, "bottom");
   host.root.querySelector(".final-assessment__zero-cups")?.remove();
 }
 
