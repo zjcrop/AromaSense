@@ -1,6 +1,6 @@
 /* AromaSense cloud-record visual alignment override.
- * This module intentionally mirrors the existing account form metrics so the
- * cloud library feels like part of the same form system rather than a new UI.
+ * This module mirrors the existing account form metrics so the cloud library
+ * remains visually consistent with the established form system.
  */
 const style = document.createElement("style");
 style.dataset.aromasenseCloudFormAlignment = "true";
@@ -31,23 +31,3 @@ style.textContent = `
 @media(max-width:520px){.cloud-records-panel{width:calc(100vw - 20px)!important}.cloud-records-header{padding:18px 18px 12px!important}.cloud-records-body{padding:0 18px 12px!important}.cloud-records-footer{padding-left:18px!important;padding-right:18px!important;padding-bottom:max(18px,env(safe-area-inset-bottom))!important}.cloud-records-range{grid-template-columns:1fr!important}}
 `;
 document.head.append(style);
-
-const attachAccountLauncher = (): void => {
-  for (const card of document.querySelectorAll<HTMLElement>(".account-card")) {
-    if (!card.querySelector(".account-card__status--good")) continue;
-    const actions = card.querySelector<HTMLElement>(".account-card__actions");
-    if (!actions || actions.querySelector("[data-cloud-records-account-launcher]")) continue;
-    const source = document.querySelector<HTMLButtonElement>("[data-cloud-records-launcher]");
-    if (!source) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "account-card__secondary";
-    button.dataset.cloudRecordsAccountLauncher = "true";
-    button.textContent = "云端记录";
-    button.addEventListener("click", () => source.click());
-    actions.insertBefore(button, actions.children[1] ?? null);
-  }
-};
-const observer = new MutationObserver(attachAccountLauncher);
-observer.observe(document.documentElement, { childList: true, subtree: true });
-attachAccountLauncher();
