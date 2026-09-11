@@ -35,9 +35,9 @@ function isUnfinished(record: SessionRecordSummary): boolean {
 }
 function isEditableFree(record: SessionRecordSummary): boolean { return isUnfinished(record) && cuppingModeFromMetadata(record.metadata) === "free"; }
 function statusLabel(record: SessionRecordSummary): string {
-  if (record.syncState === "synced") return "已同步";
-  if (record.syncState === "failed") return "同步失败";
-  return navigator.onLine ? "待同步" : "离线测评待同步";
+  if (record.syncState === "synced") return "云端上传成功";
+  if (record.syncState === "failed") return record.syncError ? `云端上传失败：${record.syncError}` : "云端上传失败";
+  return navigator.onLine ? "待上传云端" : "离线，待上传云端";
 }
 function groupValue(record: SessionRecordSummary, key: GroupKey): string {
   if (key === "none") return "全部记录";
@@ -64,6 +64,12 @@ function installStatusScopeStyles(): void {
     .session-records__scope-count{margin-left:6px;color:#77726b;font-size:10px;font-weight:600}.session-records__scope.is-active .session-records__scope-count{color:#b99c68}
     .session-record__action.is-edit{color:#d6ad63!important;font-weight:750!important}
     .session-record__action.is-retest,.session-records__batch-action.is-retest{color:#d6ad63!important;font-weight:800!important}
+    .session-records__tool.is-upload{color:#d6c394!important;font-weight:760!important}
+    .session-records__tool.is-upload:disabled{opacity:.5;cursor:default}
+    .session-record__sync-dot{display:inline-block;flex:0 0 10px;width:10px;height:10px;margin-left:7px;border-radius:999px;border:1px solid rgba(255,255,255,.24);vertical-align:middle}
+    .session-record__sync-dot.is-synced{background:#55c878;box-shadow:0 0 0 2px rgba(85,200,120,.12),0 0 8px rgba(85,200,120,.42)}
+    .session-record__sync-dot.is-pending{background:#58a9e8;box-shadow:0 0 0 2px rgba(88,169,232,.12),0 0 8px rgba(88,169,232,.38)}
+    .session-record__sync-dot.is-failed{background:#e05b5b;box-shadow:0 0 0 2px rgba(224,91,91,.12),0 0 8px rgba(224,91,91,.38)}
   `; document.head.append(style);
 }
 
@@ -75,6 +81,7 @@ export class SessionRecordsRenderer {
   private statusScope: StatusScope;
   private readonly selected = new Set<string>();
   private ordered: SessionRecordSummary[] = [];
+  private syncingAll = false;
 
   constructor(private readonly root: HTMLElement, private readonly options: SessionRecordsRendererOptions) {
     installStatusScopeStyles();
@@ -101,7 +108,7 @@ export class SessionRecordsRenderer {
       batch.append(
         button("session-records__batch-action", "全选", () => { for (const record of filtered) this.selected.add(record.sessionId); void this.render(); }),
         button("session-records__batch-action", "取消选择", () => { this.selected.clear(); void this.render(); }),
-        button("session-records__batch-action", "立即同步", () => this.syncSelected())
+        button("session-records__batch-action", "上传所选", () => this.syncSelected())
       );
       if (this.statusScope === "completed" && this.options.onRetest) {
         batch.append(button("session-records__batch-action is-retest", "批量复测", () => this.retestSelected()));
@@ -127,10 +134,12 @@ export class SessionRecordsRenderer {
 
   private renderToolbar(): HTMLElement {
     const toolbar = element("nav", "session-records__toolbar");
+    const upload = button("session-records__tool is-upload", this.syncingAll ? "上传中…" : "上传云端", () => this.syncAll()); upload.disabled = this.syncingAll || this.options.records.length === 0;
     toolbar.append(
       button("session-records__tool", "筛选", () => { this.filterKey = this.filterKey === "all" ? "date" : "all"; if (this.filterKey === "all") this.filterText = ""; void this.render(); }),
       button(`session-records__tool${this.management ? " is-active" : ""}`, "管理", () => { this.management = !this.management; if (!this.management) this.selected.clear(); void this.render(); }),
-      button("session-records__tool", "分组", () => { this.groupKey = this.groupKey === "none" ? "date" : "none"; void this.render(); })
+      button("session-records__tool", "分组", () => { this.groupKey = this.groupKey === "none" ? "date" : "none"; void this.render(); }),
+      upload
     ); return toolbar;
   }
 
@@ -162,13 +171,14 @@ export class SessionRecordsRenderer {
   }
 
   private renderRecord(record: SessionRecordSummary): HTMLElement {
-    const row = element("article", "session-record"); row.dataset.sessionId = record.sessionId; row.dataset.sessionStatus = record.status; if (this.selected.has(record.sessionId)) row.classList.add("is-selected");
+    const row = element("article", "session-record"); row.dataset.sessionId = record.sessionId; row.dataset.sessionStatus = record.status; row.dataset.syncState = record.syncState; if (this.selected.has(record.sessionId)) row.classList.add("is-selected");
     if (this.management) { const check = element("input", "session-record__check"); check.type = "checkbox"; check.checked = this.selected.has(record.sessionId); check.addEventListener("change", () => { check.checked ? this.selected.add(record.sessionId) : this.selected.delete(record.sessionId); void this.render(); }); row.append(check); }
     const content = element("div", "session-record__content"); const first = element("div", "session-record__line session-record__line--primary"); const left = element("div", "session-record__identity"); left.append(element("span", "session-record__date", record.metadata.date), element("strong", "session-record__name", record.displayName));
-    const right = element("div", "session-record__actions"); const dot = element("span", `session-record__sync-dot is-${record.syncState}`); dot.title = statusLabel(record); right.append(dot);
+    const right = element("div", "session-record__actions");
     if (isEditableFree(record) && this.options.onEdit) right.append(actionButton("session-record__action is-edit", "编辑", () => this.options.onEdit?.(record.sessionId)));
     if (!isUnfinished(record) && this.options.onRetest) right.append(actionButton("session-record__action is-retest", "复测", () => this.retestRecords([record.sessionId])));
     right.append(actionButton("session-record__action", "分享", () => this.share(record.sessionId)), actionButton("session-record__action", "导出", () => this.options.onExport(record.sessionId)), actionButton("session-record__action", "删除", () => this.deleteRecords([record.sessionId])));
+    const dot = element("span", `session-record__sync-dot is-${record.syncState}`); const syncLabel = statusLabel(record); dot.title = syncLabel; dot.setAttribute("role", "img"); dot.setAttribute("aria-label", syncLabel); right.append(dot);
     first.append(left, right);
     const second = element("div", "session-record__line session-record__line--secondary"); second.append(element("span", "session-record__meta", `${record.sampleCount} 个样品`), element("span", "session-record__meta", `完成度 ${record.completionPct}%`), element("span", "session-record__meta", `可置信度 ${record.completenessPct}%`)); second.title = "可置信度按已填写项目占全部应填写项目的比例计算，内部字段为 dataCompleteness。";
     content.append(first, second); row.append(content); this.attachRowInteraction(row, record); return row;
@@ -202,4 +212,18 @@ export class SessionRecordsRenderer {
   private async deleteRecords(ids: readonly string[]): Promise<void> { if (!ids.length || !window.confirm(`删除 ${ids.length} 条杯测记录？`)) return; await this.options.onDelete(ids); for (const id of ids) this.selected.delete(id); }
   private async deleteSelected(): Promise<void> { await this.deleteRecords([...this.selected]); }
   private async syncSelected(): Promise<void> { const ids = [...this.selected]; if (!ids.length) return; await this.options.onSync(ids); this.selected.clear(); }
+  private async syncAll(): Promise<void> {
+    if (this.syncingAll) return;
+    const ids = this.options.records.map((record) => record.sessionId);
+    if (!ids.length) return;
+    this.syncingAll = true;
+    await this.render();
+    try {
+      await this.options.onSync(ids);
+    } catch (error) {
+      this.syncingAll = false;
+      await this.render();
+      window.alert(`上传云端失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
