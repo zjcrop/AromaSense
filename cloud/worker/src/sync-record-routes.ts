@@ -49,6 +49,42 @@ function validRecordId(value: string): boolean {
   return value.length > 0 && value.length <= 256;
 }
 
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function indexEntry(row: SyncRecordRow): Record<string, unknown> {
+  let payload: Record<string, unknown> | undefined;
+  try { payload = row.payload_json ? asObject(JSON.parse(row.payload_json)) : undefined; }
+  catch { payload = undefined; }
+  const session = asObject(payload?.session);
+  const metadata = asObject(session?.metadata);
+  return {
+    recordId: row.record_id,
+    date: asText(metadata?.date) || asText(session?.createdAt).slice(0, 10),
+    organizer: asText(metadata?.organizer),
+    eventName: asText(metadata?.eventName) || asText(session?.title),
+    status: asText(session?.status) || "draft",
+    updatedAt: row.updated_at,
+    serverChangedAt: row.server_changed_at
+  };
+}
+
+function envelope(row: SyncRecordRow, changeId = 0): Record<string, unknown> {
+  return {
+    changeId,
+    recordId: row.record_id,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? undefined,
+    payload: row.payload_json ? JSON.parse(row.payload_json) as Record<string, unknown> : undefined,
+    serverChangedAt: row.server_changed_at
+  };
+}
+
 async function putRecord(request: Request, recordId: string, db: D1Database, user: SyncUser): Promise<Response> {
   if (!validRecordId(recordId)) return json({ ok: false, error: "INVALID_RECORD_ID" }, 400);
   let body: SyncRecordBody;
@@ -135,16 +171,40 @@ async function listChanges(url: URL, db: D1Database, user: SyncUser): Promise<Re
   `).bind(user.userId, cursor, limit).all<SyncChangeRow>();
 
   const rows = result.results ?? [];
-  const records = rows.map((row) => ({
-    changeId: row.change_id,
-    recordId: row.record_id,
-    updatedAt: row.updated_at,
-    deletedAt: row.deleted_at ?? undefined,
-    payload: row.payload_json ? JSON.parse(row.payload_json) as Record<string, unknown> : undefined,
-    serverChangedAt: row.server_changed_at
-  }));
+  const records = rows.map((row) => envelope(row, row.change_id));
   const nextCursor = rows.length ? rows[rows.length - 1]!.change_id : cursor;
   return json({ ok: true, records, nextCursor, hasMore: rows.length === limit });
+}
+
+async function listIndex(url: URL, db: D1Database, user: SyncUser): Promise<Response> {
+  const offsetRaw = Number(url.searchParams.get("offset") || "0");
+  const limitRaw = Number(url.searchParams.get("limit") || "200");
+  const offset = Number.isSafeInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const limit = Number.isSafeInteger(limitRaw) ? Math.max(1, Math.min(500, limitRaw)) : 200;
+  const result = await db.prepare(`
+    SELECT record_id, updated_at, deleted_at, payload_json, server_changed_at
+    FROM sync_records
+    WHERE owner_user_id = ?1 AND deleted_at IS NULL
+    ORDER BY updated_at DESC, record_id ASC
+    LIMIT ?2 OFFSET ?3
+  `).bind(user.userId, limit, offset).all<SyncRecordRow>();
+  const rows = result.results ?? [];
+  return json({
+    ok: true,
+    records: rows.map(indexEntry),
+    nextOffset: offset + rows.length,
+    hasMore: rows.length === limit
+  });
+}
+
+async function getRecord(recordId: string, db: D1Database, user: SyncUser): Promise<Response> {
+  if (!validRecordId(recordId)) return json({ ok: false, error: "INVALID_RECORD_ID" }, 400);
+  const row = await db.prepare(`
+    SELECT record_id, updated_at, deleted_at, payload_json, server_changed_at
+    FROM sync_records WHERE owner_user_id = ?1 AND record_id = ?2
+  `).bind(user.userId, recordId).first<SyncRecordRow>();
+  if (!row) return json({ ok: false, error: "RECORD_NOT_FOUND" }, 404);
+  return json({ ok: true, record: envelope(row) });
 }
 
 export async function handleRecordSyncRoute(
@@ -157,8 +217,13 @@ export async function handleRecordSyncRoute(
     if (request.method === "GET") return listChanges(url, db, user);
     return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
   }
+  if (url.pathname === "/api/v1/records/index") {
+    if (request.method === "GET") return listIndex(url, db, user);
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
+  }
   if (url.pathname.startsWith("/api/v1/records/")) {
     const recordId = decodeURIComponent(url.pathname.slice("/api/v1/records/".length));
+    if (request.method === "GET") return getRecord(recordId, db, user);
     if (request.method === "PUT") return putRecord(request, recordId, db, user);
     return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
   }
