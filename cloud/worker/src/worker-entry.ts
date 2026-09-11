@@ -1,4 +1,5 @@
 import baseWorker from "./index";
+import { handleLightweightRecordIndexRoute } from "./sync-record-index-route";
 import { handleRecordSyncRoute } from "./sync-record-routes";
 
 interface Env {
@@ -65,6 +66,8 @@ export default {
       if (!env.DB) return json({ ok: false, error: "DB_NOT_CONFIGURED" }, 503);
       const user = await authenticateRecordSync(request, env.DB);
       if (!user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
+      const lightweightIndex = await handleLightweightRecordIndexRoute(request, url, env.DB, user);
+      if (lightweightIndex) return lightweightIndex;
       const response = await handleRecordSyncRoute(request, url, env.DB, user);
       if (response) return response;
     }
