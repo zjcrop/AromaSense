@@ -9,7 +9,7 @@ import {
 import type { CuppingScreenController, CuppingScreenState } from "../cupping-screen-controller";
 import { CuppingScreenRenderer } from "./cupping-screen-renderer";
 
-const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v1");
+const PATCH_FLAG = Symbol.for("aromasense.cupping.cup-selection-hotfix.20260911.v2");
 const MAX_VISIBLE_CUPS = 40;
 
 interface RendererInternals {
@@ -57,25 +57,38 @@ function installStyles(): void {
       border:0!important;
       box-shadow:0 4px 14px rgba(0,0,0,.24)!important;
     }
-    .final-assessment__cup-grid{grid-template-columns:1fr!important;gap:12px!important}
-    .final-assessment__cup-field--indexed{display:grid!important;gap:7px!important}
-    .final-assessment__cup-label{display:flex;align-items:baseline;gap:8px;color:#c8c0b5;font-size:11px}
-    .final-assessment__cup-hint{color:#77716a;font-size:10px;font-weight:500}
-    .final-assessment__cup-index-row{display:flex;align-items:center;gap:7px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:1px 0 3px}
-    .final-assessment__cup-index-row::-webkit-scrollbar{display:none}
-    .final-assessment__cup-index,.final-assessment__cup-add{
-      flex:0 0 38px;width:38px;height:38px;display:grid;place-items:center;box-sizing:border-box;
-      border:1px solid rgba(154,157,160,.52);border-radius:7px;background:transparent;color:#c9c5be;
-      font:inherit;font-size:12px;font-weight:800;line-height:1;cursor:pointer;box-shadow:none;
+    .final-assessment__cup-grid{grid-template-columns:1fr!important;gap:10px!important;margin-top:12px!important}
+    .final-assessment__cup-field--indexed{
+      display:grid!important;grid-template-columns:72px minmax(0,1fr)!important;gap:10px!important;
+      align-items:center!important;min-height:30px!important;
     }
-    .final-assessment__cup-index[aria-pressed="true"]{border-color:#b9995a;background:#b9995a;color:#111}
-    .final-assessment__cup-add{border-color:rgba(185,153,90,.36);color:#d6ad63;font-size:20px;font-weight:500}
+    .final-assessment__cup-label{display:block;color:#c8c0b5;font-size:11px;line-height:1.2;white-space:nowrap}
+    .final-assessment__cup-index-row{
+      display:flex;align-items:center;gap:7px;min-width:0;overflow-x:auto;scrollbar-width:none;padding:2px 0;
+      touch-action:pan-x;
+    }
+    .final-assessment__cup-index-row::-webkit-scrollbar{display:none}
+    .final-assessment__cup-index{
+      flex:0 0 24px;width:24px;height:24px;padding:0;box-sizing:border-box;
+      border:1px solid #696969;border-radius:3px;background:#5b5b5b;color:transparent;
+      font-size:0;line-height:0;cursor:pointer;box-shadow:none;
+      transition:background-color .12s ease,border-color .12s ease,transform .12s ease;
+    }
+    .final-assessment__cup-index[aria-pressed="true"]{
+      border-color:#d0ad62;background:#b9995a;color:transparent;box-shadow:0 0 0 1px rgba(185,153,90,.18);
+    }
+    .final-assessment__cup-index:active:not(:disabled){transform:scale(.92)}
+    .final-assessment__cup-add{
+      flex:0 0 26px;width:26px;height:26px;display:grid;place-items:center;padding:0;margin-left:1px;
+      border:0;background:transparent;color:#d6ad63;font:inherit;font-size:23px;font-weight:500;line-height:1;cursor:pointer;box-shadow:none;
+    }
     .final-assessment__cup-index:disabled,.final-assessment__cup-add:disabled{opacity:.38;cursor:not-allowed}
     .final-assessment__zero-cups{display:none!important}
     @media(max-width:390px){
-      .final-assessment__cup-index-row{gap:5px}
-      .final-assessment__cup-index,.final-assessment__cup-add{flex-basis:34px;width:34px;height:34px;border-radius:6px;font-size:11px}
-      .final-assessment__cup-add{font-size:18px}
+      .final-assessment__cup-field--indexed{grid-template-columns:66px minmax(0,1fr)!important;gap:8px!important}
+      .final-assessment__cup-index-row{gap:6px}
+      .final-assessment__cup-index{flex-basis:22px;width:22px;height:22px;border-radius:3px}
+      .final-assessment__cup-add{flex-basis:24px;width:24px;height:24px;font-size:21px}
     }
   `;
   document.head.append(style);
@@ -125,13 +138,9 @@ function buildCupSelector(
   field.className = "final-assessment__cup-field final-assessment__cup-field--indexed";
   field.replaceChildren();
 
-  const labelRow = document.createElement("span");
-  labelRow.className = "final-assessment__cup-label";
-  labelRow.append(document.createTextNode(label));
-  const hint = document.createElement("small");
-  hint.className = "final-assessment__cup-hint";
-  hint.textContent = "未选择即为 0";
-  labelRow.append(hint);
+  const labelNode = document.createElement("span");
+  labelNode.className = "final-assessment__cup-label";
+  labelNode.textContent = label;
 
   const row = document.createElement("div");
   row.className = "final-assessment__cup-index-row";
@@ -142,10 +151,12 @@ function buildCupSelector(
     const control = document.createElement("button");
     control.type = "button";
     control.className = "final-assessment__cup-index";
-    control.textContent = String(index);
+    control.textContent = "";
+    control.dataset.cupIndex = String(index);
     control.disabled = locked;
     control.setAttribute("aria-pressed", String(selected.has(index)));
     control.setAttribute("aria-label", `${label} 第 ${index} 杯`);
+    control.title = `第 ${index} 杯`;
     control.addEventListener("click", () => {
       if (selected.has(index)) selected.delete(index); else selected.add(index);
       control.setAttribute("aria-pressed", String(selected.has(index)));
@@ -160,13 +171,14 @@ function buildCupSelector(
   add.className = "final-assessment__cup-add";
   add.textContent = "+";
   add.disabled = locked || capacity >= MAX_VISIBLE_CUPS;
-  add.setAttribute("aria-label", "增加一杯");
+  add.setAttribute("aria-label", "增加一个杯位");
+  add.title = "增加杯位（两项同步）";
   add.addEventListener("click", () => {
     if (capacity >= MAX_VISIBLE_CUPS) return;
     void persistCapacity(host, capacity + 1).catch((error) => console.error("AromaSense cup capacity save failed", error));
   });
   row.append(add);
-  field.append(labelRow, row);
+  field.append(labelNode, row);
 }
 
 async function applyCupSelectors(host: RendererInternals): Promise<void> {
@@ -197,8 +209,8 @@ async function applyCupSelectors(host: RendererInternals): Promise<void> {
   ));
   const locked = state.lockedSampleIds.includes(active.context.sampleId);
 
-  buildCupSelector(host, fields[0], "非一致性杯（每杯 −2）", SCA_NON_UNIFORM_CUPS_FIELD, SCA_NON_UNIFORM_CUP_IDS_FIELD, nonUniform, capacity, locked);
-  buildCupSelector(host, fields[1], "缺陷杯（每杯 −4）", SCA_DEFECTIVE_CUPS_FIELD, SCA_DEFECTIVE_CUP_IDS_FIELD, defective, capacity, locked);
+  buildCupSelector(host, fields[0], "非一致性", SCA_NON_UNIFORM_CUPS_FIELD, SCA_NON_UNIFORM_CUP_IDS_FIELD, nonUniform, capacity, locked);
+  buildCupSelector(host, fields[1], "缺陷杯数", SCA_DEFECTIVE_CUPS_FIELD, SCA_DEFECTIVE_CUP_IDS_FIELD, defective, capacity, locked);
   host.root.querySelector(".final-assessment__zero-cups")?.remove();
 }
 
