@@ -301,8 +301,15 @@ export class CuppingScreenRenderer {
       { transform: `translate3d(${offset}px,0,0)`, opacity: 0 },
       { transform: "translate3d(0,0,0)", opacity: 1 }
     ];
+    // Expanded labels already offset their number vertically. Keep that static
+    // alignment throughout entry so removing the animation cannot cause a jump.
+    const numberTransform = getComputedStyle(number).transform;
+    const numberKeyframes = [
+      { transform: `translate3d(${offset}px,0,0)${numberTransform === "none" ? "" : ` ${numberTransform}`}`, opacity: 0 },
+      { transform: numberTransform, opacity: 1 }
+    ];
     const timing: KeyframeAnimationOptions = { duration: 400, easing: "cubic-bezier(.16,.8,.22,1)", fill: "both" };
-    const animations = [marker.animate(keyframes, timing), number.animate(keyframes, timing)];
+    const animations = [marker.animate(keyframes, timing), number.animate(numberKeyframes, timing)];
     for (const animation of animations) animation.id = "aromasense-active-label-reveal";
     this.railRevealAnimations = animations;
     void Promise.all(animations.map((animation) => animation.finished)).then(() => {

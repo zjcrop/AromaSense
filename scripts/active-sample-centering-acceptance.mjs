@@ -99,14 +99,15 @@ async function selectDisplayNumber(cdp, displayNumber) {
   // nonzero frame. Read the actual browser effect's initial transform as well.
   requireCondition(frames.some(f=>f.markerStartX!==null&&f.numberStartX!==null&&f.markerRight-f.x+f.markerStartX<=0&&f.numberRight-f.numberX+f.numberStartX<=0),`Sample ${displayNumber} did not start outside the left viewport`);
   const entering=frames.filter(f=>f.visible&&f.opacity>.01&&f.opacity<.99);
+  const last=frames.at(-1);
   requireCondition(entering.length>=3,`Sample ${displayNumber} has no visible fade-in: ${JSON.stringify(frames)}`);
-  requireCondition(entering.every(f=>f.x<0&&Math.abs(f.x-f.numberX)<.5&&f.y===0&&f.numberY===0),`Marker and number did not move horizontally together: ${JSON.stringify(entering)}`);
+  requireCondition(entering.every(f=>f.x<0&&Math.abs(f.x-f.numberX)<.5&&f.y===0&&Math.abs(f.numberY-last.numberY)<.01),`Marker and number did not move horizontally together: ${JSON.stringify(entering)}`);
   requireCondition(entering.every(f=>Math.abs(f.opacity-f.numberOpacity)<.01),`Number faded separately from the marker: ${JSON.stringify(entering)}`);
   requireCondition(entering.every(f=>f.rowError<=1&&f.transition==='none'),`Visible marker travelled between rows: ${JSON.stringify(entering)}`);
   for(const key of ['top','numberTop','scrollTop']){
     requireCondition(Math.max(...entering.map(f=>f[key]))-Math.min(...entering.map(f=>f[key]))<=1,`Sample ${displayNumber} moved vertically during reveal (${key})`);
+    requireCondition(Math.abs(entering[0][key]-last[key])<=1,`Sample ${displayNumber} jumped at the end of reveal (${key})`);
   }
-  const last=frames.at(-1);
   requireCondition(last.visible&&last.opacity===1&&last.numberOpacity===1&&last.x===0&&last.numberX===0,`Sample ${displayNumber} did not finish revealing: ${JSON.stringify(last)}`);
   requireCondition(last.numberColor==='rgb(255, 255, 255)'&&last.numberWeight>=800,`Active number is not white and bold: ${JSON.stringify(last)}`);
   console.log(`Sample ${displayNumber} horizontal marker + number reveal: PASS`,JSON.stringify({frames:frames.length,enteringFrames:entering.length,final:last}));
