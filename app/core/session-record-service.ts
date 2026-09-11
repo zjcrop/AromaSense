@@ -30,6 +30,6 @@ export class SessionRecordService {
   }
 
   async delete(sessionId: string): Promise<void> {
-    await this.repository.deleteSession(sessionId);
+    await this.repository.deleteSessionWithSyncTombstone(sessionId, this.now());
   }
 }

@@ -1,4 +1,5 @@
 import { SENSORY_DICTIONARY_VERSION } from "../core/sensory-dictionary-v1";
+import { RecordSyncService } from "../core/record-sync-service";
 import localSchema from "../storage/0001_local_schema.sql";
 import sessionMetadataMigration from "../storage/0002_session_metadata.sql";
 import workflowMigration from "../storage/0003_workflow_event_comparison.sql";
@@ -6,9 +7,12 @@ import submissionMigration from "../storage/0004_submission_revisions.sql";
 import sessionTimingMigration from "../storage/0005_session_timing.sql";
 import yingxiangCollectionMigration from "../storage/0007_yingxiang_collection.sql";
 import yingxiangEventMigration from "../storage/0006_yingxiang_event_context.sql";
+import recordSyncMigration from "../storage/0008_record_sync.sql";
 import { AndroidSQLiteDriver } from "../storage/android-sqlite-driver";
 import { BrowserSQLiteDriver } from "../storage/browser-sqlite-driver";
 import { LocalMigrationRunner, type SQLiteScriptDriver } from "../storage/local-migration-runner";
+import { LocalAuthSessionStore } from "../storage/auth-session-store";
+import { UserPreferencesRepository } from "../storage/user-preferences-repository";
 import { StartupRenderer } from "../ui/dom/startup-renderer";
 import "../ui/dom/manual-split-photo-mode";
 import "../ui/dom/home-action-enhancements";
@@ -62,7 +66,8 @@ async function main(): Promise<void> {
       { id: 4, name: "submission_revisions_0_2", sql: submissionMigration },
       { id: 5, name: "session_timing_0_2", sql: sessionTimingMigration },
       { id: 6, name: "yingxiang_event_context_0_1", sql: yingxiangEventMigration },
-      { id: 7, name: "yingxiang_collection_0_1", sql: yingxiangCollectionMigration }
+      { id: 7, name: "yingxiang_collection_0_1", sql: yingxiangCollectionMigration },
+      { id: 8, name: "record_sync_0_2", sql: recordSyncMigration }
     ],
     new Date().toISOString()
   );
@@ -83,6 +88,23 @@ async function main(): Promise<void> {
   });
   window.AromaSenseNavigation = app.navigationApi();
 
+  const syncAuthStore = new LocalAuthSessionStore(new UserPreferencesRepository(db), now);
+  const recordSync = cloudBaseUrl
+    ? new RecordSyncService(db, cloudBaseUrl, async () => (await syncAuthStore.get())?.token, now)
+    : undefined;
+  const runRecordSync = async (): Promise<void> => {
+    if (!recordSync || !(await syncAuthStore.get())) return;
+    try { await recordSync.sync(); }
+    catch (error) { console.warn("AromaSense record sync deferred", error); }
+  };
+  if (recordSync) {
+    const legacySyncPending = app.syncPending.bind(app);
+    app.syncPending = async (sessionIds?: readonly string[]) => {
+      await runRecordSync();
+      return legacySyncPending(sessionIds);
+    };
+  }
+
   yingxiang = new YingxiangBrowserBootstrap(root, db, {
     now,
     createSessionId,
@@ -102,6 +124,7 @@ async function main(): Promise<void> {
   void app.preload().then((state) => {
     startup.setStatus("account", state.account === "signed-in" ? "ready" : "degraded", state.accountMessage);
     startup.setStatus("sync", "ready", `${state.syncMessage}${state.unfinishedSessions ? ` · ${state.unfinishedSessions} 个未完成杯测` : ""}`);
+    if (state.account === "signed-in") void app?.syncPending();
   }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     startup.setStatus("account", "degraded", "账户状态读取失败，本地杯测仍可使用");
@@ -112,6 +135,9 @@ async function main(): Promise<void> {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void app?.syncPending();
   });
+  window.setInterval(() => {
+    if (document.visibilityState === "visible" && navigator.onLine) void app?.syncPending();
+  }, 8_000);
 }
 
 void main().catch((error) => {
