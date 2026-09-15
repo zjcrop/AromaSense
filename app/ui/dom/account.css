@@ -1,13 +1,15 @@
-html, body { margin: 0; min-height: 100%; background: #151515; color: #f4efe4; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-body { min-height: 100dvh; }
+html, body { margin: 0; min-height: 100%; width: 100%; background: #151515; color: #f4efe4; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+body { min-height: 100vh; min-height: 100svh; }
 #version { position: fixed; right: 10px; bottom: max(8px, env(safe-area-inset-bottom)); z-index: 30; font-size: 10px; color: #817b70; pointer-events: none; }
-.account-screen { min-height: 100dvh; padding: 1px 0 max(24px, env(safe-area-inset-bottom)); }
-.account-card { width: min(460px, calc(100vw - 32px)); margin: 9vh auto 0; display: grid; gap: 12px; padding: 22px; border: 1px solid rgba(185,153,90,.4); border-radius: 18px; background: #1d1d1d; box-sizing: border-box; }
+.account-screen { min-height: 100vh; min-height: 100svh; padding: 1px 0 max(24px, env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+.account-card { width: min(460px, calc(100vw - 32px)); margin: max(28px, env(safe-area-inset-top)) auto 0; display: grid; gap: 12px; padding: 22px; border: 1px solid rgba(185,153,90,.4); border-radius: 18px; background: #1d1d1d; box-sizing: border-box; }
+.account-card[aria-busy="true"] { cursor: progress; }
 .account-card--verification { border-color: rgba(185,153,90,.64); }
 .account-card__title { margin: 0; font-size: 22px; color: #b9995a; }
 .account-card__text { margin: 0 0 4px; color: #aaa49a; line-height: 1.55; font-size: 13px; }
 .account-card__verification-main { margin: 0; padding: 12px 13px; border-radius: 10px; background: rgba(185,153,90,.09); color: #e7dcc5; font-size: 13px; line-height: 1.65; }
-.account-card__input { width: 100%; min-height: 44px; box-sizing: border-box; border: 1px solid rgba(185,153,90,.4); border-radius: 10px; padding: 0 12px; background: #242424; color: #f4efe4; }
+.account-card__input { width: 100%; min-height: 44px; box-sizing: border-box; border: 1px solid rgba(185,153,90,.4); border-radius: 10px; padding: 0 12px; background: #242424; color: #f4efe4; font-size: 16px; line-height: 1.25; -webkit-text-size-adjust: 100%; }
+.account-card__input[readonly] { opacity: .72; }
 .account-card__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .account-card__primary, .account-card__secondary, .account-card__link { min-height: 44px; border-radius: 10px; font-weight: 650; }
 .account-card__primary { border: 0; background: #b9995a; color: #111; }
@@ -25,4 +27,4 @@ body { min-height: 100dvh; }
 .account-card__sync-stat { padding: 4px 7px; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; }
 .account-card__sync-stat.is-warning { border-color: rgba(232,154,85,.55); color: #e89a55; }
 .cupping-nav--finish { grid-column: 1 / -1; border-color: #b9995a; background: #b9995a; color: #111; }
-@media (max-width: 520px) { .account-card { margin-top: 5vh; padding: 18px; } .account-card__actions { grid-template-columns: 1fr; } .account-card__link { grid-column: auto; } }
+@media (max-width: 520px) { .account-card { margin-top: max(18px, env(safe-area-inset-top)); padding: 18px; } .account-card__actions { grid-template-columns: 1fr; } .account-card__link { grid-column: auto; } }
