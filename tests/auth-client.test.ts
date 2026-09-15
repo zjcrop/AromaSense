@@ -50,6 +50,7 @@ test("registration is created in Firebase and stores pending verification state"
     const url = String(input);
     calls.push(url);
     assert.equal(init?.method, "POST");
+    assert.equal(init?.cache, "no-store");
     if (url.includes("accounts:signUp")) {
       const body = JSON.parse(String(init?.body)) as { email: string; password: string };
       assert.equal(body.email, "user@example.com");
@@ -63,17 +64,96 @@ test("registration is created in Firebase and stores pending verification state"
     return jsonResponse({ email: "user@example.com" }, 200);
   }, async () => {
     const result = await client.register(" User@Example.com ", "0123456789");
-    assert.deepEqual(result, { status: "verification_required", email: "user@example.com" });
+    assert.deepEqual(result, { status: "verification_required", email: "user@example.com", verificationEmail: "sent" });
     assert.equal((await client.pendingRegistration())?.email, "user@example.com");
   });
 
   assert.equal(calls.length, 2);
 });
 
-test("Firebase account-exists error is exposed without involving Cloudflare email service", async () => {
-  const client = new CloudflareAuthClient("https://api.example.test", "firebase-key", new MemorySessionStore(), new MemoryPendingStore());
+test("account creation remains successful when verification email delivery times out", async () => {
+  const pending = new MemoryPendingStore();
+  const client = new CloudflareAuthClient("https://api.example.test", "firebase-key", new MemorySessionStore(), pending, 15);
+  let call = 0;
 
-  await withFetch(async () => jsonResponse({ error: { message: "EMAIL_EXISTS" } }, 400), async () => {
+  await withFetch(async (_input, init) => {
+    call += 1;
+    if (call === 1) return jsonResponse({ idToken: "firebase-id-token", email: "user@example.com" }, 200);
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      assert.ok(signal);
+      const abort = () => reject(new DOMException("aborted", "AbortError"));
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+  }, async () => {
+    const result = await client.register("user@example.com", "0123456789");
+    assert.deepEqual(result, {
+      status: "verification_required",
+      email: "user@example.com",
+      verificationEmail: "retry_required"
+    });
+    assert.equal((await pending.get())?.email, "user@example.com");
+  });
+});
+
+test("retrying registration recovers an existing unverified Firebase account instead of trapping on EMAIL_EXISTS", async () => {
+  const pending = new MemoryPendingStore();
+  const client = new CloudflareAuthClient("https://api.example.test", "firebase-key", new MemorySessionStore(), pending);
+  const paths: string[] = [];
+
+  await withFetch(async (input) => {
+    const url = String(input);
+    paths.push(url);
+    if (url.includes("accounts:signUp")) return jsonResponse({ error: { message: "EMAIL_EXISTS" } }, 400);
+    if (url.includes("accounts:signInWithPassword")) return jsonResponse({ idToken: "existing-token", email: "user@example.com" }, 200);
+    if (url.includes("accounts:lookup")) return jsonResponse({ users: [{ email: "user@example.com", emailVerified: false }] }, 200);
+    if (url.includes("accounts:sendOobCode")) return jsonResponse({ email: "user@example.com" }, 200);
+    throw new Error(`Unexpected request ${url}`);
+  }, async () => {
+    const result = await client.register("user@example.com", "0123456789");
+    assert.deepEqual(result, { status: "verification_required", email: "user@example.com", verificationEmail: "sent" });
+    assert.equal((await pending.get())?.email, "user@example.com");
+  });
+
+  assert.equal(paths.length, 4);
+});
+
+test("concurrent registration submissions for the same email share one Firebase request chain", async () => {
+  const client = new CloudflareAuthClient("https://api.example.test", "firebase-key", new MemorySessionStore(), new MemoryPendingStore());
+  let signupCalls = 0;
+  let verificationCalls = 0;
+
+  await withFetch(async (input) => {
+    const url = String(input);
+    if (url.includes("accounts:signUp")) {
+      signupCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return jsonResponse({ idToken: "firebase-id-token", email: "user@example.com" }, 200);
+    }
+    verificationCalls += 1;
+    return jsonResponse({ email: "user@example.com" }, 200);
+  }, async () => {
+    const [left, right] = await Promise.all([
+      client.register("user@example.com", "0123456789"),
+      client.register("user@example.com", "0123456789")
+    ]);
+    assert.deepEqual(left, right);
+  });
+
+  assert.equal(signupCalls, 1);
+  assert.equal(verificationCalls, 1);
+});
+
+test("Firebase account-exists error is exposed when the existing account cannot be recovered with the supplied password", async () => {
+  const client = new CloudflareAuthClient("https://api.example.test", "firebase-key", new MemorySessionStore(), new MemoryPendingStore());
+  let call = 0;
+
+  await withFetch(async () => {
+    call += 1;
+    if (call === 1) return jsonResponse({ error: { message: "EMAIL_EXISTS" } }, 400);
+    return jsonResponse({ error: { message: "INVALID_LOGIN_CREDENTIALS" } }, 400);
+  }, async () => {
     await assert.rejects(
       () => client.register("user@example.com", "0123456789"),
       (error: unknown) => {
