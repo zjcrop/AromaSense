@@ -26,6 +26,14 @@ test("worker returns metadata-only cloud index and owner-scoped full records", (
   assert.match(routes, /if \(request\.method === "GET"\) return getRecord/u);
 });
 
+test("worker entry path actually dispatches authenticated record requests to the record sync route", () => {
+  const bridge = source("cloud/worker/src/yingxiang-host-auth.ts");
+  assert.match(bridge, /import \{ handleRecordSyncRoute \} from "\.\/sync-record-routes"/u);
+  assert.match(bridge, /url\.pathname === "\/api\/v1\/records\/index"/u);
+  assert.match(bridge, /authenticateAromaSenseSyncUser\(request, db\)/u);
+  assert.match(bridge, /handleRecordSyncRoute\(request, url, db, user\)/u);
+});
+
 test("cloud record page follows existing AromaSense form sizes and supports the three requested download modes", () => {
   const ui = source("app/ui/dom/cloud-records-renderer.ts");
   assert.match(ui, /"最近记录"/u);
