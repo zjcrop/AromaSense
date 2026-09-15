@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
-const read = (path: string): string => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const read = (path: string): string => readFileSync(resolve(process.cwd(), path), "utf8");
 
 test("Safari account UI uses stable viewport units and 16px text inputs", () => {
   const css = read("app/ui/dom/account.css");
