@@ -99,6 +99,7 @@ export class AccountRenderer {
     const email = element("input", "account-card__input");
     email.type = "email";
     email.autocomplete = "email";
+    email.inputMode = "email";
     email.placeholder = "邮箱";
     email.value = presetEmail;
     const password = element("input", "account-card__input");
@@ -113,6 +114,8 @@ export class AccountRenderer {
     const status = element("div", "account-card__status");
     status.hidden = !notice;
     status.textContent = notice;
+    let submitting = false;
+    let submitButton: HTMLButtonElement | undefined;
 
     const validate = (): string | undefined => {
       const normalizedEmail = email.value.trim();
@@ -122,19 +125,30 @@ export class AccountRenderer {
       return undefined;
     };
 
+    const setSubmitting = (value: boolean): void => {
+      submitting = value;
+      card.setAttribute("aria-busy", value ? "true" : "false");
+      email.readOnly = value;
+      password.readOnly = value;
+      confirm.readOnly = value;
+      if (submitButton) submitButton.disabled = value;
+    };
+
     const submit = async () => {
+      if (submitting) return;
       const validation = validate();
       if (validation) {
         status.textContent = validation;
         status.hidden = false;
         return;
       }
+      setSubmitting(true);
       status.hidden = false;
       try {
         if (registering) {
           status.textContent = "正在通过 Firebase 创建账户…";
           const result = await this.auth!.register(email.value, password.value);
-          this.renderPendingVerification(result.email, summary);
+          this.renderPendingVerification(result.email, summary, result.verificationEmail === "retry_required");
           return;
         }
         status.textContent = "正在验证 Firebase 身份并连接 AromaSense 云端…";
@@ -148,31 +162,43 @@ export class AccountRenderer {
         if (error instanceof AuthClientError && error.code === "EMAIL_NOT_VERIFIED") {
           const pendingEmail = email.value.trim().toLowerCase();
           window.setTimeout(() => this.renderPendingVerification(pendingEmail, summary), 0);
+        } else if (registering && error instanceof AuthClientError && error.code === "ACCOUNT_ALREADY_VERIFIED") {
+          window.setTimeout(() => this.render("login", error.message), 0);
         }
+      } finally {
+        if (card.isConnected) setSubmitting(false);
       }
     };
 
     const actions = element("div", "account-card__actions");
     actions.append(
-      button("account-card__secondary", registering ? "已有账户" : "注册账户", () => this.render(registering ? "login" : "register", "")),
-      button("account-card__primary", registering ? "提交注册" : "登录", submit)
+      button("account-card__secondary", registering ? "已有账户" : "注册账户", () => this.render(registering ? "login" : "register", ""))
     );
+    submitButton = button("account-card__primary", registering ? "提交注册" : "登录", submit);
+    actions.append(submitButton);
     if (!registering) {
       actions.append(button("account-card__link", "忘记密码", () => this.renderPasswordReset(email.value, summary)));
     }
     actions.append(button("account-card__link", "离线使用 / 返回", () => this.options.onSkip()));
     for (const input of [email, password, confirm]) {
-      input.addEventListener("keydown", (event) => { if (event.key === "Enter") void submit(); });
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        void submit();
+      });
     }
     card.append(title, note, this.renderSyncSummary(summary), email, password, confirm, status, actions);
     this.root.replaceChildren(card);
   }
 
-  private renderPendingVerification(email: string, summary?: AccountSyncSummary): void {
+  private renderPendingVerification(email: string, summary?: AccountSyncSummary, verificationNeedsRetry = false): void {
     const card = element("section", "account-card account-card--verification");
+    const mainMessage = verificationNeedsRetry
+      ? `账户 ${email} 已创建，但验证邮件本次未确认发送。请不要重复注册；在下方输入密码后重新发送验证邮件。`
+      : `Firebase 验证邮件已发送至 ${email}。完成邮箱验证后，返回 AromaSense 使用相同邮箱和密码登录。`;
     card.append(
-      element("h1", "account-card__title", "等待邮箱验证"),
-      element("p", "account-card__verification-main", `Firebase 验证邮件已发送至 ${email}。完成邮箱验证后，返回 AromaSense 使用相同邮箱和密码登录。`),
+      element("h1", "account-card__title", verificationNeedsRetry ? "账户已创建 · 请重新发送验证邮件" : "等待邮箱验证"),
+      element("p", "account-card__verification-main", mainMessage),
       element("p", "account-card__text", "若未收到邮件，请检查垃圾邮件目录。需要重新发送时，请在下方再次输入账户密码。"),
       this.renderSyncSummary(summary)
     );
@@ -190,6 +216,7 @@ export class AccountRenderer {
         return;
       }
       resend.disabled = true;
+      password.readOnly = true;
       status.hidden = false;
       status.textContent = "正在请求 Firebase 重新发送验证邮件…";
       try {
@@ -199,6 +226,8 @@ export class AccountRenderer {
       } catch (error) {
         status.textContent = error instanceof Error ? error.message : String(error);
         resend.disabled = false;
+      } finally {
+        password.readOnly = false;
       }
     });
     actions.append(
@@ -207,7 +236,11 @@ export class AccountRenderer {
       button("account-card__link", "忘记密码", () => this.renderPasswordReset(email, summary)),
       button("account-card__link", "继续离线使用", () => this.options.onSkip())
     );
-    password.addEventListener("keydown", (event) => { if (event.key === "Enter") resend.click(); });
+    password.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || resend.disabled) return;
+      event.preventDefault();
+      resend.click();
+    });
     card.append(password, status, actions);
     this.root.replaceChildren(card);
   }
@@ -217,6 +250,7 @@ export class AccountRenderer {
     const email = element("input", "account-card__input");
     email.type = "email";
     email.autocomplete = "email";
+    email.inputMode = "email";
     email.placeholder = "注册邮箱";
     email.value = presetEmail.trim();
     const status = element("div", "account-card__inline-message");
@@ -228,6 +262,7 @@ export class AccountRenderer {
         return;
       }
       send.disabled = true;
+      email.readOnly = true;
       status.hidden = false;
       status.textContent = "正在请求 Firebase 发送密码重置邮件…";
       try {
@@ -238,10 +273,15 @@ export class AccountRenderer {
         status.classList.remove("account-card__status--good");
         status.textContent = error instanceof Error ? error.message : String(error);
       } finally {
+        email.readOnly = false;
         send.disabled = false;
       }
     });
-    email.addEventListener("keydown", (event) => { if (event.key === "Enter") send.click(); });
+    email.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || send.disabled) return;
+      event.preventDefault();
+      send.click();
+    });
     const actions = element("div", "account-card__actions");
     actions.append(
       send,

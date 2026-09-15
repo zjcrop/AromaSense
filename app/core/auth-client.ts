@@ -13,6 +13,7 @@ export interface PendingRegistration {
 export interface RegistrationResult {
   status: "verification_required";
   email: string;
+  verificationEmail: "sent" | "retry_required";
 }
 
 export interface AuthSessionStore {
@@ -46,7 +47,7 @@ export class AuthClientError extends Error {
   }
 }
 
-const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 8_000;
+const DEFAULT_AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
 function messageForAuthError(code: string, status: number): string {
   const messages: Record<string, string> = {
@@ -55,7 +56,7 @@ function messageForAuthError(code: string, status: number): string {
     EMAIL_NOT_VERIFIED: "账户尚未激活，请先完成 Firebase 验证邮件中的激活步骤。",
     ACCOUNT_EXISTS: "该邮箱已注册，请直接登录或使用“忘记密码”。",
     ACCOUNT_ALREADY_VERIFIED: "该账户已经完成邮箱验证，请直接登录。",
-    VERIFICATION_EMAIL_FAILED: "验证邮件发送失败，请稍后重试。",
+    VERIFICATION_EMAIL_FAILED: "账户已创建，但验证邮件本次未确认发送。请使用“重新发送验证邮件”，不要重复注册。",
     PASSWORD_RESET_FAILED: "密码重置邮件发送失败，请稍后重试。",
     FIREBASE_NOT_CONFIGURED: "Firebase Authentication 尚未配置，本地杯测不受影响。",
     FIREBASE_AUTH_DISABLED: "Firebase 邮箱/密码登录尚未启用。",
@@ -100,6 +101,9 @@ function isAbortError(error: unknown): boolean {
 }
 
 export class CloudflareAuthClient {
+  private registerInFlight?: { email: string; promise: Promise<RegistrationResult> };
+  private loginInFlight?: { email: string; promise: Promise<AuthSession> };
+
   constructor(
     private readonly baseUrl: string,
     private readonly firebaseApiKey: string,
@@ -108,25 +112,76 @@ export class CloudflareAuthClient {
     private readonly requestTimeoutMs = DEFAULT_AUTH_REQUEST_TIMEOUT_MS
   ) {}
 
-  async register(email: string, password: string): Promise<RegistrationResult> {
+  register(email: string, password: string): Promise<RegistrationResult> {
     const normalizedEmail = normalizeEmail(email);
     this.validateCredentials(normalizedEmail, password);
-    const signup = await this.firebaseRequest("accounts:signUp", {
-      email: normalizedEmail,
-      password,
-      returnSecureToken: true
+    if (this.registerInFlight?.email === normalizedEmail) return this.registerInFlight.promise;
+    const promise = this.registerOnce(normalizedEmail, password).finally(() => {
+      if (this.registerInFlight?.promise === promise) this.registerInFlight = undefined;
     });
-    if (!signup.idToken) throw new AuthClientError("FIREBASE_AUTH_FAILED", 502, messageForAuthError("FIREBASE_AUTH_FAILED", 502));
+    this.registerInFlight = { email: normalizedEmail, promise };
+    return promise;
+  }
+
+  private async registerOnce(normalizedEmail: string, password: string): Promise<RegistrationResult> {
+    let signup: FirebaseResponse;
     try {
-      await this.sendVerification(signup.idToken);
+      signup = await this.firebaseRequest("accounts:signUp", {
+        email: normalizedEmail,
+        password,
+        returnSecureToken: true
+      });
     } catch (error) {
-      throw error instanceof AuthClientError
-        ? error
-        : new AuthClientError("VERIFICATION_EMAIL_FAILED", 502, messageForAuthError("VERIFICATION_EMAIL_FAILED", 502));
+      if (error instanceof AuthClientError && error.code === "ACCOUNT_EXISTS") {
+        return this.recoverPendingRegistration(normalizedEmail, password, error);
+      }
+      throw error;
     }
-    const result = { status: "verification_required" as const, email: normalizeEmail(signup.email ?? normalizedEmail) };
-    await this.pendingStore?.set({ email: result.email, createdAt: new Date().toISOString() });
-    return result;
+    if (!signup.idToken) throw new AuthClientError("FIREBASE_AUTH_FAILED", 502, messageForAuthError("FIREBASE_AUTH_FAILED", 502));
+    const registeredEmail = normalizeEmail(signup.email ?? normalizedEmail);
+    await this.rememberPendingRegistration(registeredEmail);
+    const verificationEmail = await this.trySendVerification(signup.idToken);
+    return { status: "verification_required", email: registeredEmail, verificationEmail };
+  }
+
+  private async recoverPendingRegistration(
+    normalizedEmail: string,
+    password: string,
+    accountExistsError: AuthClientError
+  ): Promise<RegistrationResult> {
+    try {
+      const signin = await this.signInFirebase(normalizedEmail, password);
+      const lookup = await this.firebaseRequest("accounts:lookup", { idToken: signin.idToken });
+      if (lookup.users?.[0]?.emailVerified) {
+        await this.pendingStore?.clear();
+        throw new AuthClientError("ACCOUNT_ALREADY_VERIFIED", 409, messageForAuthError("ACCOUNT_ALREADY_VERIFIED", 409));
+      }
+      await this.rememberPendingRegistration(normalizedEmail);
+      const verificationEmail = await this.trySendVerification(signin.idToken);
+      return { status: "verification_required", email: normalizedEmail, verificationEmail };
+    } catch (error) {
+      if (error instanceof AuthClientError && error.code === "ACCOUNT_ALREADY_VERIFIED") throw error;
+      if (error instanceof AuthClientError && error.code === "AUTH_RATE_LIMITED") {
+        await this.rememberPendingRegistration(normalizedEmail);
+        return { status: "verification_required", email: normalizedEmail, verificationEmail: "retry_required" };
+      }
+      throw accountExistsError;
+    }
+  }
+
+  private async rememberPendingRegistration(email: string): Promise<void> {
+    await this.pendingStore?.set({ email, createdAt: new Date().toISOString() });
+  }
+
+  private async trySendVerification(idToken: string): Promise<"sent" | "retry_required"> {
+    try {
+      await this.sendVerification(idToken);
+      return "sent";
+    } catch {
+      // Firebase account creation is already committed. A mail-delivery/network
+      // failure must not turn a successful signup into a duplicate-registration trap.
+      return "retry_required";
+    }
   }
 
   async resendVerification(email: string, password: string): Promise<void> {
@@ -139,7 +194,7 @@ export class CloudflareAuthClient {
       throw new AuthClientError("ACCOUNT_ALREADY_VERIFIED", 409, messageForAuthError("ACCOUNT_ALREADY_VERIFIED", 409));
     }
     await this.sendVerification(signin.idToken);
-    await this.pendingStore?.set({ email: normalizedEmail, createdAt: new Date().toISOString() });
+    await this.rememberPendingRegistration(normalizedEmail);
   }
 
   async requestPasswordReset(email: string): Promise<void> {
@@ -156,9 +211,18 @@ export class CloudflareAuthClient {
     }
   }
 
-  async login(email: string, password: string): Promise<AuthSession> {
+  login(email: string, password: string): Promise<AuthSession> {
     const normalizedEmail = normalizeEmail(email);
     this.validateCredentials(normalizedEmail, password);
+    if (this.loginInFlight?.email === normalizedEmail) return this.loginInFlight.promise;
+    const promise = this.loginOnce(normalizedEmail, password).finally(() => {
+      if (this.loginInFlight?.promise === promise) this.loginInFlight = undefined;
+    });
+    this.loginInFlight = { email: normalizedEmail, promise };
+    return promise;
+  }
+
+  private async loginOnce(normalizedEmail: string, password: string): Promise<AuthSession> {
     const signin = await this.signInFirebase(normalizedEmail, password);
     const response = await this.cloudRequest("/api/v1/auth/exchange", { idToken: signin.idToken });
     const body = response.body as Partial<AuthSession> & { ok?: boolean };
@@ -243,7 +307,11 @@ export class CloudflareAuthClient {
     const controller = new AbortController();
     const timeout = globalThis.setTimeout(() => controller.abort(), Math.max(1, this.requestTimeoutMs));
     try {
-      return await fetch(input, { ...init, signal: controller.signal });
+      return await fetch(input, {
+        ...init,
+        cache: "no-store",
+        signal: controller.signal
+      });
     } finally {
       globalThis.clearTimeout(timeout);
     }
@@ -254,7 +322,7 @@ export class CloudflareAuthClient {
     try {
       const response = await this.fetchWithTimeout(`https://identitytoolkit.googleapis.com/v1/${path}?key=${encodeURIComponent(this.firebaseApiKey)}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
         body: JSON.stringify(body)
       });
       let payload: FirebaseResponse = {};
@@ -275,7 +343,7 @@ export class CloudflareAuthClient {
     try {
       const response = await this.fetchWithTimeout(`${this.baseUrl}${path}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
         body: JSON.stringify(body)
       });
       let payload: Record<string, unknown> = {};
