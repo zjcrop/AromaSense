@@ -8,6 +8,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="color-scheme" content="dark" />
   <meta name="application-version" content="B0.2.a" />
   <meta name="build-revision" content="__BUILD_ID__" />
@@ -21,6 +23,23 @@
   <link rel="stylesheet" href="release-0.1c.css?v=__BUILD_ID__" />
   <link rel="stylesheet" href="import-0.1c.css?v=__BUILD_ID__" />
   <link rel="stylesheet" href="mobile-ocr-emergency.css?v=__BUILD_ID__" />
+  <style data-aromasense-webkit-viewport-stability>
+    /* iOS/iPadOS WebKit changes dynamic viewport height while browser chrome and
+       the software keyboard animate. Keep the application shell on the stable
+       small viewport and let the existing inner editors own scrolling. */
+    @supports (-webkit-touch-callout: none) {
+      .aromasense-cupping,
+      .cupping-layout {
+        min-height: 100svh !important;
+      }
+      .cupping-layout__main {
+        max-height: 100svh !important;
+      }
+      .home-modal__content {
+        max-height: min(86svh, 820px) !important;
+      }
+    }
+  </style>
   <style data-aromasense-current-round-visual-closure>
     /* B0.2.a user-facing workflow closure.
        Stage identity no longer carries its own color. Progress is the only
