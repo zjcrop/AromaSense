@@ -20,7 +20,8 @@ git config user.email "${AKD_GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@user
 
 if git show-ref --verify --quiet "refs/heads/$AKD_WORK_BRANCH"; then
   git switch "$AKD_WORK_BRANCH"
-  git pull --ff-only origin "$AKD_WORK_BRANCH"
+  git fetch origin "$AKD_WORK_BRANCH:refs/remotes/origin/$AKD_WORK_BRANCH"
+  git merge --ff-only "refs/remotes/origin/$AKD_WORK_BRANCH"
 elif git ls-remote --exit-code --heads origin "$AKD_WORK_BRANCH" >/dev/null 2>&1; then
   git fetch origin "$AKD_WORK_BRANCH:refs/remotes/origin/$AKD_WORK_BRANCH"
   git switch -c "$AKD_WORK_BRANCH" --track "origin/$AKD_WORK_BRANCH"
@@ -28,9 +29,11 @@ else
   git switch -c "$AKD_WORK_BRANCH" "origin/$AKD_BASE_BRANCH"
 fi
 
+executor_home="${AKD_EXECUTOR_HOME:-.akd}"
+
 case "$AKD_TASK_KIND" in
   IMPLEMENT)
-    .akd/implement.sh
+    "$executor_home/implement.sh"
 
     if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
       echo "IMPLEMENT task produced no changes." >&2
@@ -43,11 +46,11 @@ case "$AKD_TASK_KIND" in
     ;;
 
   VERIFY)
-    .akd/verify.sh
+    "$executor_home/verify.sh"
     ;;
 
   DELIVER)
-    .akd/deliver.sh
+    "$executor_home/deliver.sh"
     ;;
 
   *)
