@@ -18,9 +18,12 @@ export AKD_BASE_BRANCH="${AKD_BASE_BRANCH:-main}"
 git config user.name "${AKD_GIT_AUTHOR_NAME:-auto-keep-doing[bot]}"
 git config user.email "${AKD_GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 
-if git ls-remote --exit-code --heads origin "$AKD_WORK_BRANCH" >/dev/null 2>&1; then
-  git fetch origin "$AKD_WORK_BRANCH:$AKD_WORK_BRANCH"
+if git show-ref --verify --quiet "refs/heads/$AKD_WORK_BRANCH"; then
   git switch "$AKD_WORK_BRANCH"
+  git pull --ff-only origin "$AKD_WORK_BRANCH"
+elif git ls-remote --exit-code --heads origin "$AKD_WORK_BRANCH" >/dev/null 2>&1; then
+  git fetch origin "$AKD_WORK_BRANCH:refs/remotes/origin/$AKD_WORK_BRANCH"
+  git switch -c "$AKD_WORK_BRANCH" --track "origin/$AKD_WORK_BRANCH"
 else
   git switch -c "$AKD_WORK_BRANCH" "origin/$AKD_BASE_BRANCH"
 fi

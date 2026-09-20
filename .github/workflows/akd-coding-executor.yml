@@ -46,6 +46,7 @@ jobs:
       - name: Validate executor
         run: |
           set -euo pipefail
+          git config core.fileMode false
           test -n "$AKD_BASE_URL"
           test -n "$AKD_PROJECT_ID"
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
