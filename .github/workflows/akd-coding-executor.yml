@@ -3,6 +3,11 @@ name: AKD Coding Executor
 on:
   schedule:
     - cron: "*/5 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".akd/**"
+      - ".github/workflows/akd-coding-executor.yml"
   workflow_dispatch:
 
 permissions:
