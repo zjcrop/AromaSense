@@ -51,7 +51,12 @@ jobs:
           test -n "$AKD_PROJECT_ID"
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
           test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          chmod +x .akd/execute-task.sh .akd/implement.sh .akd/verify.sh .akd/deliver.sh .akd/project-verify.sh
+          chmod +x .akd/project-verify.sh
+          AKD_EXECUTOR_HOME="$RUNNER_TEMP/akd-executor"
+          mkdir -p "$AKD_EXECUTOR_HOME"
+          cp .akd/execute-task.sh .akd/implement.sh .akd/verify.sh .akd/deliver.sh "$AKD_EXECUTOR_HOME/"
+          chmod +x "$AKD_EXECUTOR_HOME"/*.sh
+          echo "AKD_EXECUTOR_HOME=$AKD_EXECUTOR_HOME" >> "$GITHUB_ENV"
           copilot --version
           gh --version
 
@@ -120,7 +125,7 @@ jobs:
 
             echo "Executing $AKD_TASK_ID ($AKD_TASK_KIND / $AKD_LANE)"
             set +e
-            .akd/execute-task.sh
+            "$AKD_EXECUTOR_HOME/execute-task.sh"
             execute_status=$?
             set -e
 
