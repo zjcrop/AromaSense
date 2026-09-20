@@ -1,0 +1,137 @@
+name: AKD Coding Executor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  copilot-requests: write
+
+concurrency:
+  group: akd-coding-executor-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  poll-and-execute:
+    runs-on: ubuntu-latest
+    env:
+      AKD_BASE_URL: https://auto-keep-doing.zj-crop.workers.dev
+      AKD_PROJECT_ID: aromasense
+      AKD_NIGHTLY_OPEN: "false"
+      AKD_BASE_BRANCH: main
+      GITHUB_TOKEN: ${{ github.token }}
+      COPILOT_AUTO_UPDATE: "false"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Validate executor
+        run: |
+          set -euo pipefail
+          test -n "$AKD_BASE_URL"
+          test -n "$AKD_PROJECT_ID"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          chmod +x .akd/execute-task.sh .akd/implement.sh .akd/verify.sh .akd/deliver.sh .akd/project-verify.sh
+          copilot --version
+          gh --version
+
+      - name: Claim and execute AKD coding tasks
+        run: |
+          set -euo pipefail
+          encoded_project="$(jq -rn --arg value "$AKD_PROJECT_ID" '$value|@uri')"
+
+          get_akd_oidc_token() {
+            audience="akd:$AKD_PROJECT_ID"
+            encoded_audience="$(jq -rn --arg value "$audience" '$value|@uri')"
+            separator='&'
+            case "$ACTIONS_ID_TOKEN_REQUEST_URL" in
+              *\?*) ;;
+              *) separator='?' ;;
+            esac
+            curl --silent --show-error --fail \
+              -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}${separator}audience=${encoded_audience}" \
+              | jq -er '.value'
+          }
+
+          akd_post() {
+            local url="$1"
+            local payload="$2"
+            local oidc_token
+            oidc_token="$(get_akd_oidc_token)"
+            curl --silent --show-error --fail \
+              -X POST "$url" \
+              -H "Authorization: Bearer $oidc_token" \
+              -H "Content-Type: application/json" \
+              --data "$payload"
+          }
+
+          completed=0
+          for round in {1..12}; do
+            dispatched="$(akd_post \
+              "${AKD_BASE_URL%/}/v1/projects/$encoded_project/dispatch" \
+              '{"nightlyOpen":false,"maxParallel":1,"leaseSeconds":1800}')"
+
+            task_id="$(echo "$dispatched" | jq -r '.taskIds[0] // empty')"
+            if [ -z "$task_id" ]; then
+              echo "No dependency-ready AKD task."
+              break
+            fi
+
+            task_json="$(echo "$dispatched" | jq -c --arg project "$AKD_PROJECT_ID" --arg task "$task_id" '
+              .state as $state
+              | ($state.tasks[] | select(.taskId == $task)) as $taskNode
+              | ($state.changeSets[] | select(.changeSetId == $taskNode.changeSetId)) as $changeSet
+              | ($changeSet.requirementIds // []) as $requirementIds
+              | {
+                  projectId:$project,
+                  task:$taskNode,
+                  changeSet:$changeSet,
+                  requirements:[
+                    $state.requirements[]
+                    | select(.requirementId as $id | $requirementIds | index($id))
+                  ]
+                }')"
+
+            export AKD_TASK_ID="$task_id"
+            export AKD_TASK_JSON="$task_json"
+            export AKD_TASK_KIND="$(echo "$task_json" | jq -r '.task.kind')"
+            export AKD_LANE="$(echo "$task_json" | jq -r '.task.lane')"
+
+            echo "Executing $AKD_TASK_ID ($AKD_TASK_KIND / $AKD_LANE)"
+            set +e
+            .akd/execute-task.sh
+            execute_status=$?
+            set -e
+
+            encoded_task="$(jq -rn --arg value "$AKD_TASK_ID" '$value|@uri')"
+            callback="${AKD_BASE_URL%/}/v1/projects/$encoded_project/tasks/$encoded_task"
+            if [ "$execute_status" -eq 0 ]; then
+              payload='{"status":"DONE"}'
+            else
+              run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              payload="$(jq -nc --arg error "AromaSense AKD coding executor failed with exit code $execute_status. See $run_url" '{status:"BLOCKED",error:$error}')"
+            fi
+
+            akd_post "$callback" "$payload" >/dev/null
+            if [ "$execute_status" -ne 0 ]; then
+              exit "$execute_status"
+            fi
+            completed=$((completed + 1))
+          done
+
+          echo "AKD coding executor completed $completed task(s)."
