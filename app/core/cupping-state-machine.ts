@@ -24,7 +24,45 @@ function key(sampleId: string, stageId: StageId): string {
   return `${sampleId}:${stageId}`;
 }
 
+function stageStateFor(
+  state: CuppingState,
+  context: EditingContext,
+  fallbackStatus: StageStatus = "not_started"
+): StageState {
+  const k = key(context.sampleId, context.stageId);
+  const current = state.stages[k];
+  return {
+    stageId: context.stageId,
+    status: current?.status ?? fallbackStatus,
+    startedAt: current?.startedAt,
+    completedAt: current?.completedAt
+  };
+}
+
 export function activateStage(
+  state: CuppingState,
+  context: EditingContext,
+  now: string
+): CuppingState {
+  const k = key(context.sampleId, context.stageId);
+  const current = state.stages[k];
+  return {
+    ...state,
+    active: context,
+    stages: {
+      ...state.stages,
+      [k]: {
+        ...stageStateFor(state, context),
+        stageId: context.stageId,
+        status: current?.status === "completed" ? "completed" : current?.status ?? "not_started",
+        startedAt: current?.startedAt ?? undefined,
+        completedAt: current?.completedAt
+      }
+    }
+  };
+}
+
+export function recordStageInput(
   state: CuppingState,
   context: EditingContext,
   now: string
@@ -49,12 +87,30 @@ export function activateStage(
 export function completeStage(
   state: CuppingState,
   context: EditingContext,
-  now: string
+  now: string,
+  requiredSatisfied: boolean = true
 ): CuppingState {
   const k = key(context.sampleId, context.stageId);
   const current = state.stages[k];
+  if (!requiredSatisfied && current?.status !== "completed") {
+    return {
+      ...state,
+      active: context,
+      stages: {
+        ...state.stages,
+        [k]: {
+          ...stageStateFor(state, context),
+          stageId: context.stageId,
+          status: current?.status ?? "not_started",
+          startedAt: current?.startedAt ?? undefined,
+          completedAt: current?.completedAt
+        }
+      }
+    };
+  }
   return {
     ...state,
+    active: context,
     stages: {
       ...state.stages,
       [k]: {

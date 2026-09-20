@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  activateStage,
+  completeStage,
+  recordStageInput,
+  stageStatus
+} from "../app/core/cupping-state-machine";
 import { deriveFinalPhaseStatus, deriveStageStatus } from "../app/core/cupping-progress-policy";
 import {
   SCA_CVA_AFFECTIVE_FIELDS,
@@ -31,6 +37,22 @@ function scaOverall(overrides: Record<string, unknown> = {}): SensoryObservation
   });
   return observations("final", values);
 }
+
+test("stage state machine keeps browse-only navigation at not_started", () => {
+  const context = { sessionId: "progress-session", sampleId: "progress-sample", stageId: "aroma" as const };
+  const viewed = activateStage({ stages: {} }, context, "2026-09-07T06:40:00Z");
+  assert.equal(stageStatus(viewed, context.sampleId, context.stageId), "not_started");
+  assert.equal(viewed.active, context);
+
+  const inputStarted = recordStageInput(viewed, context, "2026-09-07T06:41:00Z");
+  assert.equal(stageStatus(inputStarted, context.sampleId, context.stageId), "active");
+
+  const blockedCompletion = completeStage(inputStarted, context, "2026-09-07T06:42:00Z", false);
+  assert.equal(stageStatus(blockedCompletion, context.sampleId, context.stageId), "active");
+
+  const completed = completeStage(inputStarted, context, "2026-09-07T06:42:00Z", true);
+  assert.equal(stageStatus(completed, context.sampleId, context.stageId), "completed");
+});
 
 test("browsing an empty stage never changes it from not_started", () => {
   assert.equal(deriveStageStatus("aroma", []), "not_started");
