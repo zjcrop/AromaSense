@@ -1,0 +1,121 @@
+name: Build AromaSense signed APK 20260918
+on:
+  push:
+    branches: [build/aromasense-apk-20260918]
+    paths: [.github/workflows/aromasense-apk-20260918.yml]
+permissions:
+  contents: read
+concurrency:
+  group: aromasense-apk-20260918
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      AROMA_SOURCE_SHA: 85ee588091e73978329f43f291400308075691b5
+      AROMASENSE_CLOUD_URL: https://aromasense-api.zj-crop.workers.dev
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: zjcrop/AromaSense
+          ref: 85ee588091e73978329f43f291400308075691b5
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Validate pinned source and run core tests
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$AROMA_SOURCE_SHA"
+          npm install --no-audit --no-fund
+          npm run check
+          npm install --prefix cloud/worker --no-audit --no-fund
+          npm --prefix cloud/worker run typecheck
+      - uses: actions/setup-java@v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4.0.1
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install required SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v6.3.0
+        with:
+          gradle-version: '9.5.0'
+      - name: Set monotonic APK build number
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('mobile/android/app/build.gradle.kts')
+          s = p.read_text()
+          assert s.count('versionCode = 10201') == 1
+          p.write_text(s.replace('versionCode = 10201', 'versionCode = 10202'))
+          PY
+      - name: Assemble unsigned release from current product source
+        run: |
+          GITHUB_SHA="$AROMA_SOURCE_SHA" gradle --no-daemon -p mobile/android :app:assembleRelease
+      - name: Verify bundled configuration and sign with existing official certificate
+        env:
+          KEYSTORE_B64: ${{ secrets.LUCKYBEAN_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.LUCKYBEAN_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUCKYBEAN_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LUCKYBEAN_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64"
+          test -n "$STORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          unsigned=mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$unsigned"
+          mkdir -p dist
+          apk=dist/AromaSense-B0.2.a-20260918-release.apk
+          "$tools/zipalign" -p -f 4 "$unsigned" "$apk"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/aromasense-release.jks"
+          chmod 600 "$RUNNER_TEMP/aromasense-release.jks"
+          trap 'rm -f "$RUNNER_TEMP/aromasense-release.jks"' EXIT
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/aromasense-release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD "$apk"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > dist/SIGNATURE_VERIFICATION.txt
+          expected=$(tr -d '[:space:]:' < mobile/android/signing/CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')
+          actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' dist/SIGNATURE_VERIFICATION.txt | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+          test "$expected" = "$actual"
+          "$tools/aapt" dump badging "$apk" > dist/APK_METADATA.txt
+          grep -Fq "package: name='com.zjcrop.aromasense' versionCode='10202' versionName='B0.2.a'" dist/APK_METADATA.txt
+          unzip -p "$apk" assets/www/index.html > "$RUNNER_TEMP/apk-index.html"
+          grep -Fq "data-cloud-base-url=\"$AROMASENSE_CLOUD_URL\"" "$RUNNER_TEMP/apk-index.html"
+          grep -Fq "${AROMA_SOURCE_SHA:0:16}" "$RUNNER_TEMP/apk-index.html"
+          export APK_PATH="$apk" CERT_SHA256="$actual"
+          python3 - <<'PY'
+          import os, json, hashlib, zipfile
+          from pathlib import Path
+          apk=Path(os.environ['APK_PATH'])
+          with zipfile.ZipFile(apk) as z:
+              files=list(Path('mobile/android/app/src/main/assets/www').rglob('*'))
+              count=0
+              for p in files:
+                  if p.is_file() and p.name != '.nojekyll':
+                      rel=p.relative_to('mobile/android/app/src/main/assets/www').as_posix()
+                      assert z.read('assets/www/'+rel)==p.read_bytes(), rel
+                      count+=1
+          provenance={'product':'AromaSense','version':'B0.2.a','versionCode':10202,
+            'productSourceSha':os.environ['AROMA_SOURCE_SHA'],
+            'packagingChange':'versionCode increased from 10201 to 10202 for update installation',
+            'cloudUrl':os.environ['AROMASENSE_CLOUD_URL'],'certificateSha256':os.environ['CERT_SHA256'],
+            'apkSha256':hashlib.sha256(apk.read_bytes()).hexdigest(),
+            'verifiedBundledFileCount':count,'coreTests':'passed','workerTypecheck':'passed'}
+          Path('dist/BUILD_PROVENANCE.json').write_text(json.dumps(provenance,ensure_ascii=False,indent=2)+'\n')
+          PY
+          (cd dist && sha256sum AromaSense-B0.2.a-20260918-release.apk > SHA256SUMS.txt)
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/aromasense-release.jks"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: AromaSense-B0.2.a-20260918-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
